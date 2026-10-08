@@ -13,22 +13,30 @@ export const load: PageServerLoad = async ({ locals }) => {
     const formStatus = await getApplicationFormStatus();
 
     try {
-        // OSA-specific statistics mapped as requested
-        const totalApplicationsResult = await supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'osa_val']);
-        const pendingValidationResult = await supabase.from('registration').select('*', { count: 'exact', head: true })
-            .eq('status', 'distributed')
-            .is('security_checked_at', null);
-        const pendingDistributionResult = await supabase.from('registration').select('*', { count: 'exact', head: true })
-            .eq('status', 'distributed')
-            .not('security_checked_at', 'is', null)
-            .is('sticker_released_at', null);
-        const completedTodayResult = await supabase.from('registration').select('*', { count: 'exact', head: true })
-            .eq('status', 'completed');
-        const rejectedTodayResult = await supabase.from('registration').select('*', { count: 'exact', head: true })
-            .eq('status', 'rejected')
-            .gte('rejected_at', today)
-            .lt('rejected_at', tomorrow);
-        const totalDepartmentsResult = await supabase.from('department').select('*', { count: 'exact', head: true });
+        // Run all statistics, breakdown, and recent applications queries in parallel
+        const [
+            totalApplicationsResult,
+            pendingValidationResult,
+            pendingDistributionResult,
+            completedTodayResult,
+            rejectedTodayResult,
+            totalDepartmentsResult,
+            statusBreakdownResult,
+            recentApplicationsResult
+        ] = await Promise.all([
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'osa_val']),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'distributed').is('security_checked_at', null),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'distributed').not('security_checked_at', 'is', null).is('sticker_released_at', null),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
+            supabase.from('department').select('*', { count: 'exact', head: true }),
+            supabase.from('registration').select('status').order('created_at', { ascending: false }),
+            supabase.from('registration').select(`
+                *,
+                user:user_id(email),
+                department:department_id(department)
+            `).order('created_at', { ascending: false }).limit(5)
+        ]);
 
         const totalApplications = totalApplicationsResult?.count || 0;
         const pendingValidation = pendingValidationResult?.count || 0;
@@ -37,11 +45,8 @@ export const load: PageServerLoad = async ({ locals }) => {
         const rejectedToday = rejectedTodayResult?.count || 0;
         const totalDepartments = totalDepartmentsResult?.count || 0;
 
-        // Application breakdown by status
-        const { data: statusBreakdown } = await supabase
-            .from('registration')
-            .select('status')
-            .order('created_at', { ascending: false });
+        const statusBreakdown = statusBreakdownResult?.data;
+        const recentApplications = recentApplicationsResult?.data;
 
         const statusCounts: Record<string, number> = {
             pending: 0,
@@ -58,17 +63,6 @@ export const load: PageServerLoad = async ({ locals }) => {
                 statusCounts[app.status]++;
             }
         });
-
-        // Recent applications with safer query
-        const { data: recentApplications } = await supabase
-            .from('registration')
-            .select(`
-                *,
-                user:user_id(email),
-                department:department_id(department)
-            `)
-            .order('created_at', { ascending: false })
-            .limit(5);
 
         return {
             stats: {

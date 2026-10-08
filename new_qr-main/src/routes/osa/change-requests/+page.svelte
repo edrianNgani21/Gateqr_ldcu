@@ -2,8 +2,26 @@
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
   import { invalidateAll } from '$app/navigation';
+  import { supabaseClient } from '$lib/supabaseClient';
 
   let { data } = $props();
+
+  // Realtime subscription for change vehicle requests
+  $effect(() => {
+    const channel = supabaseClient
+      .channel('osa-change-requests-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
+        invalidateAll();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
+        invalidateAll();
+      })
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  });
 
   let requests = $derived((data.requests as any[]) || []);
 

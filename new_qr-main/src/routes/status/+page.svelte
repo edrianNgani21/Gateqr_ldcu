@@ -2,9 +2,27 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import { invalidateAll } from '$app/navigation';
+    import { supabaseClient } from '$lib/supabaseClient';
     import type { PageData } from './$types';
 
     let { data }: { data: PageData } = $props();
+
+    // Realtime live subscription for applicant status updates
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('applicant-status-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
+                invalidateAll();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
+                invalidateAll();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     async function handleLogout() {
         await fetch('/api/auth/logout', { method: 'POST' });

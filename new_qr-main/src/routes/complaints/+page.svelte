@@ -1,6 +1,7 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
     import { onMount } from 'svelte';
+    import { supabaseClient } from '$lib/supabaseClient';
     
     let { data } = $props();
 
@@ -25,6 +26,20 @@
 
     onMount(() => {
         loadComplaints();
+    });
+
+    // Realtime subscription for complaints
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('user-complaints-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'complaint' }, () => {
+                loadComplaints();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
     });
 
     async function submitComplaint() {

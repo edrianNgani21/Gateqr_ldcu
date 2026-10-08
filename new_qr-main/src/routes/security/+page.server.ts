@@ -23,38 +23,65 @@ export const load: PageServerLoad = async ({ locals }) => {
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
     try {
-        // Fetch vehicles for monitoring - distributed/active vehicles
-        const { data: rows } = await supabase
-            .from('registration')
-            .select(`
-                *,
-                department:department_id(
-                    department,
-                    email
-                ),
-                user:user_id(
-                    email
-                ),
-                vehicle_information:vehicle_information_id(
-                    or_document,
-                    cr_document,
-                    drivers_license,
-                    school_id,
-                    authorization_letter,
-                    plate_number,
-                    brand,
-                    color,
-                    type,
-                    qr_code
-                )
-            `)
-            .in('status', ['distributed', 'completed', 'revoked'])
-            .order('created_at', { ascending: false });
-
-        const { data: changeReqs } = await supabase
-            .from('change_vehicle_requests')
-            .select('*')
-            .in('status', ['pending', 'approved', 'Pending', 'Approved']);
+        // Run all queries concurrently in parallel for ultra-fast response
+        const [
+            { data: rows },
+            { data: changeReqs },
+            { data: statsRows },
+            { count: vehicleCount },
+            { count: unreadComplaints },
+            { data: parkingData }
+        ] = await Promise.all([
+            supabase
+                .from('registration')
+                .select(`
+                    *,
+                    department:department_id(
+                        department,
+                        email
+                    ),
+                    user:user_id(
+                        email
+                    ),
+                    vehicle_information:vehicle_information_id(
+                        or_document,
+                        cr_document,
+                        drivers_license,
+                        school_id,
+                        authorization_letter,
+                        plate_number,
+                        brand,
+                        color,
+                        type,
+                        qr_code
+                    )
+                `)
+                .in('status', ['distributed', 'completed', 'revoked'])
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('change_vehicle_requests')
+                .select('*')
+                .in('status', ['pending', 'approved', 'Pending', 'Approved']),
+            supabase
+                .from('vehicle_log')
+                .select('*')
+                .gte('check_in', today)
+                .lt('check_in', tomorrow),
+            supabase
+                .from('registration')
+                .select('*', { count: 'exact', head: true })
+                .in('status', ['distributed', 'completed']),
+            supabase
+                .from('complaint')
+                .select('*', { count: 'exact', head: true })
+                .eq('status', 'Pending'),
+            supabase
+                .from('parking_availability')
+                .select('parking_capacity, slot_occupied, slot_unoccupied, date_time')
+                .order('date_time', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+        ]);
 
         const changeReqMap = new Map<number, any>();
         (changeReqs || []).forEach((cr: any) => {
@@ -79,33 +106,6 @@ export const load: PageServerLoad = async ({ locals }) => {
             qr_code: v.qr_code || v.vehicle_information?.qr_code || null,
             qr_unique_code: v.qr_unique_code || v.vehicle_information?.qr_unique_code || null
         }));
-
-        // Fetch stats for dashboard
-        const { data: statsRows } = await supabase
-            .from('vehicle_log')
-            .select('*')
-            .gte('check_in', today)
-            .lt('check_in', tomorrow);
-
-        // Fetch vehicle count
-        const { count: vehicleCount } = await supabase
-            .from('registration')
-            .select('*', { count: 'exact', head: true })
-            .in('status', ['distributed', 'completed']);
-
-        // Fetch unread complaints count (complaints with 'Pending' status)
-        const { count: unreadComplaints } = await supabase
-            .from('complaint')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'Pending');
-
-        // Fetch parking availability data for real-time status
-        const { data: parkingData } = await supabase
-            .from('parking_availability')
-            .select('parking_capacity, slot_occupied, slot_unoccupied, date_time')
-            .order('date_time', { ascending: false })
-            .limit(1)
-            .maybeSingle();
 
         const max_capacity = parkingData?.parking_capacity ?? 500;
 

@@ -1,6 +1,7 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
 
@@ -38,8 +39,20 @@
         }
     }
 
-    // Load admins on component mount
-    loadAdmins();
+    // Load admins on component mount & subscribe to realtime updates
+    $effect(() => {
+        loadAdmins();
+        const channel = supabaseClient
+            .channel('osa-admins-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'user' }, () => {
+                loadAdmins();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     async function handleSubmit() {
         if (!adminEmail || !adminType || !adminIdentification) {

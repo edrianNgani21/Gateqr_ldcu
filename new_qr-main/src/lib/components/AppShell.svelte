@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import '$lib/styles/theme-gold.css';
+  import { supabaseClient } from '$lib/supabaseClient';
   let { title = 'GateQR', userEmail = '', children, showSidebar = false, userRole = 'osa' } = $props();
 
   let currentPath = $derived($page.url.pathname);
@@ -21,16 +22,10 @@
     loadingNotifications = true;
     try {
       const res = await fetch('/api/notifications');
-      console.log('Notifications API response status:', res.status);
       if (res.ok) {
         const data = await res.json();
-        console.log('Notifications data received:', data);
         notifications = data.notifications || [];
         unreadCount = notifications.filter((n: any) => !n.is_read).length;
-        console.log('Notification count:', notifications.length, 'Unread count:', unreadCount);
-      } else {
-        const errorData = await res.json();
-        console.error('Notifications API error:', errorData);
       }
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
@@ -89,9 +84,19 @@
     };
   }
 
-  // Fetch notifications on component mount
+  // Fetch notifications on component mount & subscribe to realtime changes
   $effect(() => {
     fetchNotifications();
+    const channel = supabaseClient
+      .channel('appshell-notifications-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+        fetchNotifications();
+      })
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
   });
 
   // Notification creation helper

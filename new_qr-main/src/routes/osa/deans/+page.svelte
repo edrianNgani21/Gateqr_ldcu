@@ -2,10 +2,28 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
     let deans = $derived(data.deans);
     let userEmail = $derived(data.userEmail);
+
+    // Realtime subscription for deans and departments
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('osa-deans-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'user' }, () => {
+                invalidateAll();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'department' }, () => {
+                invalidateAll();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     let showForm = $state(false);
     let newDeanEmail = $state('');

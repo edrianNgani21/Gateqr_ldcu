@@ -10,43 +10,42 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
     const userEmail = locals.user.email;
 
     try {
-        const { data: rows } = await supabase
-            .from('registration')
-            .select(`
-                *,
-                department:department_id(
-                    department,
-                    email
-                ),
-                user:user_id(
-                    email
-                ),
-                vehicle_information:vehicle_information_id(
-                    or_document,
-                    cr_document,
-                    drivers_license,
-                    school_id,
-                    authorization_letter,
-                    plate_number,
-                    brand,
-                    color,
-                    type,
-                    qr_code
-                )
-            `)
-            .order('created_at', { ascending: false });
-
-        console.log('Raw registration rows:', rows?.length || 0);
-        console.log('Sample row:', rows?.[0]);
-        console.log('Sample department data:', rows?.[0]?.department);
-        console.log('All application statuses:', rows?.map(r => ({ id: r.registration_id, status: r.status, department_id: r.department_id })));
-
-        // Fetch active change vehicle requests to label applications undergoing this process
-        const { data: changeReqs } = await supabase
-            .from('change_vehicle_requests')
-            .select('*, new_vehicle:new_vehicle_id(brand, plate_number, type)')
-            .in('status', ['Pending', 'pending', 'Approved', 'approved', 'in_progress', 'scheduled'])
-            .order('requested_at', { ascending: false });
+        // Fetch registrations and change vehicle requests concurrently in parallel
+        const [
+            { data: rows },
+            { data: changeReqs }
+        ] = await Promise.all([
+            supabase
+                .from('registration')
+                .select(`
+                    *,
+                    department:department_id(
+                        department,
+                        email
+                    ),
+                    user:user_id(
+                        email
+                    ),
+                    vehicle_information:vehicle_information_id(
+                        or_document,
+                        cr_document,
+                        drivers_license,
+                        school_id,
+                        authorization_letter,
+                        plate_number,
+                        brand,
+                        color,
+                        type,
+                        qr_code
+                    )
+                `)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('change_vehicle_requests')
+                .select('*, new_vehicle:new_vehicle_id(brand, plate_number, type)')
+                .in('status', ['Pending', 'pending', 'Approved', 'approved', 'in_progress', 'scheduled'])
+                .order('requested_at', { ascending: false })
+        ]);
 
         const changeReqMap = new Map<number, any>();
         (changeReqs || []).forEach((cr: any) => {

@@ -4,6 +4,7 @@
   import ApplicationCard from "$lib/components/ApplicationCard.svelte";
   import ActionBar from "$lib/components/ActionBar.svelte";
   import { invalidateAll } from "$app/navigation";
+  import { supabaseClient } from "$lib/supabaseClient";
 
   let { data } = $props();
   let apps = $derived((data.applications as any[]) || []);
@@ -12,6 +13,20 @@
   const tabs = ["validation", "history"];
 
   let searchQuery = $state("");
+
+  // Realtime subscription for Dean portal
+  $effect(() => {
+    const channel = supabaseClient
+      .channel('dean-applications-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
+        invalidateAll();
+      })
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  });
 
   $effect(() => {
     document.cookie = `dean_active_tab=${tab}; path=/dean; max-age=31536000; SameSite=Lax`;

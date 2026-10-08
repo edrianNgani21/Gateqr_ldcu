@@ -1,6 +1,7 @@
 <script lang="ts">
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
+  import { supabaseClient } from '$lib/supabaseClient';
 
   let { data } = $props();
   let userRole = $derived(data.userRole || 'security');
@@ -11,6 +12,20 @@
   let totalPages = $state(1);
   const pageSize = 25;
   let loading = $state(false);
+
+  // Realtime subscription for vehicle logs
+  $effect(() => {
+    const channel = supabaseClient
+      .channel('security-logs-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
+        fetchLogs();
+      })
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  });
 
   let selectedDate = $state(new Date().toISOString().split('T')[0]);
   let boundFilter = $state('all');

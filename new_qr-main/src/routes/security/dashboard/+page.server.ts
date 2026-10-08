@@ -248,15 +248,28 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         try {
             const campusesList = ['Main Campus', 'RNP', 'PASEO'];
-            for (const name of campusesList) {
-                const { data: paData } = await supabase
-                    .from('parking_availability')
-                    .select('*')
-                    .eq('campus', name)
-                    .order('date_time', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                    
+            const campusResults = await Promise.all(campusesList.map(async (name) => {
+                const [paRes, evRes] = await Promise.all([
+                    supabase
+                        .from('parking_availability')
+                        .select('*')
+                        .eq('campus', name)
+                        .order('date_time', { ascending: false })
+                        .limit(1)
+                        .maybeSingle(),
+                    supabase
+                        .from('campus_events')
+                        .select('*')
+                        .eq('campus', name)
+                        .eq('is_active', true)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle()
+                ]);
+                return { name, paData: paRes.data, evData: evRes.data };
+            }));
+
+            for (const { name, paData, evData } of campusResults) {
                 const presence = name === 'RNP' ? rnpCampusPresence : (name === 'PASEO' ? paseoCampusPresence : mainCampusPresence);
                 const cap = paData?.parking_capacity ?? 500;
                 const occ = presence;
@@ -265,15 +278,6 @@ export const load: PageServerLoad = async ({ locals }) => {
                 if (name === 'Main Campus') mainCapacity = { capacity: cap, occupied: occ, available: avail };
                 if (name === 'RNP') rnpCapacity = { capacity: cap, occupied: occ, available: avail };
                 if (name === 'PASEO') paseoCapacity = { capacity: cap, occupied: occ, available: avail };
-
-                const { data: evData } = await supabase
-                    .from('campus_events')
-                    .select('*')
-                    .eq('campus', name)
-                    .eq('is_active', true)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
 
                 if (evData?.event_name) {
                     const evt = { name: evData.event_name, start: evData.start_date, end: evData.end_date };

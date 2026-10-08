@@ -1449,6 +1449,69 @@ CREATE TABLE campus_events (
 );
 
 -- ============================================================
+-- 40. SUPABASE REALTIME REPLICATION CONFIGURATION
+-- ============================================================
+-- Enables Realtime websocket broadcasts for instant UI updates
+-- without requiring manual page refresh.
+-- ============================================================
+
+ALTER TABLE public.registration REPLICA IDENTITY FULL;
+ALTER TABLE public.vehicle_log REPLICA IDENTITY FULL;
+ALTER TABLE public.complaint REPLICA IDENTITY FULL;
+ALTER TABLE public.change_vehicle_requests REPLICA IDENTITY FULL;
+ALTER TABLE public.parking_availability REPLICA IDENTITY FULL;
+ALTER TABLE public.campus_events REPLICA IDENTITY FULL;
+ALTER TABLE public.department REPLICA IDENTITY FULL;
+ALTER TABLE public."user" REPLICA IDENTITY FULL;
+ALTER TABLE public.notifications REPLICA IDENTITY FULL;
+ALTER TABLE public.application_form_settings REPLICA IDENTITY FULL;
+
+-- Add tables to the supabase_realtime publication
+DO $$
+BEGIN
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.registration;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.vehicle_log;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.complaint;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.change_vehicle_requests;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.parking_availability;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.campus_events;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.department;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public."user";
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.application_form_settings;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+END $$;
+
+-- ============================================================
 -- END OF COMPLETE GATEQR DATABASE SCHEMA
 -- ============================================================
 

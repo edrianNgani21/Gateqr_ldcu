@@ -6,18 +6,22 @@ import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
     try {
-        const { email, otp } = await request.json();
+        const body = await request.json();
+        const rawEmail = body.email;
+        const rawOtp = body.otp;
 
-        if (!email || !otp) {
+        if (!rawEmail || !rawOtp) {
             return json({ error: 'Email and OTP are required' }, { status: 400 });
         }
 
+        const email = String(rawEmail).trim().toLowerCase();
+        const otp = String(rawOtp).trim();
+
         // Verify OTP from Supabase with optimized query
-        console.log('[OTP] Verifying OTP for email:', email, 'code:', otp);
         const { data: otpData, error: otpError } = await supabase
             .from('otp_codes')
             .select('*')
-            .eq('email', email)
+            .ilike('email', email)
             .eq('otp', otp)
             .gt('expires_at', new Date().toISOString())
             .order('created_at', { ascending: false })
@@ -41,18 +45,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             });
 
         // Get user from Supabase with optimized query
-        const { data: users, error: userError } = await supabase
+        const { data: userList } = await supabase
             .from('user')
             .select('user_id, user_type, identification, department_id')
-            .eq('email', email)
-            .maybeSingle();
+            .ilike('email', email)
+            .order('user_id', { ascending: true })
+            .limit(1);
+
+        const users = userList && userList.length > 0 ? userList[0] : null;
 
         let userId;
         let userType = 'Applicants';
         let identification = 'Visitor';
         let department_id = null;
 
-        if (users && !userError) {
+        if (users) {
             userId = users.user_id;
             userType = users.user_type || 'Applicants';
             identification = users.identification || 'Visitor';

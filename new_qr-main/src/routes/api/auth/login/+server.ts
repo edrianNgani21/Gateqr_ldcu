@@ -5,33 +5,37 @@ import { sendEmail } from '$lib/server/email';
 
 export const POST: RequestHandler = async ({ request }) => {
     try {
-        const { email } = await request.json();
+        const body = await request.json();
+        const rawEmail = body.email;
 
-        if (!email) {
+        if (!rawEmail || typeof rawEmail !== 'string') {
             return json({ error: 'Email is required' }, { status: 400 });
         }
 
-        // Generate OTP first (fast operation)
+        const email = rawEmail.trim().toLowerCase();
+
+        // Fast random 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        // Get or create user using Supabase with optimized query
-        let { data: users, error: userError } = await supabase
-            .from('user')
-            .select('user_id, user_type')
-            .eq('email', email)
-            .maybeSingle();
+        // Run user lookup and old OTP cleanup concurrently in parallel
+        const [userRes, _cleanupRes] = await Promise.all([
+            supabase
+                .from('user')
+                .select('user_id, user_type')
+                .ilike('email', email)
+                .order('user_id', { ascending: true })
+                .limit(1),
+            supabase
+                .from('otp_codes')
+                .delete()
+                .ilike('email', email)
+        ]);
 
-        let userId = users?.user_id;
-        let userType = users?.user_type || 'Applicants';
+        let userId = userRes?.data && userRes.data.length > 0 ? userRes.data[0].user_id : null;
 
-        if (!userId || userError) {
-            // Only create user if doesn't exist (not on other errors)
-            if (userError && userError.code !== 'PGRST116') {
-                throw userError;
-            }
-
-            // Create user if doesn't exist
+        if (!userId) {
+            // Create user if doesn't exist yet
             const { data: newUser, error: createError } = await supabase
                 .from('user')
                 .insert({
@@ -46,37 +50,22 @@ export const POST: RequestHandler = async ({ request }) => {
             userId = newUser.user_id;
         }
 
-        // Clean up old OTPs for this email (faster than waiting for expiration)
-        const { error: cleanupError } = await supabase
-            .from('otp_codes')
-            .delete()
-            .lt('expires_at', new Date().toISOString())
-            .eq('email', email);
-        
-        if (cleanupError) {
-            console.error('[OTP] Cleanup error:', cleanupError);
-        }
-
-        // Store OTP in Supabase database
-        console.log('[OTP] Attempting to store OTP for user:', userId, 'email:', email);
-        const { error: otpError, data: otpData } = await supabase
+        // Store OTP in database quickly
+        const { error: otpError } = await supabase
             .from('otp_codes')
             .insert({
                 user_id: userId,
                 email,
                 otp,
                 expires_at: expiresAt.toISOString()
-            })
-            .select();
+            });
 
         if (otpError) {
             console.error('[OTP] Database insertion error:', otpError);
             throw otpError;
         }
-        
-        console.log('[OTP] Successfully stored OTP in database:', otpData);
 
-        // Send email with OSA sender
+        // Send email with OSA sender concurrently in background without blocking
         sendEmail(
             email,
             'Your GateQR Login OTP Code',
@@ -97,12 +86,11 @@ export const POST: RequestHandler = async ({ request }) => {
                 </p>
             </div>`,
             `"Liceo OSA - GateQR" <aluban98304@liceo.edu.ph>`
-        ).catch(err => console.error('Email send error:', err));
+        ).catch(err => console.error('[Email Error]:', err));
 
-        // For testing/development, log the OTP immediately
-        console.log(`[OTP] Generated for ${email}: ${otp}`);
+        console.log(`[OTP] Sent for ${email}: ${otp}`);
 
-        // Return success immediately without waiting for email
+        // Return immediately
         return json({ message: 'OTP sent successfully' });
     } catch (error) {
         console.error('Login error:', error);

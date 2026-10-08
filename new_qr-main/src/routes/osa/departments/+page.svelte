@@ -2,10 +2,25 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
     let departments = $derived(data.departments);
     let userEmail = $derived(data.userEmail);
+
+    // Realtime subscription for departments
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('osa-departments-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'department' }, () => {
+                invalidateAll();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     let showForm = $state(false);
     let newDeptName = $state('');

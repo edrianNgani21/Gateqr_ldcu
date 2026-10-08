@@ -1,8 +1,30 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
+    import { invalidateAll } from '$app/navigation';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
+
+    // Realtime live subscription for automatic instant updates
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('osa-dashboard-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
+                invalidateAll();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'department' }, () => {
+                invalidateAll();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
+                invalidateAll();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     const navLinks = [
         { label: 'Add Admin', href: '/osa/admin' },

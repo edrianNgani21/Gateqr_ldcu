@@ -5,9 +5,27 @@
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import ActionBar from '$lib/components/ActionBar.svelte';
     import { invalidateAll } from '$app/navigation';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
     let apps = $derived((data.applications as any[]) || []);
+
+    // Realtime live subscription for instant automatic updates without manual refresh
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('osa-applications-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
+                invalidateAll();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
+                invalidateAll();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
+    });
 
     let tab = $state('validation');
     const tabs = ['validation', 'distribution', 'overdue', 'release', 'registered', 'revoked'];

@@ -2,6 +2,7 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { onMount } from 'svelte';
+    import { supabaseClient } from '$lib/supabaseClient';
 
     let { data } = $props();
     let userRole = $derived(data.userRole || 'security');
@@ -28,6 +29,20 @@
 
     onMount(() => {
         loadComplaints();
+    });
+
+    // Realtime subscription for complaints
+    $effect(() => {
+        const channel = supabaseClient
+            .channel('security-complaints-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'complaint' }, () => {
+                loadComplaints();
+            })
+            .subscribe();
+
+        return () => {
+            supabaseClient.removeChannel(channel);
+        };
     });
 
     async function updateComplaintStatus(id: number, status: string) {
