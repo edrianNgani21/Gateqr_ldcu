@@ -1063,4 +1063,27 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  @media (max-width: 640px) {
+    .welcome-banner {
+      padding: 1.25rem 1.25rem;
+      border-radius: 14px;
+    }
+    .wb-title {
+      font-size: 1.25rem;
+    }
+    .wb-sub {
+      font-size: 0.825rem;
+    }
+    .wb-icon-shield {
+      display: none;
+    }
+    .mc-footer {
+      flex-direction: column;
+    }
+    .btn-cancel, .btn-submit-change {
+      width: 100%;
+      text-align: center;
+    }
+  }
 </style>

@@ -1220,6 +1220,7 @@
     .app-shell {
       flex-direction: column;
       padding: 1rem;
+      gap: 1.25rem;
     }
 
     .sidebar {
@@ -1230,6 +1231,71 @@
 
     .notification-flyout-card {
       width: min(360px, calc(100vw - 2rem));
+      right: 0;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .app-shell {
+      padding: 0.75rem 0.5rem;
+      gap: 1rem;
+    }
+
+    .content-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+    }
+
+    .header-left-meta {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .header-actions-group {
+      width: 100%;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+
+    .profile-info-block {
+      display: none;
+    }
+
+    .sidebar {
+      padding: 1.25rem 1rem;
+      border-radius: 16px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .app-shell {
+      padding: 0.5rem 0.35rem;
+    }
+
+    .meta-system-badge {
+      padding: 0.35rem 0.65rem;
+    }
+
+    .meta-sub {
+      display: none;
+    }
+
+    .meta-sep {
+      display: none;
+    }
+
+    .topbar-logout-btn span {
+      display: none;
+    }
+
+    .topbar-logout-btn {
+      padding: 0.45rem 0.65rem;
+    }
+
+    .topbar-action-pill {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.75rem;
     }
   }
 </style>

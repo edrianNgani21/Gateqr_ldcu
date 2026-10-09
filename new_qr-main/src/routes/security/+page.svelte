@@ -2399,4 +2399,24 @@
     max-width: 400px;
     margin: 0;
   }
+
+  @media (max-width: 768px) {
+    .install-action-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .btn-install {
+      width: 100%;
+    }
+    .paginator {
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .empty-state-install {
+      padding: 2.5rem 1rem;
+    }
+  }
 </style>

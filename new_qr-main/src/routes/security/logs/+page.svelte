@@ -1001,4 +1001,73 @@
   @keyframes spin {
     to { transform: rotate(360deg); }
   }
+
+  @media (max-width: 768px) {
+    .card {
+      padding: 1rem;
+      border-radius: 12px;
+    }
+
+    .controls-toolbar {
+      gap: 0.75rem;
+    }
+
+    .filters-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+
+    .select-control {
+      width: 100%;
+    }
+
+    .dropdown-btn {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .dropdown-menu {
+      width: 100%;
+    }
+
+    .btn-action {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-primary {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .pagination-bar {
+      justify-content: space-between;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .header-section {
+      width: 100%;
+    }
+
+    .header-stats {
+      width: 100%;
+    }
+
+    .top-campus-select {
+      width: 100%;
+    }
+
+    .empty-campus-state {
+      padding: 2.5rem 1rem;
+      margin: 1rem 0;
+    }
+
+    .logs-table th,
+    .logs-table td {
+      padding: 0.65rem 0.75rem;
+      font-size: 0.8rem;
+    }
+  }
 </style>
