@@ -1289,9 +1289,8 @@ def render_bottom_panel(display):
         draw_text(display, f"[{gate_txt}] Time: {t_txt}", (box_x + 20, box_y + 85), 0.68, (70, 75, 85), 1)
         draw_text(display, f"Status: {st_txt}", (box_x + 360, box_y + 85), 0.72, st_col, 2)
         
-        name_txt = latest_scanned_details.get('name', 'N/A')
         role_txt = latest_scanned_details.get('role', 'N/A')
-        draw_text(display, f"Driver: {name_txt} ({role_txt})", (box_x + 20, box_y + 125), 0.72, (20, 25, 35), 2)
+        draw_text(display, f"Role: {role_txt}", (box_x + 20, box_y + 125), 0.72, (20, 25, 35), 2)
         
         plate_txt = latest_scanned_details.get('plate', 'N/A')
         type_txt = latest_scanned_details.get('type', 'N/A')
@@ -1470,7 +1469,7 @@ def render_side(img, side, offset_x=0):
             time_txt = p_info.get('time') or datetime.now().strftime("%I:%M:%S %p")
             
             draw_text(img, f"Plate Number : {plate_txt}", (card_x + 30, card_y + 125), 0.85, (255, 255, 255), 2)
-            draw_text(img, f"Driver / Role: {driver_txt} ({role_txt})", (card_x + 30, card_y + 160), 0.72, (0, 255, 255), 2)
+            draw_text(img, f"Role         : {role_txt}", (card_x + 30, card_y + 160), 0.72, (0, 255, 255), 2)
             draw_text(img, f"Time Logged  : {time_txt}", (card_x + 30, card_y + 192), 0.68, (200, 220, 200), 1)
             
             draw_text(img, f"Scanner ready in {wait_s}s to scan next vehicle...", (card_x + 30, card_y + 225), 0.68, (0, 230, 255), 2)
