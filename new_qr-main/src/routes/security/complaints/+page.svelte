@@ -31,18 +31,16 @@
         loadComplaints();
     });
 
-    // Realtime subscription for complaints
-    $effect(() => {
-        const channel = supabaseClient
-            .channel('security-complaints-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'complaint' }, () => {
-                loadComplaints();
-            })
-            .subscribe();
+    import { startLiveSync } from '$lib/utils/liveSync';
 
-        return () => {
-            supabaseClient.removeChannel(channel);
-        };
+    // Dual-engine live sync for security complaints
+    $effect(() => {
+        return startLiveSync({
+            channelName: 'security-complaints-realtime',
+            tables: ['complaint'],
+            intervalMs: 5000,
+            onSync: () => loadComplaints()
+        });
     });
 
     async function updateComplaintStatus(id: number, status: string) {
@@ -368,13 +366,13 @@
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
   }
   .complaint-card.card-scheduled {
-    border-color: rgba(37,99,235,0.3);
-    border-left: 4px solid #2563eb;
+    border-color: rgba(212, 166, 42, 0.4);
+    border-left: 4px solid #D4A62A;
   }
   .complaint-card.card-resolved {
-    border-color: rgba(34,197,94,0.3);
-    border-left: 4px solid #16a34a;
-    opacity: 0.8;
+    border-color: rgba(139, 26, 60, 0.25);
+    border-left: 4px solid #8B1A3C;
+    opacity: 0.85;
   }
 
   .card-header {
@@ -419,9 +417,9 @@
     padding: 0.25rem 0.75rem;
     border-radius: 6px;
   }
-  .status-badge.pending { background: rgba(217,119,6,0.1); color: #d97706; }
-  .status-badge.scheduled { background: rgba(37,99,235,0.1); color: #2563eb; }
-  .status-badge.resolved { background: rgba(34,197,94,0.1); color: #16a34a; }
+  .status-badge.pending { background: #f1f5f9; color: #64748b; }
+  .status-badge.scheduled { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .status-badge.resolved { background: #fdf2f4; color: #8B1A3C; border: 1px solid #fecdd3; }
 
   .card-body {
     padding: 1.25rem;
@@ -441,10 +439,10 @@
     gap: 0.75rem;
     margin: 0 1.25rem 1rem;
     padding: 0.875rem;
-    background: rgba(37,99,235,0.05);
-    border: 1px solid rgba(37,99,235,0.2);
+    background: #fffdf5;
+    border: 1px solid #fde68a;
     border-radius: 8px;
-    color: #1d4ed8;
+    color: #92400e;
     font-size: 0.875rem;
   }
   .schedule-banner svg { flex-shrink: 0; margin-top: 1px; }
@@ -497,18 +495,22 @@
   }
 
   .btn-resolve {
-    background: rgba(34,197,94,0.1);
-    color: #16a34a;
-    border: 1px solid rgba(34,197,94,0.3);
+    background: #fdf2f4;
+    color: #8B1A3C;
+    border: 1px solid #fecdd3;
   }
-  .btn-resolve:hover { background: rgba(34,197,94,0.2); }
+  .btn-resolve:hover { background: #8B1A3C; color: #ffffff; }
 
   .btn-confirm {
-    background: rgba(37,99,235,0.1);
-    color: #2563eb;
-    border: 1px solid rgba(37,99,235,0.3);
+    background: linear-gradient(135deg, #F0CF72, #D4A62A);
+    color: #3D0818;
+    border: none;
+    font-weight: 700;
   }
-  .btn-confirm:hover:not(:disabled) { background: rgba(37,99,235,0.2); }
+  .btn-confirm:hover:not(:disabled) {
+    box-shadow: 0 4px 10px rgba(212, 166, 42, 0.4);
+    transform: translateY(-1px);
+  }
   .btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .resolved-note {

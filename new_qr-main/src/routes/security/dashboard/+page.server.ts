@@ -20,13 +20,18 @@ export const load: PageServerLoad = async ({ locals }) => {
                 check_in,
                 check_out,
                 logged_status,
+                is_vip,
                 campus,
+                registration_id,
                 vehicle_information:vehicle_information_id(
                     type
                 ),
                 registration:registration_id(
                     campus,
-                    role
+                    role,
+                    vehicle_information:vehicle_information_id(
+                        type
+                    )
                 )
             `)
             .is('check_out', null);
@@ -38,23 +43,45 @@ export const load: PageServerLoad = async ({ locals }) => {
         let rnp2W = 0, rnp4W = 0;
         let paseo2W = 0, paseo4W = 0;
 
-        (activeInsideLogs || []).forEach((log: any) => {
-            const st = (log.logged_status || '').toLowerCase();
-            if (st === 'denied' || st === 'exit' || st === 'out') return;
+        const countedMain = new Set<string | number>();
+        const countedRnp = new Set<string | number>();
+        const countedPaseo = new Set<string | number>();
 
-            const vType = (log.vehicle_information?.type || '').toLowerCase();
-            const is2W = vType.includes('2-wheeler') || vType.includes('motorcycle') || vType.includes('2-wheel') || vType.includes('bike');
+        (activeInsideLogs || []).forEach((log: any) => {
+            // If vehicle has exit (check_out is set or logged_status is exit/out/denied/exited), currently in is 0
+            if (log.check_out) return;
+            const st = (log.logged_status || '').toLowerCase();
+            if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited') return;
+
+            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || st === 'guest' || st === 'vip' || Boolean(log.is_vip);
+            const vehicleKey = isGuestOrVip ? log.vehicle_log_id : log.registration_id;
+
+            const vType = (
+                log.vehicle_information?.type || 
+                log.registration?.vehicle_information?.type || 
+                ''
+            ).toLowerCase();
+            const is2W = vType.includes('2') || vType.includes('motorcycle') || vType.includes('bike') || vType.includes('scooter');
 
             const c = (log.campus || log.registration?.campus || '').toLowerCase();
             if (c.includes('rnp')) {
-                rnpCampusPresence++;
-                if (is2W) rnp2W++; else rnp4W++;
+                if (!countedRnp.has(vehicleKey)) {
+                    countedRnp.add(vehicleKey);
+                    rnpCampusPresence++;
+                    if (is2W) rnp2W++; else rnp4W++;
+                }
             } else if (c.includes('paseo')) {
-                paseoCampusPresence++;
-                if (is2W) paseo2W++; else paseo4W++;
+                if (!countedPaseo.has(vehicleKey)) {
+                    countedPaseo.add(vehicleKey);
+                    paseoCampusPresence++;
+                    if (is2W) paseo2W++; else paseo4W++;
+                }
             } else {
-                mainCampusPresence++;
-                if (is2W) main2W++; else main4W++;
+                if (!countedMain.has(vehicleKey)) {
+                    countedMain.add(vehicleKey);
+                    mainCampusPresence++;
+                    if (is2W) main2W++; else main4W++;
+                }
             }
         });
 
@@ -271,7 +298,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
             for (const { name, paData, evData } of campusResults) {
                 const presence = name === 'RNP' ? rnpCampusPresence : (name === 'PASEO' ? paseoCampusPresence : mainCampusPresence);
-                const cap = paData?.parking_capacity ?? 500;
+                const cap = paData?.parking_capacity ?? 200;
                 const occ = presence;
                 const avail = Math.max(0, cap - occ);
 
@@ -313,7 +340,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             roleBreakdownByCampus,
             hourlyChart,
             unreadComplaints: unreadComplaints || 0,
-            flaggedAlerts
+            flaggedAlerts,
+            latestInsideLog: activeInsideLogs && activeInsideLogs.length > 0 ? activeInsideLogs[0] : null
         };
     } catch (e) {
         console.error('Error loading security dashboard data:', e);

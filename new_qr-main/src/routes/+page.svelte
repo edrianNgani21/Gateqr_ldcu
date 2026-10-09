@@ -162,7 +162,7 @@
   <meta name="description" content="Apply for a Liceo de Cagayan University vehicle parking sticker." />
 </svelte:head>
 
-<AppShell>
+<AppShell userRole="applicant" userEmail={data.userEmail} showSidebar={false}>
   {#if data.applicationOpen === false}
     <div class="form-card" style="text-align:center; padding: 2.5rem 1.5rem; display:flex; flex-direction:column; align-items:center; gap:0.75rem;">
       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--maroon)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -176,10 +176,17 @@
       </button>
     </div>
   {:else}
-  <!-- User greeting -->
-  <div class="welcome-bar">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    <span>{data.userEmail}</span>
+  <!-- Welcome Banner matching Dashboard Aesthetic -->
+  <div class="welcome-banner">
+    <div class="wb-content">
+      <h1 class="wb-title">Vehicle Sticker Application</h1>
+      <p class="wb-sub">Please complete all steps to apply for your campus parking sticker.</p>
+    </div>
+    <div class="wb-icon-shield">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+      </svg>
+    </div>
   </div>
 
   <!-- Step progress -->
@@ -531,21 +538,50 @@
 {/snippet}
 
 <style>
-  .welcome-bar {
+  /* Welcome Banner matching Dashboard aesthetic */
+  .welcome-banner {
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border-radius: 18px;
+    padding: 1.75rem 2.25rem;
+    color: #ffffff;
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 0.75rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-    background: linear-gradient(135deg, #fef2f2, #ffffff);
-    border: 1px solid rgba(107, 26, 42, 0.1);
-    border-radius: 12px;
-    padding: 0.75rem 1.25rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
   }
 
-  .welcome-bar svg { color: var(--maroon); flex-shrink: 0; }
+  .wb-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    z-index: 1;
+  }
+
+  .wb-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #E9C25E;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .wb-sub {
+    font-size: 0.9rem;
+    color: #F5D5DE;
+    margin: 0;
+    font-weight: 500;
+  }
+
+  .wb-icon-shield {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
+  }
 
   /* ─── Step Progress ─── */
   .step-progress {
@@ -591,10 +627,10 @@
   }
 
   .step-done .step-circle {
-    background: linear-gradient(135deg, #10b981, #059669);
-    border-color: #10b981;
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    background: linear-gradient(135deg, #F0CF72, #D4A62A);
+    border-color: #D4A62A;
+    color: #3D0818;
+    box-shadow: 0 2px 8px rgba(212, 166, 42, 0.35);
   }
 
   .step-connector {
@@ -608,7 +644,7 @@
 
   .step-done .step-connector,
   .step-active .step-connector {
-    background: linear-gradient(90deg, #10b981, var(--maroon-light));
+    background: linear-gradient(90deg, #D4A62A, var(--maroon-light));
   }
 
   .section-title {

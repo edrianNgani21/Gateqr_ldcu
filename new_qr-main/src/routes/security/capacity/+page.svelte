@@ -28,6 +28,9 @@
         .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_events' }, () => {
             invalidateAll();
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
+            invalidateAll();
+        })
         .subscribe();
 
     return () => {
@@ -125,7 +128,7 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
   <div class="capacity-wrapper">
     <div class="header">
-      <h1>Campus Capacity Management</h1>
+      <h1>Campus Vehicle Capacity Management</h1>
       <p>Monitor and set the vehicle capacity limits for each campus.</p>
     </div>
 
@@ -179,7 +182,7 @@
                 <span class="value">{campus.capacity}</span>
               </div>
               <div class="stat">
-                <span class="label">Occupied</span>
+                <span class="label">Currently IN</span>
                 <span class="value occupied">{campus.occupied}</span>
               </div>
               <div class="stat">
@@ -327,21 +330,21 @@
   }
 
   .value.occupied { color: #e53e3e; }
-  .value.available { color: #38a169; }
+  .value.available { color: #D4A62A; }
 
   .event-display {
     text-align: center;
     margin-bottom: 1.5rem;
     padding: 1.25rem;
-    background: rgba(49, 130, 206, 0.04);
+    background: rgba(139, 26, 60, 0.05);
     border-radius: 12px;
     font-size: 0.85rem;
     position: relative;
-    border: 1px solid rgba(49, 130, 206, 0.1);
+    border: 1px solid rgba(139, 26, 60, 0.15);
   }
   .event-display .value {
     font-size: 1.1rem;
-    color: #2b6cb0;
+    color: #8B1A3C;
     font-weight: 800;
     display: block;
     margin-top: 0.35rem;
@@ -355,7 +358,7 @@
     background: rgba(255,255,255,0.7);
     padding: 0.6rem;
     border-radius: 8px;
-    border: 1px dashed rgba(49, 130, 206, 0.3);
+    border: 1px dashed rgba(139, 26, 60, 0.3);
     font-weight: 500;
   }
 
@@ -429,8 +432,8 @@
   }
   
   .form-group input:focus {
-    border-color: #3182ce;
-    box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+    border-color: #8B1A3C;
+    box-shadow: 0 0 0 3px rgba(139, 26, 60, 0.1);
     background: #ffffff;
   }
 
@@ -443,20 +446,20 @@
   .save-btn {
     flex: 2;
     padding: 0.85rem;
-    background: linear-gradient(135deg, #059669, #10b981);
-    color: white;
+    background: linear-gradient(135deg, #8B1A3C, #6B1A2A);
+    color: #E9C25E;
     border: none;
     border-radius: 10px;
     font-weight: 700;
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 4px 10px rgba(139, 26, 60, 0.3);
   }
   .save-btn:hover { 
-    background: linear-gradient(135deg, #047857, #059669); 
+    background: linear-gradient(135deg, #7A1734, #4a0d1e); 
     transform: translateY(-1px);
-    box-shadow: 0 6px 12px rgba(16, 185, 129, 0.4);
+    box-shadow: 0 6px 12px rgba(139, 26, 60, 0.4);
   }
   .save-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; }
 

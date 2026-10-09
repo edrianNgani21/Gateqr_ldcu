@@ -50,16 +50,40 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
     const qrImage = await loadImage(qrDataUrl);
     ctx.drawImage(qrImage, borderPadding, borderPadding, qrSize, qrSize);
 
-    // 4. Overlay Liceo logo in center (transparent background, no white box)
+    // 4. Overlay Liceo logo in center with high-contrast badge background
     const logoPath = join(process.cwd(), 'static', 'liceo-logo.png');
     if (fs.existsSync(logoPath)) {
         const logo = await loadImage(logoPath);
-        const logoDrawSize = 90;
+        const logoDrawSize = 92;
         const centerX = totalSize / 2;
         const centerY = totalSize / 2;
-        const logoX = centerX - logoDrawSize / 2;
-        const logoY = centerY - logoDrawSize / 2;
-        ctx.drawImage(logo, logoX, logoY, logoDrawSize, logoDrawSize);
+        const bgPadding = 8;
+        const bgSize = logoDrawSize + bgPadding * 2;
+        const bgX = centerX - bgSize / 2;
+        const bgY = centerY - bgSize / 2;
+        const radius = 14;
+
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        if (typeof (ctx as any).roundRect === 'function') {
+            (ctx as any).roundRect(bgX, bgY, bgSize, bgSize, radius);
+        } else {
+            ctx.rect(bgX, bgY, bgSize, bgSize);
+        }
+        ctx.fill();
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.drawImage(
+            logo,
+            centerX - logoDrawSize / 2,
+            centerY - logoDrawSize / 2,
+            logoDrawSize,
+            logoDrawSize
+        );
+        ctx.restore();
     }
 
     return canvas.toBuffer('image/png');

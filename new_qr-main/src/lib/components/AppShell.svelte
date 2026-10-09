@@ -2,15 +2,90 @@
   import { page } from '$app/stores';
   import '$lib/styles/theme-gold.css';
   import { supabaseClient } from '$lib/supabaseClient';
+  import AdminSettingsModal from '$lib/components/AdminSettingsModal.svelte';
+
   let { title = 'GateQR', userEmail = '', children, showSidebar = false, userRole = 'osa' } = $props();
 
+  let settingsModalOpen = $state(false);
+
   let currentPath = $derived($page.url.pathname);
+  let currentSearchTab = $derived($page.url.searchParams.get('tab'));
+
+  let isManageRoute = $derived(currentPath === '/osa' || currentPath.startsWith('/osa/change-requests'));
+  let isAccountsRoute = $derived(currentPath.startsWith('/osa/admin') || currentPath.startsWith('/osa/deans'));
+
+  // User manual close overrides
+  let userClosedManage = $state(false);
+  let userClosedAccounts = $state(false);
+
+  let manageAppsOpen = $state(false);
+  let accountsOpen = $state(false);
+
+  $effect(() => {
+    if (isManageRoute) {
+      manageAppsOpen = !userClosedManage;
+    } else if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('gateqr_manage_apps_open');
+      manageAppsOpen = stored === 'true';
+    }
+
+    if (isAccountsRoute) {
+      accountsOpen = !userClosedAccounts;
+    } else if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('gateqr_accounts_open');
+      accountsOpen = stored === 'true';
+    }
+  });
+
+  function toggleManageApps() {
+    if (isManageRoute) {
+      userClosedManage = !userClosedManage;
+      manageAppsOpen = !userClosedManage;
+    } else {
+      manageAppsOpen = !manageAppsOpen;
+    }
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('gateqr_manage_apps_open', String(manageAppsOpen));
+    }
+  }
+
+  function toggleAccounts() {
+    if (isAccountsRoute) {
+      userClosedAccounts = !userClosedAccounts;
+      accountsOpen = !userClosedAccounts;
+    } else {
+      accountsOpen = !accountsOpen;
+    }
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('gateqr_accounts_open', String(accountsOpen));
+    }
+  }
 
   // Notification state
   let notifications = $state<any[]>([]);
   let unreadCount = $state(0);
   let notificationDropdownOpen = $state(false);
   let loadingNotifications = $state(false);
+
+  // User display helper
+  let userInitials = $derived(
+    userRole === 'applicant' ? 'AP' :
+    (userEmail ? userEmail.slice(0, 2).toUpperCase() : 'AD')
+  );
+  let userDisplayName = $derived(
+    userRole === 'applicant' ? 'Applicant' :
+    (userEmail ? userEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Admin User')
+  );
+  let userRoleLabel = $derived(
+    userRole === 'applicant' ? (userEmail || 'Applicant') :
+    (userRole === 'security' ? 'Security Administrator' : (userRole === 'dean' ? 'College Dean' : 'OSA Administrator'))
+  );
+  let portalSubtitle = $derived(
+    userRole === 'applicant' ? 'Application Form' :
+    userRole === 'dean' ? 'Department Head Portal' :
+    userRole === 'security' ? 'Safety & Security Office' :
+    'Office of Student Affairs'
+  );
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -48,7 +123,24 @@
     }
   }
 
+  async function markAllAsRead() {
+    try {
+      const res = await fetch('/api/notifications/mark-all-read', { method: 'POST' });
+      if (res.ok) {
+        notifications = notifications.map(n => ({
+          ...n,
+          is_read: true,
+          read_at: new Date().toISOString()
+        }));
+        unreadCount = 0;
+      }
+    } catch (error) {
+      console.error('Failed to mark all as read:', error);
+    }
+  }
+
   function formatNotificationTime(timestamp: string) {
+    if (!timestamp) return 'Just now';
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -60,14 +152,14 @@
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
-  function formatNotificationType(type: string) {
+  function formatNotificationType(type: string | undefined): string {
+    if (!type) return 'System Notification';
     return type
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
   }
 
   function clickOutside(node: HTMLElement, callback: () => void) {
@@ -84,9 +176,10 @@
     };
   }
 
-  // Fetch notifications on component mount & subscribe to realtime changes
+  // Fetch notifications on mount, periodic heartbeat & realtime
   $effect(() => {
     fetchNotifications();
+
     const channel = supabaseClient
       .channel('appshell-notifications-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
@@ -94,76 +187,31 @@
       })
       .subscribe();
 
+    // Background timer to sync notifications every 8 seconds
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    }, 8000);
+
+    const handleFocus = () => {
+      fetchNotifications();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+      document.addEventListener('visibilitychange', handleFocus);
+    }
+
     return () => {
+      clearInterval(timer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+        document.removeEventListener('visibilitychange', handleFocus);
+      }
       supabaseClient.removeChannel(channel);
     };
   });
-
-  // Notification creation helper
-  async function createNotification(notificationData: {
-    user_id: number;
-    notification_type: string;
-    message: string;
-    actor_id?: number;
-    action_type?: string;
-    target_entity_type?: string;
-    target_entity_id?: number;
-    reference_id?: number;
-    metadata?: any;
-  }) {
-    try {
-      const res = await fetch('/api/notifications/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(notificationData)
-      });
-      if (res.ok) {
-        // Refresh notifications to show the new one
-        await fetchNotifications();
-      }
-    } catch (error) {
-      console.error('Failed to create notification:', error);
-    }
-  }
-
-  const osaActions = [
-    {
-      label: 'Office of Student Affairs Dashboard',
-      href: '/osa/dashboard',
-      icon: `<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><line x1="10" y1="17" x2="10" y2="17"/>`,
-      description: 'View dashboard and statistics'
-    },
-    {
-      label: 'Manage Applications',
-      href: '/osa',
-      icon: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>`,
-      description: 'Review and process vehicle registrations'
-    },
-    {
-      label: 'Request to Change Registration Details',
-      href: '/osa/change-requests',
-      icon: `<path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/>`,
-      description: 'Review requests to change registration details'
-    },
-    {
-      label: 'Add Admin',
-      href: '/osa/admin',
-      icon: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
-      description: 'Create new admin accounts'
-    },
-    {
-      label: 'Departments',
-      href: '/osa/departments',
-      icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
-      description: 'Manage college departments'
-    },
-    {
-      label: 'Dean Management',
-      href: '/osa/deans',
-      icon: `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
-      description: 'Manage dean accounts and assignments'
-    }
-  ];
 
   const securityActions = [
     {
@@ -191,18 +239,37 @@
       description: 'View and manage complaints'
     },
     {
-      label: 'Campus Capacity',
+      label: 'Campus Vehicle Capacity Management',
       href: '/security/capacity',
       icon: `<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/><path d="M12 22v-7"/><path d="M20 22v-7"/>`,
       description: 'Manage capacity per campus'
     }
   ];
 
-  const quickActions = userRole === 'security' ? securityActions : osaActions;
+  const manageAppSubLinks = [
+    { label: 'Accept & Schedule Application', tab: 'validation', href: '/osa?tab=validation' },
+    { label: 'Application Schedules for Hardcopy Compliance', tab: 'distribution', href: '/osa?tab=distribution' },
+    { label: 'Overdue Application Schedules', tab: 'overdue', href: '/osa?tab=overdue' },
+    { label: 'Sticker Release', tab: 'release', href: '/osa?tab=release' },
+    { label: 'Registered Vehicle', tab: 'registered', href: '/osa?tab=registered' },
+    { label: 'Revoked Application', tab: 'revoked', href: '/osa?tab=revoked' },
+    { label: 'Application Request', path: '/osa/change-requests', href: '/osa/change-requests' }
+  ];
+
+  function isAppTabActive(item: typeof manageAppSubLinks[number]): boolean {
+    if (item.path) {
+      return currentPath === item.path;
+    }
+    if (currentPath === '/osa') {
+      const activeTab = currentSearchTab || 'validation';
+      return activeTab === item.tab;
+    }
+    return false;
+  }
 </script>
 
 <!-- Page shell -->
-<main class="app-shell" class:theme-osa={userRole === 'security' || currentPath.startsWith('/security') || (userRole === 'osa' && !currentPath.startsWith('/dean') && !currentPath.startsWith('/monitor'))}>
+<main class="app-shell theme-osa">
   {#if showSidebar}
     <aside class="sidebar">
       <!-- Brand Section -->
@@ -211,157 +278,327 @@
           <img src="/liceo-logo.png" alt="LICEO DE CAGAYAN UNIVERSITY" />
         </div>
         <div class="brand-info">
-          <span class="brand-name">GateQR</span>
-          <span class="brand-sub">Liceo de Cagayan University</span>
+          <div class="brand-top-row">
+            <span class="brand-name">GateQR</span>
+            <span class="brand-tag">ADMIN PORTAL</span>
+          </div>
+          <span class="brand-sub">Office of Student Affairs</span>
         </div>
       </div>
 
-      <!-- User Section -->
-      <div class="sidebar-user">
-        <div class="user-avatar">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-        </div>
-        <div class="user-info">
-          <span class="user-email">{userEmail}</span>
-          <span class="user-role">{userRole === 'security' ? 'SECURITY ADMIN' : 'OSA ADMIN'}</span>
-        </div>
-        <button class="logout-btn" onclick={handleLogout} title="Logout">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-          </svg>
+      <!-- Main Navigation Menu -->
+      <div class="sidebar-menu-wrapper">
+        <div class="sidebar-menu-heading">MAIN MENU</div>
+
+        <nav class="sidebar-nav-tree">
+          {#if userRole === 'osa'}
+            <!-- Dashboard Link -->
+            <a href="/osa/dashboard" class="menu-item-btn" class:active={currentPath === '/osa/dashboard'}>
+              <div class="menu-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                </svg>
+              </div>
+              <span class="menu-item-label">Dashboard</span>
+            </a>
+
+            <!-- Manage Applications (Dropdown) -->
+            <div class="dropdown-parent-group" class:is-open={manageAppsOpen}>
+              <button
+                type="button"
+                class="menu-item-btn dropdown-toggle"
+                class:active-parent={currentPath === '/osa' || currentPath.startsWith('/osa/change-requests')}
+                onclick={toggleManageApps}
+              >
+                <div class="menu-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                  </svg>
+                </div>
+                <span class="menu-item-label">Manage Applications</span>
+                <span class="dropdown-chevron" class:rotated={manageAppsOpen}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </span>
+              </button>
+
+              {#if manageAppsOpen}
+                <div class="submenu-container">
+                  {#each manageAppSubLinks as subItem}
+                    <a
+                      href={subItem.href}
+                      class="submenu-link"
+                      class:active={isAppTabActive(subItem)}
+                    >
+                      <span class="submenu-text">{subItem.label}</span>
+                    </a>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Accounts (Dropdown: Add Admin & Add Dean) -->
+            <div class="dropdown-parent-group" class:is-open={accountsOpen}>
+              <button
+                type="button"
+                class="menu-item-btn dropdown-toggle"
+                class:active-parent={currentPath.startsWith('/osa/admin') || currentPath.startsWith('/osa/deans')}
+                onclick={toggleAccounts}
+              >
+                <div class="menu-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
+                </div>
+                <span class="menu-item-label">Accounts</span>
+                <span class="dropdown-chevron" class:rotated={accountsOpen}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </span>
+              </button>
+
+              {#if accountsOpen}
+                <div class="submenu-container">
+                  <a
+                    href="/osa/admin"
+                    class="submenu-link"
+                    class:active={currentPath === '/osa/admin'}
+                  >
+                    <span class="submenu-text">Add Admin</span>
+                  </a>
+                  <a
+                    href="/osa/deans"
+                    class="submenu-link"
+                    class:active={currentPath === '/osa/deans'}
+                  >
+                    <span class="submenu-text">Add Dean</span>
+                  </a>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Departments Link -->
+            <a href="/osa/departments" class="menu-item-btn" class:active={currentPath === '/osa/departments'}>
+              <div class="menu-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+                </svg>
+              </div>
+              <span class="menu-item-label">Departments</span>
+            </a>
+
+            <!-- Settings Link -->
+            <a href="/osa/settings" class="menu-item-btn" class:active={currentPath === '/osa/settings'}>
+              <div class="menu-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </div>
+              <span class="menu-item-label">Settings</span>
+            </a>
+          {:else}
+            <!-- Non-OSA / Security Actions -->
+            {#each securityActions as action}
+              <a href={action.href} class="menu-item-btn" class:active={currentPath === action.href}>
+                <div class="menu-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    {@html action.icon}
+                  </svg>
+                </div>
+                <span class="menu-item-label">{action.label}</span>
+              </a>
+            {/each}
+          {/if}
+        </nav>
+      </div>
+
+      <!-- Bottom Logout Pill -->
+      <div class="sidebar-bottom-action">
+        <button class="bottom-logout-pill" onclick={handleLogout} title="Logout of GateQR">
+          Logout
         </button>
       </div>
-
-      <!-- Divider -->
-      <div class="sidebar-divider"></div>
-
-      <!-- Quick Actions -->
-      <div class="sidebar-header">
-        <h3>Quick Actions</h3>
-      </div>
-      <nav class="sidebar-nav">
-        {#each quickActions as action}
-          <a href={action.href} class="sidebar-link" class:active={currentPath === action.href}>
-            <div class="sidebar-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                {@html action.icon}
-              </svg>
-            </div>
-            <div class="sidebar-content">
-              <div class="sidebar-label">{action.label}</div>
-              <div class="sidebar-desc">{action.description}</div>
-            </div>
-          </a>
-        {/each}
-      </nav>
     </aside>
   {/if}
+
   <div class="shell-content">
+    <!-- Topbar Header (Matching Screenshots 1 & 2) -->
     <div class="content-header">
-      <div class="notification-wrapper" use:clickOutside={() => notificationDropdownOpen = false}>
-        <button class="notification-btn" onclick={() => notificationDropdownOpen = !notificationDropdownOpen}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-          </svg>
-          {#if unreadCount > 0}
-            <span class="notification-badge">{unreadCount}</span>
+      <div class="header-left-meta">
+        <span class="meta-system-badge">
+          <img src="/liceo-logo.png" alt="LDCU" class="badge-mini-logo" />
+          <span class="meta-title">GateQR</span>
+          <span class="meta-sep">•</span>
+          <span class="meta-sub">{portalSubtitle}</span>
+        </span>
+      </div>
+
+      <div class="header-actions-group">
+        {#if userRole === 'applicant'}
+          {#if currentPath === '/complaints'}
+            <a href="/status" class="topbar-action-pill complaints-pill">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <span>Application Status</span>
+            </a>
+          {:else}
+            <a href="/complaints" class="topbar-action-pill complaints-pill">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+              </svg>
+              <span>My Complaints</span>
+            </a>
           {/if}
-        </button>
-        {#if notificationDropdownOpen}
-          <div class="notification-dropdown">
-            <div class="notification-header">
-              <span class="notification-title">Notifications</span>
-              {#if unreadCount > 0}
-                <button class="mark-all-read-btn" onclick={() => {
-                  notifications.forEach(n => markAsRead(n.notification_id));
-                  notificationDropdownOpen = false;
-                }}>
-                  Mark all as read
-                </button>
-              {/if}
-            </div>
-            <div class="notification-list">
-              {#if loadingNotifications}
-                <div class="notification-loading">Loading...</div>
-              {:else if notifications.length === 0}
-                <div class="notification-empty">No notifications</div>
-              {:else}
-                {#each notifications as notification}
-                  <div class="notification-item" class:unread={!notification.is_read} onclick={() => markAsRead(notification.notification_id)}>
-                    <div class="notification-content">
-                      <p class="notification-message">{notification.message}</p>
-                      <div class="notification-details">
-                        <span class="notification-type">{formatNotificationType(notification.notification_type)}</span>
-                        <span class="notification-email">{notification.actor?.email || notification.user?.email || 'Unknown'}</span>
-                      </div>
-                      <span class="notification-time">{formatNotificationTime(notification.created_at)}</span>
-                    </div>
-                    {#if !notification.is_read}
-                      <div class="notification-dot"></div>
-                    {/if}
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          </div>
         {/if}
+
+        <!-- Notification Bell with Popover (All roles including Applicant) -->
+        <div class="notification-wrapper" use:clickOutside={() => notificationDropdownOpen = false}>
+          <button
+            class="topbar-bell-btn"
+            onclick={() => notificationDropdownOpen = !notificationDropdownOpen}
+            aria-label="Toggle notifications"
+          >
+            <!-- Amber bell SVG matching screenshot 1 -->
+            <svg class="bell-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            {#if unreadCount > 0}
+              <span class="notification-counter-badge">{unreadCount}</span>
+            {/if}
+          </button>
+
+          <!-- Notification Dropdown Popover matching Screenshot 2 -->
+          {#if notificationDropdownOpen}
+            <div class="notification-flyout-card">
+              <div class="flyout-header">
+                <span class="flyout-title">Recent Notifications</span>
+                {#if notifications.length > 0}
+                  <button class="flyout-mark-btn" onclick={markAllAsRead}>
+                    Mark all as read
+                  </button>
+                {/if}
+              </div>
+
+              <div class="flyout-scroll-body">
+                {#if loadingNotifications}
+                  <div class="flyout-empty-state">Loading notifications...</div>
+                {:else if notifications.length === 0}
+                  <div class="flyout-empty-state">No recent notifications</div>
+                {:else}
+                  {#each notifications as notif}
+                    <div
+                      class="flyout-item-card"
+                      class:item-unread={!notif.is_read}
+                      role="button"
+                      tabindex="0"
+                      onclick={() => markAsRead(notif.notification_id)}
+                      onkeydown={(e) => { if (e.key === 'Enter') markAsRead(notif.notification_id); }}
+                    >
+                      <div class="item-text-body">
+                        <div class="item-header-row">
+                          <span class="item-type-badge">{formatNotificationType(notif.notification_type)}</span>
+                          <span class="item-time">{formatNotificationTime(notif.created_at)}</span>
+                        </div>
+                        <p class="item-message">{notif.message}</p>
+                        {#if notif.actor?.email}
+                          <span class="item-actor">By: {notif.actor.email}</span>
+                        {/if}
+                      </div>
+                      {#if !notif.is_read}
+                        <span class="unread-indicator-dot"></span>
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- User Profile Pill (Matching Screenshot 1) -->
+        <div class="topbar-profile-pill">
+          <div class="profile-avatar-circle">
+            <span>{userInitials}</span>
+          </div>
+          <div class="profile-info-block">
+            <span class="profile-name">{userDisplayName}</span>
+            <span class="profile-role-sub">{userRoleLabel}</span>
+          </div>
+        </div>
+
+        <!-- Topbar Logout Button Beside User -->
+        <button class="topbar-logout-btn" onclick={handleLogout} title="Logout of GateQR">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span>Logout</span>
+        </button>
       </div>
     </div>
+
+    <!-- Page Body Slot -->
     {@render children()}
   </div>
+
+  <AdminSettingsModal open={settingsModalOpen} onclose={() => settingsModalOpen = false} />
 </main>
 
 <style>
   .app-shell {
     min-height: 100vh;
-    padding: var(--space-xl);
+    padding: 1.5rem 2rem;
     display: flex;
-    gap: var(--space-xl);
-    background: var(--bg-gradient);
+    gap: 1.75rem;
+    background: #f8fafc;
     align-items: flex-start;
   }
 
+  /* ─── Modern Dark Sidebar (Theme-Preserved) ─── */
   .sidebar {
-    width: 350px;
+    width: 290px;
     flex-shrink: 0;
-    background: var(--surface);
-    border-radius: var(--radius-xl);
-    padding: var(--space-lg);
+    background: linear-gradient(180deg, #10192e 0%, #0a1120 100%);
+    border-radius: 20px;
+    padding: 1.5rem 1.25rem;
     position: sticky;
-    top: var(--space-xl);
+    top: 1.5rem;
     align-self: flex-start;
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    box-shadow: var(--shadow-xl);
-    border: 1px solid var(--border-light);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    min-height: calc(100vh - 3rem);
+    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     z-index: 40;
+    box-sizing: border-box;
   }
 
-
-
+  /* Brand Header */
   .sidebar-brand {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) 0 var(--space-md) 0;
+    gap: 0.85rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .brand-logo {
-    width: 52px;
-    height: 52px;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
   }
 
   .brand-logo img {
@@ -374,475 +611,625 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
+  }
+
+  .brand-top-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
   }
 
   .brand-name {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     font-weight: 800;
-    color: var(--maroon);
+    color: #ffffff;
     letter-spacing: -0.01em;
+  }
+
+  .brand-tag {
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    background: #E9C25E;
+    color: #3D0818;
+    padding: 1px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
   }
 
   .brand-sub {
     font-size: 0.7rem;
-    color: var(--text-secondary);
-    font-weight: 600;
+    color: #94a3b8;
+    font-weight: 500;
     line-height: 1.2;
-    text-transform: uppercase;
   }
 
-  .sidebar-user {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    background: var(--maroon-muted);
-    border: 1px solid var(--maroon-tint);
-    border-radius: var(--radius-lg);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .sidebar-user:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
-  }
-
-  .user-avatar {
-    width: 50px;
-    height: 50px;
-    background: var(--gradient-maroon);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    box-shadow: var(--shadow-gold-sm);
-    border: 2px solid white;
-    font-weight: 700;
-    font-size: 1rem;
-  }
-
-  .user-info {
+  /* Navigation Tree */
+  .sidebar-menu-wrapper {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
-    min-width: 0;
+    margin-top: 1.5rem;
   }
 
-  .user-email {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .user-role {
+  .sidebar-menu-heading {
     font-size: 0.75rem;
-    color: var(--text-secondary);
-    font-weight: 500;
+    font-weight: 800;
+    color: #f1f5f9;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.09em;
+    margin-bottom: 0.85rem;
+    padding-left: 0.5rem;
+    opacity: 0.95;
   }
 
-  .logout-btn {
-    width: 40px;
-    height: 40px;
-    background: var(--surface);
-    border: 2px solid var(--border);
-    border-radius: var(--radius-md);
+  .sidebar-nav-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  /* Base Menu Button */
+  .menu-item-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 0.95rem;
+    border-radius: 12px;
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    font-size: 0.925rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    text-align: left;
+  }
+
+  .menu-item-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+
+  /* Dashboard / Active Button - Gold theme */
+  .menu-item-btn.active {
+    background: linear-gradient(135deg, #F0CF72 0%, #D4A62A 100%);
+    color: #3D0818;
+    font-weight: 800;
+    box-shadow: 0 4px 14px rgba(212, 166, 42, 0.4);
+  }
+
+  .menu-item-btn.active .menu-item-icon {
+    color: #3D0818;
+    opacity: 1;
+  }
+
+  .menu-item-btn.active-parent {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+    font-weight: 700;
+  }
+
+  .menu-item-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--maroon);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    opacity: 0.95;
   }
 
-  .logout-btn:hover {
-    background: var(--maroon);
-    color: #fff;
-    border-color: var(--maroon);
-    transform: translateY(-2px) rotate(180deg);
-    box-shadow: var(--shadow-gold-md);
+  .menu-item-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .sidebar-divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent 0%, var(--border) 50%, transparent 100%);
-    margin: var(--space-sm) 0;
+  .dropdown-toggle {
+    justify-content: space-between;
   }
 
-  .sidebar-header {
-    margin-bottom: var(--space-sm);
+  .dropdown-chevron {
+    display: flex;
+    align-items: center;
+    transition: transform 0.25s ease;
+    opacity: 0.85;
   }
 
-  .sidebar-header h3 {
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--maroon);
-    margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+  .dropdown-chevron.rotated {
+    transform: rotate(180deg);
+    opacity: 1;
   }
 
-  .sidebar-nav {
+  /* Submenu Dropdown Container - with hierarchy line indicators */
+  .submenu-container {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    padding: 0.45rem 0 0.5rem 1.25rem;
+    margin-left: 1.15rem;
+    border-left: 2px solid rgba(233, 194, 94, 0.45);
+    position: relative;
   }
 
-  .sidebar-link {
+  .submenu-link {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    background: var(--surface);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
+    padding: 0.6rem 0.95rem;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #ffffff;
     text-decoration: none;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    min-height: 64px;
-    position: relative;
-    overflow: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(255, 255, 255, 0.05);
   }
 
-  .sidebar-link::before {
+  /* Branch indicator line showing this tab is from the dropdown */
+  .submenu-link::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 4px;
-    height: 100%;
-    background: var(--gradient-gold);
-    transform: scaleY(0);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    left: -1.25rem;
+    top: 50%;
+    width: 0.95rem;
+    height: 2px;
+    background: rgba(233, 194, 94, 0.45);
+    transform: translateY(-50%);
+    transition: all 0.2s ease;
   }
 
-  .sidebar-link:hover, .sidebar-link.active {
-    border-color: var(--gold);
+  .submenu-link:hover::before {
+    background: #F0CF72;
+    width: 1.25rem;
+  }
+
+  .submenu-link.active::before {
+    background: #F0CF72;
+    width: 1.25rem;
+  }
+
+  .submenu-link:hover {
+    color: #ffffff;
+    background: rgba(233, 194, 94, 0.25);
     transform: translateX(4px);
-    box-shadow: var(--shadow-gold-sm);
   }
 
-  .sidebar-link:hover::before, .sidebar-link.active::before {
-    transform: scaleY(1);
+  .submenu-link.active {
+    color: #3D0818;
+    font-weight: 800;
+    background: linear-gradient(135deg, #F0CF72 0%, #D4A62A 100%);
+    box-shadow: 0 3px 12px rgba(212, 166, 42, 0.4);
   }
 
-  .sidebar-icon {
-    width: 46px;
-    height: 46px;
-    background: var(--maroon-muted);
-    border: 1px solid var(--maroon-tint);
-    border-radius: var(--radius-md);
+  .submenu-text {
+    display: block;
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  /* Bottom Logout Pill */
+  .sidebar-bottom-action {
+    margin-top: auto;
+    padding-top: 1.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .sidebar-user-brief {
+    padding-left: 0.25rem;
+  }
+
+  .brief-role {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.02em;
+  }
+
+  .bottom-logout-pill {
+    width: 100%;
+    padding: 0.65rem 1rem;
+    border-radius: 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1.5px solid #ef4444;
+    color: #ef4444;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+  }
+
+  .bottom-logout-pill:hover {
+    background: #ef4444;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+  }
+
+  /* ─── Main Shell Content Area ─── */
+  .shell-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  /* ─── Topbar Header ─── */
+  .content-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.35rem 0;
+  }
+
+  .header-left-meta {
+    display: flex;
+    align-items: center;
+  }
+
+  .meta-system-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.4rem 0.85rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  }
+
+  .badge-mini-logo {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+  }
+
+  .meta-title {
+    font-size: 0.875rem;
+    font-weight: 800;
+    color: #7A1734;
+  }
+
+  .meta-sep {
+    color: #cbd5e1;
+    font-size: 0.75rem;
+  }
+
+  .meta-sub {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #64748b;
+  }
+
+  .header-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  /* Topbar Notification Bell Button (Matching Screenshot 1) */
+  .notification-wrapper {
+    position: relative;
+  }
+
+  .topbar-bell-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #edf2f7;
+    border: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--maroon);
-    flex-shrink: 0;
-    transition: all 0.3s;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
   }
 
-  .sidebar-link:hover .sidebar-icon, .sidebar-link.active .sidebar-icon {
-    background: var(--gradient-gold);
-    color: var(--text-primary);
-    border-color: var(--gold);
-    transform: scale(1.05);
+  .topbar-bell-btn:hover {
+    background: #e2e8f0;
+    transform: translateY(-1px);
   }
 
-  .sidebar-content {
+  .bell-svg {
+    color: #f59e0b; /* Amber / gold bell */
+  }
+
+  .notification-counter-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 800;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 5px rgba(239, 68, 68, 0.4);
+  }
+
+  /* Notification Flyout Card (Matching Screenshot 2) */
+  .notification-flyout-card {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 380px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    overflow: hidden;
+  }
+
+  .flyout-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .flyout-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .flyout-mark-btn {
+    background: transparent;
+    border: none;
+    color: #8B1A3C;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+    padding: 0;
+  }
+
+  .flyout-mark-btn:hover {
+    text-decoration: underline;
+    opacity: 0.85;
+  }
+
+  .flyout-scroll-body {
+    max-height: 380px;
+    overflow-y: auto;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  /* Maroon-accented notification item cards */
+  .flyout-item-card {
+    background: #f8fafc;
+    border-radius: 10px;
+    border-left: 4px solid #8B1A3C;
+    padding: 0.75rem 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.65rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  }
+
+  .flyout-item-card:hover {
+    background: #fdf2f4;
+    transform: translateX(2px);
+  }
+
+  .flyout-item-card.item-unread {
+    background: #ffffff;
+    box-shadow: 0 2px 6px rgba(139, 26, 60, 0.08);
+  }
+
+  .item-text-body {
     flex: 1;
     min-width: 0;
   }
 
-  .sidebar-label {
+  .item-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .item-type-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    background: #fdf2f4;
+    color: #8B1A3C;
+    border: 1px solid #fecdd3;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: capitalize;
+  }
+
+  .item-time {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .item-message {
+    font-size: 0.825rem;
+    font-weight: 600;
+    color: #1e293b;
+    line-height: 1.4;
+    margin: 0 0 0.35rem 0;
+    word-break: break-word;
+  }
+
+  .item-actor {
+    display: block;
+    font-size: 0.68rem;
+    color: #64748b;
+    margin-top: 2px;
+  }
+
+  .unread-indicator-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #8B1A3C;
+    flex-shrink: 0;
+    margin-top: 5px;
+    box-shadow: 0 0 6px rgba(139, 26, 60, 0.6);
+  }
+
+  .flyout-empty-state {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: #94a3b8;
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 2px;
-    transition: color 0.3s;
   }
 
-  .sidebar-link:hover .sidebar-label, .sidebar-link.active .sidebar-label {
-    color: var(--maroon);
+  /* Topbar User Profile Pill (Matching Screenshot 1) */
+  .topbar-profile-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.35rem 0.85rem 0.35rem 0.45rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
   }
 
-  .sidebar-desc {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    line-height: 1.3;
+  .profile-avatar-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    color: #E9C25E;
+    border: 1.5px solid rgba(233, 194, 94, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
   }
 
-  .shell-content {
-    flex: 1;
-    max-width: 1200px;
-    margin: 0 auto;
+  .profile-info-block {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    line-height: 1.2;
   }
 
-  .content-header {
-    display: flex;
-    justify-content: flex-end;
+  .profile-name {
+    font-size: 0.825rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .profile-role-sub {
+    font-size: 0.7rem;
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  /* Topbar Logout Button & Action Pills */
+  .topbar-logout-btn {
+    display: inline-flex;
     align-items: center;
-    padding: var(--space-sm) 0;
+    gap: 0.45rem;
+    padding: 0.45rem 0.95rem;
+    background: #ffffff;
+    border: 1.5px solid #fecaca;
+    color: #ef4444;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.08);
+  }
+
+  .topbar-logout-btn:hover {
+    background: #ef4444;
+    color: #ffffff;
+    border-color: #ef4444;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.28);
+    transform: translateY(-1px);
+  }
+
+  .topbar-action-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  }
+
+  .topbar-action-pill:hover {
+    background: #f8fafc;
+    color: #0f172a;
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+  }
+
+  .complaints-pill {
+    color: #7A1734;
+    border-color: #fed7aa;
+    background: #fffaf0;
+  }
+
+  .complaints-pill:hover {
+    background: #feebc8;
+    color: #7A1734;
+    border-color: #fbd38d;
   }
 
   @media (max-width: 1024px) {
     .app-shell {
       flex-direction: column;
-      padding: var(--space-lg);
+      padding: 1rem;
     }
 
     .sidebar {
       width: 100%;
       position: static;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .app-shell {
-      padding: var(--space-md);
-      gap: var(--space-md);
-    }
-  }
-
-  @media (max-width: 768px) {
-    .sidebar-brand {
-      padding: var(--space-sm);
+      min-height: auto;
     }
 
-    .brand-logo {
-      width: 44px;
-      height: 44px;
+    .notification-flyout-card {
+      width: min(360px, calc(100vw - 2rem));
     }
-
-    .brand-name {
-      font-size: 1.25rem;
-    }
-
-    .sidebar-user {
-      padding: var(--space-sm);
-    }
-
-    .user-avatar {
-      width: 40px;
-      height: 40px;
-      font-size: 0.9rem;
-    }
-
-    .sidebar-link {
-      padding: var(--space-sm);
-      min-height: 56px;
-    }
-
-    .sidebar-icon {
-      width: 36px;
-      height: 36px;
-    }
-
-    .notification-dropdown {
-      width: min(340px, calc(100vw - 2rem));
-      right: 0;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .notification-dropdown {
-      width: calc(100vw - 2rem);
-      right: 50%;
-      transform: translateX(50%);
-      position: fixed;
-      top: auto;
-    }
-  }
-
-  /* Notification styles */
-  .notification-wrapper {
-    position: relative;
-  }
-
-  .notification-btn {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-sm);
-    background: var(--gradient-maroon);
-    border: 2px solid var(--maroon-tint);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    color: #fff;
-    box-shadow: var(--shadow-gold-sm);
-  }
-
-  .notification-btn:hover {
-    background: var(--gradient-gold);
-    border-color: var(--gold);
-    color: var(--text-primary);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-gold-md);
-  }
-
-  .notification-badge {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    background: var(--gradient-gold);
-    color: var(--text-primary);
-    font-size: 0.7rem;
-    font-weight: 700;
-    min-width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2px solid white;
-    box-shadow: var(--shadow-sm);
-  }
-
-  .notification-dropdown {
-    position: absolute;
-    top: calc(100% + 12px);
-    right: 0;
-    width: 380px;
-    max-height: 480px;
-    background: var(--surface);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-2xl);
-    z-index: 1000;
-    overflow: hidden;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-  }
-
-  .notification-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--border-light);
-    background: var(--maroon-muted);
-  }
-
-  .notification-title {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: var(--maroon);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .mark-all-read-btn {
-    background: var(--surface);
-    border: 1px solid var(--maroon-tint);
-    color: var(--maroon);
-    font-size: 0.75rem;
-    font-weight: 600;
-    cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-    transition: all 0.2s;
-  }
-
-  .mark-all-read-btn:hover {
-    background: var(--maroon);
-    color: white;
-    border-color: var(--maroon);
-  }
-
-  .notification-list {
-    max-height: 420px;
-    overflow-y: auto;
-  }
-
-  .notification-item {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--border-light);
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-  }
-
-  .notification-item:hover {
-    background: var(--maroon-muted);
-    transform: translateX(-2px);
-  }
-
-  .notification-item.unread {
-    background: var(--gold-muted);
-    border-left: 3px solid var(--gold);
-  }
-
-  .notification-content {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .notification-message {
-    font-size: 0.85rem;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-xs) 0;
-    line-height: 1.5;
-    font-weight: 500;
-  }
-
-  .notification-details {
-    display: flex;
-    gap: var(--space-sm);
-    margin-bottom: var(--space-xs);
-    flex-wrap: wrap;
-  }
-
-  .notification-type {
-    font-size: 0.7rem;
-    color: var(--maroon);
-    background: var(--maroon-muted);
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-xs);
-    font-weight: 600;
-    border: 1px solid var(--maroon-tint);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .notification-email {
-    font-size: 0.7rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .notification-time {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-weight: 500;
-  }
-
-  .notification-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--gradient-gold);
-    border-radius: 50%;
-    flex-shrink: 0;
-    margin-left: var(--space-sm);
-    box-shadow: 0 0 0 2px var(--gold-muted);
-  }
-
-  .notification-loading,
-  .notification-empty {
-    padding: var(--space-2xl) var(--space-lg);
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    font-weight: 500;
   }
 </style>

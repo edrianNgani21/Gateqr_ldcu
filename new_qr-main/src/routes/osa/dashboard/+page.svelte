@@ -2,28 +2,17 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
-    import { supabaseClient } from '$lib/supabaseClient';
+    import { startLiveSync } from '$lib/utils/liveSync';
 
     let { data } = $props();
 
-    // Realtime live subscription for automatic instant updates
+    // Dual-engine live sync for automatic instant updates without page refresh
     $effect(() => {
-        const channel = supabaseClient
-            .channel('osa-dashboard-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
-                invalidateAll();
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'department' }, () => {
-                invalidateAll();
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
-                invalidateAll();
-            })
-            .subscribe();
-
-        return () => {
-            supabaseClient.removeChannel(channel);
-        };
+        return startLiveSync({
+            channelName: 'osa-dashboard-realtime',
+            tables: ['registration', 'department', 'change_vehicle_requests'],
+            intervalMs: 5000
+        });
     });
 
     const navLinks = [
@@ -130,7 +119,18 @@
     <NavBar title="Office of Student Affairs Dashboard" />
     
     <div class="dashboard-container">
-
+        <!-- Welcome Banner matching Dashboard Aesthetic -->
+        <div class="welcome-banner">
+            <div class="wb-content">
+                <h1 class="wb-title">Welcome back, Admin!</h1>
+                <p class="wb-sub">Here's what's happening with GateQR vehicle sticker operations today.</p>
+            </div>
+            <div class="wb-icon-shield">
+                <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </div>
+        </div>
 
         <!-- Application Form Control -->
         <div class="form-control-bar" class:is-closed={!formOpen}>
@@ -236,7 +236,50 @@
         margin: 0 auto;
     }
 
+    /* Welcome Banner matching Dashboard aesthetic */
+    .welcome-banner {
+        background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+        border-radius: 18px;
+        padding: 1.75rem 2.25rem;
+        color: #ffffff;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+        border: 1px solid rgba(233, 194, 94, 0.25);
+        margin-bottom: 1.5rem;
+        position: relative;
+        overflow: hidden;
+    }
 
+    .wb-content {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        z-index: 1;
+    }
+
+    .wb-title {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: #E9C25E;
+        margin: 0;
+        letter-spacing: -0.01em;
+    }
+
+    .wb-sub {
+        font-size: 0.9rem;
+        color: #F5D5DE;
+        margin: 0;
+        font-weight: 500;
+    }
+
+    .wb-icon-shield {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.85;
+    }
 
     /* Application form open/close control */
     .form-control-bar {
@@ -246,8 +289,8 @@
         gap: var(--space-md);
         padding: var(--space-md) var(--space-lg);
         margin-bottom: var(--space-lg);
-        background: #ECFDF5;
-        border: 1.5px solid #A7F3D0;
+        background: #fffdf5;
+        border: 1.5px solid #fde68a;
         border-radius: var(--radius-lg);
     }
 
@@ -266,8 +309,8 @@
         width: 12px;
         height: 12px;
         border-radius: 50%;
-        background: #059669;
-        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.2);
+        background: #D4A62A;
+        box-shadow: 0 0 0 4px rgba(212, 166, 42, 0.2);
         flex-shrink: 0;
     }
 
@@ -301,8 +344,8 @@
         font-weight: 700;
         font-family: inherit;
         cursor: pointer;
-        color: #fff;
-        background: #059669;
+        color: #3D0818;
+        background: linear-gradient(135deg, #F0CF72, #D4A62A);
         white-space: nowrap;
         transition: opacity 0.2s, transform 0.2s;
     }

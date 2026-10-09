@@ -1,6 +1,9 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
+import bcrypt from 'bcryptjs';
+
+const PRIMARY_OSA_EMAIL = 'aluban98304@liceo.edu.ph';
 
 async function createNotification(
     userId: number,
@@ -33,30 +36,75 @@ async function createNotification(
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     try {
-        const { email, user_type, identification } = await request.json();
+        if (!locals.user || locals.user.role !== 'osa') {
+            return json({ error: 'Unauthorized. OSA Admin privileges required.' }, { status: 401 });
+        }
+
+        const callerEmail = (locals.user.email || '').trim().toLowerCase();
+
+        // Restriction: Only aluban98304@liceo.edu.ph can add admins
+        if (callerEmail !== PRIMARY_OSA_EMAIL.toLowerCase()) {
+            return json({
+                error: `Permission denied. Only the primary OSA administrator (${PRIMARY_OSA_EMAIL}) is authorized to add new admin accounts.`
+            }, { status: 403 });
+        }
+
+        const { email, user_type, identification, password, pin } = await request.json();
 
         if (!email || !user_type || !identification) {
             return json({ error: 'Missing required fields' }, { status: 400 });
+        }
+
+        if (!password || typeof password !== 'string' || password.trim().length < 6) {
+            return json({ error: 'Password is required and must be at least 6 characters' }, { status: 400 });
+        }
+
+        // 4-Digit PIN Verification Check
+        const { data: requester, error: requesterError } = await supabase
+            .from('user')
+            .select('user_id, email, security_pin_hash')
+            .eq('user_id', locals.user.user_id)
+            .single();
+
+        if (requesterError || !requester) {
+            return json({ error: 'Failed to verify admin credentials' }, { status: 500 });
+        }
+
+        if (!requester.security_pin_hash) {
+            return json({
+                error: 'You must set up your 4-digit security PIN in Admin Settings before you can add new admin accounts.'
+            }, { status: 400 });
+        }
+
+        if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin.trim())) {
+            return json({ error: 'Please enter your 4-digit security PIN to authorize adding an admin' }, { status: 400 });
+        }
+
+        if (!bcrypt.compareSync(pin.trim(), requester.security_pin_hash)) {
+            return json({ error: 'Incorrect 4-digit security PIN. Authorization denied.' }, { status: 401 });
         }
 
         // Check if user already exists
         const { data: existingUser } = await supabase
             .from('user')
             .select('email')
-            .eq('email', email)
+            .eq('email', email.trim().toLowerCase())
             .single();
 
         if (existingUser) {
             return json({ error: 'User with this email already exists' }, { status: 400 });
         }
 
-        // Create new admin user
+        const password_hash = bcrypt.hashSync(password.trim(), 10);
+
+        // Create new admin user with password_hash
         const { data: newUser, error: createError } = await supabase
             .from('user')
             .insert({
-                email,
+                email: email.trim().toLowerCase(),
                 user_type,
                 identification,
+                password_hash,
                 is_active: true
             })
             .select('user_id, email, user_type')
@@ -64,21 +112,38 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (createError) throw createError;
 
-        // Create notification for the new admin
+        // Create notification for OSA admin and the new admin
         if (newUser) {
             const actorId = locals.user?.user_id;
-            await createNotification(
-                newUser.user_id,
-                'admin_created',
-                'Admin added successfully!',
-                actorId,
-                'create_admin',
-                'user',
-                newUser.user_id,
-                newUser.user_id,
-                { user_type }
-            );
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'admin_created',
+                    'Admin added successfully.',
+                    actorId,
+                    'create_admin',
+                    'user',
+                    newUser.user_id,
+                    newUser.user_id,
+                    { user_type }
+                );
+            }
+            if (newUser.user_id !== actorId) {
+                await createNotification(
+                    newUser.user_id,
+                    'admin_created',
+                    'Admin added successfully.',
+                    actorId,
+                    'create_admin',
+                    'user',
+                    newUser.user_id,
+                    newUser.user_id,
+                    { user_type }
+                );
+            }
         }
+
+        console.log(`[Admin] New ${user_type} created (${newUser.email}) by primary admin ${callerEmail}`);
 
         return json({ 
             message: 'Admin created successfully',
@@ -90,7 +155,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 };
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: users, error } = await supabase
             .from('user')
@@ -100,7 +165,13 @@ export const GET: RequestHandler = async () => {
 
         if (error) throw error;
 
-        return json({ users: users || [] });
+        const callerEmail = (locals.user?.email || '').trim().toLowerCase();
+        const isPrimaryAdmin = callerEmail === PRIMARY_OSA_EMAIL.toLowerCase();
+
+        return json({ 
+            users: users || [],
+            isPrimaryAdmin
+        });
     } catch (error) {
         console.error('Error fetching admins:', error);
         return json({ error: 'Failed to fetch admins' }, { status: 500 });
@@ -109,6 +180,17 @@ export const GET: RequestHandler = async () => {
 
 export const PATCH: RequestHandler = async ({ request, locals }) => {
     try {
+        if (!locals.user || locals.user.role !== 'osa') {
+            return json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const callerEmail = (locals.user.email || '').trim().toLowerCase();
+        if (callerEmail !== PRIMARY_OSA_EMAIL.toLowerCase()) {
+            return json({
+                error: `Permission denied. Only the primary OSA administrator (${PRIMARY_OSA_EMAIL}) can modify admin accounts.`
+            }, { status: 403 });
+        }
+
         const { user_id, is_active } = await request.json();
 
         if (!user_id || typeof is_active !== 'boolean') {
@@ -152,6 +234,17 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
     try {
+        if (!locals.user || locals.user.role !== 'osa') {
+            return json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const callerEmail = (locals.user.email || '').trim().toLowerCase();
+        if (callerEmail !== PRIMARY_OSA_EMAIL.toLowerCase()) {
+            return json({
+                error: `Permission denied. Only the primary OSA administrator (${PRIMARY_OSA_EMAIL}) can delete admin accounts.`
+            }, { status: 403 });
+        }
+
         const { user_id } = await request.json();
 
         if (!user_id) {

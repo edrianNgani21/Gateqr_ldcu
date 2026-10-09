@@ -18,9 +18,10 @@
 		"@tailwindcss/forms": "^0.5.11",
 		"@tailwindcss/typography": "^0.5.19",
 		"@tailwindcss/vite": "^4.2.2",
+		"@types/bcryptjs": "^2.4.6",
 		"@types/cookie": "^0.6.0",
 		"@types/jsonwebtoken": "^9.0.10",
-		"@types/nodemailer": "^8.0.1",
+		"@types/nodemailer": "^8.0.2",
 		"@types/qrcode": "^1.5.6",
 		"svelte": "^5.55.2",
 		"svelte-check": "^4.4.6",
@@ -31,10 +32,14 @@
 	"dependencies": {
 		"@napi-rs/canvas": "^1.0.10",
 		"@supabase/supabase-js": "^2.116.0",
+		"@types/three": "^0.186.0",
+		"bcryptjs": "^3.0.3",
 		"cookie": "^0.6.0",
 		"dotenv": "^17.4.2",
 		"jsonwebtoken": "^9.0.3",
-		"nodemailer": "^9.0.1",
-		"qrcode": "^1.5.4"
+		"nodemailer": "^10.0.16",
+		"qrcode": "^1.5.4",
+		"resend": "^6.32.1",
+		"three": "^0.186.1"
 	}
 }

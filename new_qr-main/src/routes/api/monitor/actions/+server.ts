@@ -63,13 +63,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (action === 'security_check') {
             updateData = { security_checked_at: new Date().toISOString() };
             notifType = 'security_checked';
-            notifMessage = 'Your application has been reviewed by Safety and Security. Proceed to OSA for sticker release.';
-            emailSubject = 'Application Update: Security Check Approved';
+            notifMessage = 'Campus Security has inspected and verified your vehicle documents. Please proceed to OSA for sticker release.';
+            emailSubject = 'Application Update: Security Documents Verified';
         } else if (action === 'install_sticker') {
             updateData = { sticker_installed_at: new Date().toISOString() };
             notifType = 'sticker_installed';
-            notifMessage = 'Your sticker has been successfully installed. Registration is now fully complete.';
-            emailSubject = 'Application Update: Sticker Installed & Registration Complete';
+            notifMessage = 'Campus Security has successfully installed your vehicle RFID sticker. Congratulations! You have completed the vehicle registration process and your vehicle is now officially registered.';
+            emailSubject = 'Application Update: RFID Sticker Installed & Registration Complete';
         } else {
             return json({ error: 'Invalid action' }, { status: 400 });
         }
@@ -101,6 +101,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (targetEmail) {
                 await sendEmail(targetEmail, emailSubject, notifMessage);
             }
+        }
+
+        // Notify Security officer
+        if (locals.user?.user_id) {
+            const officerMsg = action === 'security_check'
+                ? `Successfully verified vehicle documents for ${(reg.users as any)?.email || 'applicant'}.`
+                : `Successfully installed RFID sticker for ${(reg.users as any)?.email || 'applicant'}. Registration finalized.`;
+            await createNotification(
+                locals.user.user_id,
+                notifType,
+                officerMsg,
+                locals.user.user_id,
+                action,
+                'registration',
+                vehicle_id,
+                vehicle_id
+            );
         }
 
         return json({ success: true });

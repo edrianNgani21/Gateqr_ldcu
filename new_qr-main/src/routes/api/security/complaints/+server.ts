@@ -76,16 +76,59 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User not found' }, { status: 404 });
         }
 
-        const { error: insertError } = await supabase
+        const { data: newComplaint, error: insertError } = await supabase
             .from('complaint')
             .insert([{
                 user_id: userData.user_id,
                 message: message.trim()
-            }]);
+            }])
+            .select('complaint_id')
+            .single();
 
         if (insertError) throw insertError;
 
-        // Notify Security
+        // Notify complainant (applicant)
+        try {
+            await supabase.from('notifications').insert({
+                user_id: userData.user_id,
+                notification_type: 'complaint_submitted',
+                message: 'Your complaint has been submitted successfully to Safety & Security.',
+                actor_id: userData.user_id,
+                action_type: 'create_complaint',
+                target_entity_type: 'complaint',
+                target_entity_id: newComplaint?.complaint_id,
+                is_read: false
+            });
+        } catch (notifErr) {
+            console.error('Failed to notify complainant:', notifErr);
+        }
+
+        // Notify Security staff
+        try {
+            const { data: secUsers } = await supabase
+                .from('user')
+                .select('user_id')
+                .eq('user_type', 'Safety Security');
+
+            if (secUsers && secUsers.length > 0) {
+                const complaintSnippet = message.trim().slice(0, 70) + (message.trim().length > 70 ? '...' : '');
+                const secNotifs = secUsers.map(u => ({
+                    user_id: u.user_id,
+                    notification_type: 'new_complaint',
+                    message: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
+                    actor_id: userData.user_id,
+                    action_type: 'new_complaint',
+                    target_entity_type: 'complaint',
+                    target_entity_id: newComplaint?.complaint_id,
+                    is_read: false
+                }));
+                await supabase.from('notifications').insert(secNotifs);
+            }
+        } catch (secNotifErr) {
+            console.error('Failed to notify security staff:', secNotifErr);
+        }
+
+        // Notify Security via email
         await sendEmail(
             env.SECURITY_EMAIL as string,
             'New Complaint Received',

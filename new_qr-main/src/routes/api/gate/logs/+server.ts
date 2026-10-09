@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
 
         const tomorrow = new Date(new Date(dateFilter).getTime() + 86400000).toISOString().split('T')[0];
 
-        // ── Registered entries ──────────────────────────────────────────────
+        // ── Registered, Guest, & VIP entries ────────────────────────────────
         let regRows: any[] = [];
         let query = supabase
             .from('vehicle_log')
@@ -37,9 +37,11 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                 vehicle_log_id,
                 vehicle_information:vehicle_information_id(plate_number),
                 registration:registration_id(first_name, last_name, role, campus),
+                guest_log:guest_log(plate_number, id_number, purpose),
                 check_in,
                 check_out,
                 logged_status,
+                is_vip,
                 campus,
                 created_at
             `)
@@ -54,9 +56,11 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                     vehicle_log_id,
                     vehicle_information:vehicle_information_id(plate_number),
                     registration:registration_id(first_name, last_name, role, campus),
+                    guest_log:guest_log(plate_number, id_number, purpose),
                     check_in,
                     check_out,
                     logged_status,
+                    is_vip,
                     campus,
                     created_at
                 `)
@@ -66,59 +70,79 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         }
 
         if (data) {
-            regRows = data.map(row => ({
-                ...row,
-                log_type: 'registered'
-            }));
+            regRows = data;
         }
-
-        // ── Guest entries ────────────────────────────────────────────────────
-        let guestRows: any[] = [];
-        let vipRows: any[] = [];
 
         // ── Process logs ─────────────────────────────────────────────────────
         const logs: any[] = [];
+        const normalizedRolesFilter = rolesFilter.map(r => r.toLowerCase().trim());
 
         regRows.forEach(row => {
             const inDate = new Date(row.check_in || row.created_at || Date.now());
-            const hasCheckout = row.check_out !== null;
-            
-            const role = row.registration?.role || 'visitor';
-            const campus = row.campus || row.registration?.campus || '';
+            const hasCheckout = row.check_out !== null && String(row.check_out).trim() !== '' && String(row.check_out).trim() !== 'null';
+            const isInside = !hasCheckout && String(row.logged_status || '').toLowerCase() !== 'exited' && String(row.logged_status || '').toLowerCase() !== 'out';
+            const statusDisplay = isInside ? 'INSIDE CAMPUS' : 'EXITED';
 
-            // Normalize campus names so "Main", "Main Campus" and "Liceo Main" all match
-            const normCampus = (c: string) => {
-                const v = (c || '').toLowerCase().trim();
-                if (v.includes('rnp')) return 'rnp';
-                if (v.includes('paseo')) return 'paseo';
-                if (v.includes('main') || v.includes('liceo')) return 'main';
-                return v;
-            };
+            const st = String(row.logged_status || '').toLowerCase();
+            const guestRecord = Array.isArray(row.guest_log) ? row.guest_log[0] : row.guest_log;
+            const isVip = Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
+            const isGuest = Boolean(guestRecord) || st === 'guest' || st.includes('guest');
 
-            if (rolesFilter.length > 0 && !rolesFilter.includes(role)) return;
-            if (campusFilter && campusFilter !== 'all' && campusFilter !== '') {
-                if (normCampus(campus) !== normCampus(campusFilter)) return;
+            let role = row.registration?.role ? (row.registration.role.charAt(0).toUpperCase() + row.registration.role.slice(1)) : 'Driver';
+            let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || 'Driver';
+            let plate = row.vehicle_information?.plate_number || 'No Plate';
+
+            if (isVip) {
+                role = 'VIP';
+                driverName = 'VIP Access';
+                plate = 'VIP';
+            } else if (isGuest) {
+                role = 'Guest';
+                if (guestRecord) {
+                    driverName = guestRecord.purpose ? `Guest (${guestRecord.purpose})` : (guestRecord.id_number ? `Guest (ID: ${guestRecord.id_number})` : 'Guest');
+                    plate = guestRecord.plate_number || 'Guest Vehicle';
+                } else {
+                    driverName = 'Guest';
+                    plate = 'Guest Vehicle';
+                }
             }
 
-            let displayCampus = campus;
-            if (normCampus(campus) === 'rnp') displayCampus = 'RNP';
-            else if (normCampus(campus) === 'paseo') displayCampus = 'PASEO';
-            else if (normCampus(campus) === 'main') displayCampus = 'Main Campus';
+            // Role filter check
+            if (normalizedRolesFilter.length > 0 && !normalizedRolesFilter.includes(role.toLowerCase())) {
+                return;
+            }
 
-            // Apply bound filter
+            // Campus filter check: only show logs for the specific campus
+            if (campusFilter && campusFilter.trim() !== '') {
+                const cf = campusFilter.toLowerCase().trim();
+                const targetCampus = cf.includes('main') ? 'main' : (cf.includes('rnp') ? 'rnp' : (cf.includes('paseo') ? 'paseo' : cf));
+                const rowCampus = (row.campus || row.registration?.campus || '').toLowerCase().trim();
+                const matchesCampus = targetCampus === 'main'
+                    ? (rowCampus.includes('main') || rowCampus === '')
+                    : rowCampus.includes(targetCampus);
+
+                if (!matchesCampus) {
+                    return;
+                }
+            }
+
+            // Apply bound filter: 'in' = Entry only (inside campus), 'out' = Exit only (exited)
             if (boundFilter === 'all' || 
-                (boundFilter === 'in' && !hasCheckout) || 
-                (boundFilter === 'out' && hasCheckout)) {
+                (boundFilter === 'in' && isInside) || 
+                (boundFilter === 'out' && !isInside)) {
+                const displayCampus = row.campus || row.registration?.campus || 'Main Campus';
                 logs.push({
                     vehicle_log_id: row.vehicle_log_id,
-                    plate: row.vehicle_information?.plate_number || 'No Plate',
-                    driver_name: `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || 'Guest',
+                    plate: plate,
+                    driver_name: driverName,
                     role: role,
+                    is_vip: isVip,
+                    is_guest: isGuest,
                     campus: displayCampus || 'Main Campus',
-                    bound: hasCheckout ? 'out' : 'in',
+                    bound: isInside ? 'in' : 'out',
                     check_in: row.check_in,
                     check_out: row.check_out,
-                    logged_status: row.logged_status,
+                    logged_status: statusDisplay,
                     created_at: row.created_at,
                     timestamp: inDate.getTime()
                 });

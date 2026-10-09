@@ -1,42 +1,47 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
-    import TabBar from '$lib/components/TabBar.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import ActionBar from '$lib/components/ActionBar.svelte';
     import { invalidateAll } from '$app/navigation';
     import { supabaseClient } from '$lib/supabaseClient';
 
+    import { startLiveSync } from '$lib/utils/liveSync';
+
+    import { page } from '$app/stores';
+
     let { data } = $props();
     let apps = $derived((data.applications as any[]) || []);
 
-    // Realtime live subscription for instant automatic updates without manual refresh
+    // Dual-engine live sync for instant automatic updates without manual refresh
     $effect(() => {
-        const channel = supabaseClient
-            .channel('osa-applications-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
-                invalidateAll();
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
-                invalidateAll();
-            })
-            .subscribe();
-
-        return () => {
-            supabaseClient.removeChannel(channel);
-        };
+        return startLiveSync({
+            channelName: 'osa-applications-realtime',
+            tables: ['registration', 'change_vehicle_requests', 'department'],
+            intervalMs: 5000
+        });
     });
 
     let tab = $state('validation');
     const tabs = ['validation', 'distribution', 'overdue', 'release', 'registered', 'revoked'];
     const tabLabels: Record<string, string> = {
-        'validation':   'Accept and Schedule Application',
-        'distribution': 'Hardcopy Compliance Schedules',
-        'overdue':      'Overdue Schedule',
+        'validation':   'Accept & Schedule Application',
+        'distribution': 'Application Schedules for Hardcopy Compliance',
+        'overdue':      'Overdue Application Schedules',
         'release':      'Sticker Release',
-        'registered':   'Registered',
-        'revoked':      'Revoked'
+        'registered':   'Registered Vehicle',
+        'revoked':      'Revoked Application'
     };
+
+    $effect(() => {
+        const urlTab = $page.url.searchParams.get('tab');
+        if (urlTab && tabs.includes(urlTab)) {
+            tab = urlTab;
+            selectedDistributionApp = null;
+            selectedScheduleDate = null;
+        }
+    });
+
     const navLinks = [
         { label: 'Applications', href: '/osa' },
         { label: 'Add Admin', href: '/osa/admin' },
@@ -357,18 +362,9 @@
 </svelte:head>
 
 <AppShell userEmail={data.userEmail} showSidebar={true}>
-  <NavBar title="Manage Application" />
+  <NavBar title={tabLabels[tab] || 'Manage Applications'} />
 
   <div class="applications-container">
-
-    <TabBar tabs={tabs.map(t => tabLabels[t] || t)} counts={tabs.map(t => tabCounts[t] || 0)} active={tabLabels[tab] || tab} onchange={(label) => { 
-      const found = tabs.find(t => tabLabels[t] === label); 
-      if (found) { 
-        tab = found; 
-        selectedDistributionApp = null; 
-        selectedScheduleDate = null;
-      } 
-    }} />
 
     {#if tab === 'overdue'}
       <div class="overdue-banner">

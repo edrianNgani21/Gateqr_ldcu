@@ -250,11 +250,22 @@
           <div class="detail-section" class:no-border={tab.toLowerCase() === 'revoked'}>
             <span class="section-label">QR Code</span>
             <div class="qr-body">
-              <img src={data.qr_code || 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=PENDING'} alt="QR" width="96" height="96" class="qr-img" />
+              {#if data.qr_code}
+                <button
+                  type="button"
+                  class="qr-preview-trigger"
+                  onclick={() => (showDocPopup = data.qr_code)}
+                  title="Click to view full size QR code"
+                >
+                  <img src={data.qr_code} alt="Vehicle QR Code" width="96" height="96" class="qr-img" />
+                </button>
+              {:else}
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=PENDING" alt="QR Pending" width="96" height="96" class="qr-img" />
+              {/if}
               <div class="qr-meta">
                 <span class="qr-code-text">Code: {data.qr_unique_code || 'PENDING'}</span>
                 {#if data.qr_code}
-                  <a href={data.qr_code} download class="qr-download-btn">Download QR</a>
+                  <a href={data.qr_code} download={`gateqr-${data.qr_unique_code || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
                 {/if}
               </div>
             </div>
@@ -536,38 +547,64 @@
   .qr-body {
     display: flex;
     align-items: center;
-    gap: 0.875rem;
+    gap: 1rem;
+  }
+  .qr-preview-trigger {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    display: flex;
+    border-radius: 8px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .qr-preview-trigger:hover {
+    transform: scale(1.04);
   }
   .qr-img {
-    border-radius: 6px;
-    border: 1px solid var(--border);
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+    display: block;
   }
   .qr-meta {
     display: flex;
     flex-direction: column;
-    gap: 0.375rem;
+    gap: 0.5rem;
   }
   .qr-code-text {
     font-family: monospace;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 700;
     color: var(--maroon);
+    background: #f8fafc;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    width: fit-content;
   }
   .qr-download-btn {
-    display: inline-block;
-    font-size: 0.75rem;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.78rem;
+    font-weight: 700;
     color: var(--maroon);
     text-decoration: none;
-    padding: 0.25rem 0.625rem;
+    padding: 0.35rem 0.75rem;
     background: white;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    transition: background 0.15s, color 0.15s;
+    border: 1.5px solid var(--maroon);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    width: fit-content;
   }
   .qr-download-btn:hover {
     background: var(--maroon);
     color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(128, 0, 32, 0.25);
   }
 
   /* ─── Document Modal ─────────────────────────────────────────────────── */

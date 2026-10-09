@@ -25,6 +25,10 @@ def load_env():
     env_dict = {}
     try:
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        if not os.path.exists(env_path):
+            alt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "new_qr-main", ".env")
+            if os.path.exists(alt_path):
+                env_path = alt_path
         with open(env_path) as f:
             for line in f:
                 if line.strip() and not line.startswith("#"):
@@ -39,7 +43,7 @@ env_vars = load_env()
 SUPABASE_URL = env_vars.get("SUPABASE_URL", "https://nrrbkvtwnoqshtzliijq.supabase.co")
 SUPABASE_KEY = env_vars.get("SUPABASE_SERVICE_ROLE_KEY", env_vars.get("PRIVATE_SUPABASE_SERVICE_ROLE_KEY", ""))
 GATE_API_KEY = env_vars.get("PRIVATE_GATE_API_KEY", "replace-with-a-secure-random-gate-key")
-CAMERA_ZOOM = 2.0  # Adjust this to change digital zoom level (1.0 = no zoom, 2.0 = 2x zoom)
+CAMERA_ZOOM = 1.5  # 1.0 = normal full view, 1.5 = balanced zoom for clear QR resolution
 
 # Initialize Supabase client
 print("DEBUG: Startup - Initializing Supabase client...")
@@ -137,6 +141,7 @@ class GateState:
     API_ERROR = "API_ERROR"
     WARNING = "WARNING"
     TIMEOUT = "TIMEOUT"
+    PROLONG = "PROLONG"               # Permanent barrier open mode for rush / convoy
     MANUAL_TYPE = "MANUAL_TYPE"       # Ask: Registered or Guest?
     MANUAL_REG = "MANUAL_REG"         # Ask: Reg ID
     MANUAL_GUEST_IN = "MANUAL_GUEST_IN"   # Ask: Name, Plate, ID Number, Purpose
@@ -160,19 +165,26 @@ class SideState:
         self.anomaly_desc = ""
         self.logged_status = None
         self.vehicle_data = {} # Holds vehicle information from separate table
+        self.prolong_ready_time = 0.0 # Cooldown timer for PROLONG scans (5s delay)
+        self.scan_cooldown_end = 0.0  # Cooldown timer for Exit scanner (5s delay between scans)
         
         # Manual Form Data
         self.input_field = 0 # which field is active
         self.form_data = ["", "", ""] # e.g. [plate, id_number, purpose] or [plate]
         self.ticket_generated = ""
         self.anim_offset = 0.0 if gate_type == 'in' else 1.5
+        self.last_prolong_exit = {}
 
 side_in = SideState('in')
 side_out = SideState('out')
 
-global_stats = {"currentlyIn": 0, "visitsToday": 0}
+global_stats = {"currentlyIn": 0, "visitsToday": 0, "maxCapacity": 200, "availableSlots": 200, "eventName": ""}
 global_logs = []
+latest_scanned_details = None
 log_scroll_offset = 0
+CURRENT_VIEW = 'in'  # 'in' for Entrance Camera (expanded), 'out' for Exit Camera (expanded)
+CREAM_BG = (235, 244, 248)  # Warm cream background for dashboard (BGR)
+
 
 # ==============================================================================
 # SUPABASE HELPERS
@@ -188,95 +200,179 @@ class _EmptyResponse:
     data = []
 
 def get_latest_parking_row():
-    """Latest parking_availability row for the campus selected at boot.
-    'Main' matches 'Main Campus', 'Rnp' matches 'RNP', 'Paseo' matches 'PASEO'."""
+    """Latest parking_availability row for the campus selected at boot."""
     campus = globals().get('SELECTED_CAMPUS')
     if not campus:
-        return _EmptyResponse()  # campus not chosen yet (boot screen)
-    
+        return _EmptyResponse()
+    norm_campus = 'Main Campus'
+    if 'rnp' in str(campus).lower():
+        norm_campus = 'RNP'
+    elif 'paseo' in str(campus).lower():
+        norm_campus = 'PASEO'
+    return supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+
+def get_live_currently_in():
+    """Count active vehicles currently inside selected campus (check_out is null).
+    Logic: vehicle log entry increments to 1, vehicle log exit decrements to 0.
+    Applies to registered vehicles, guest logs, and VIP logs across all campuses."""
+    campus = globals().get('SELECTED_CAMPUS')
+    if not campus:
+        return 0
+    try:
+        norm_campus = 'Main'
+        if 'rnp' in str(campus).lower(): norm_campus = 'RNP'
+        elif 'paseo' in str(campus).lower(): norm_campus = 'PASEO'
+
+        res = supabase.table('vehicle_log').select('vehicle_log_id, check_out, logged_status, campus, registration_id').ilike('campus', f"%{norm_campus}%").execute()
+        if res.data:
+            seen_vehicles = set()
+            active_count = 0
+            # Get placeholder reg id if known
+            placeholder_reg_id = _placeholder_ids[0] if globals().get('_placeholder_ids') else None
+            for r in res.data:
+                st = str(r.get('logged_status', '')).lower()
+                if not r.get('check_out') and st not in ('denied', 'exit', 'out', 'exited'):
+                    reg_id = r.get('registration_id')
+                    # If it's a guest or VIP log (or uses placeholder registration), key by vehicle_log_id
+                    if not reg_id or (placeholder_reg_id and reg_id == placeholder_reg_id) or st in ('guest', 'vip') or r.get('is_vip'):
+                        v_key = f"log_{r.get('vehicle_log_id')}"
+                    else:
+                        v_key = f"reg_{reg_id}"
+                    if v_key not in seen_vehicles:
+                        seen_vehicles.add(v_key)
+                        active_count += 1
+            return active_count
+        return 0
+    except Exception as e:
+        print(f"DEBUG: Error querying live currently in: {e}")
+        return 0
+
+def sync_parking_availability(occupied_count=None):
+    """Sync live counts to parking_availability in Supabase so web dashboard matches 1:1"""
+    campus = globals().get('SELECTED_CAMPUS')
+    if not campus:
+        return
     norm_campus = 'Main Campus'
     if 'rnp' in str(campus).lower():
         norm_campus = 'RNP'
     elif 'paseo' in str(campus).lower():
         norm_campus = 'PASEO'
         
-    return supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
-
-def update_parking_availability(action, vehicle_log_id=None):
-    """Update parking_availability table in Supabase when vehicle enters or exits"""
     try:
-        campus = globals().get('SELECTED_CAMPUS', 'Main')
+        pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+        capacity = 200
+        if pa_res.data and pa_res.data[0].get('parking_capacity'):
+            capacity = pa_res.data[0]['parking_capacity']
+            
+        if occupied_count is None:
+            occupied_count = get_live_currently_in()
+            
+        unoccupied = max(0, capacity - occupied_count)
+        
+        if pa_res.data:
+            last_id = pa_res.data[0]['parking_availability_id']
+            supabase.table('parking_availability').update({
+                "slot_occupied": occupied_count,
+                "slot_unoccupied": unoccupied,
+                "date_time": datetime.now().isoformat()
+            }).eq('parking_availability_id', last_id).execute()
+        else:
+            supabase.table('parking_availability').insert({
+                "campus": norm_campus,
+                "parking_capacity": capacity,
+                "slot_occupied": occupied_count,
+                "slot_unoccupied": unoccupied,
+                "date_time": datetime.now().isoformat()
+            }).execute()
+            
+        ev_name = (pa_res.data[0].get('event_name') or pa_res.data[0].get('event') or '') if pa_res.data else ''
+        if not ev_name:
+            try:
+                ce_res = supabase.table('campus_events').select('event_name').ilike('campus', f"%{norm_campus}%").eq('is_active', True).order('created_at', desc=True).limit(1).execute()
+                if ce_res.data and ce_res.data[0].get('event_name'):
+                    ev_name = ce_res.data[0]['event_name']
+            except:
+                pass
+
+        global_stats['maxCapacity'] = capacity
+        global_stats['currentlyIn'] = occupied_count
+        global_stats['availableSlots'] = unoccupied
+        global_stats['eventName'] = ev_name.strip() if ev_name else ''
+        print(f"DEBUG: Synced parking ({norm_campus}) -> Occupied: {occupied_count}, Available: {unoccupied}, Event: {global_stats['eventName']}")
+    except Exception as e:
+        print(f"DEBUG: Error in sync_parking_availability: {e}")
+
+def refresh_parking_data():
+    """Manually refresh parking availability data from database"""
+    global global_stats
+    try:
+        campus = globals().get('SELECTED_CAMPUS')
+        if not campus:
+            return
         norm_campus = 'Main Campus'
         if 'rnp' in str(campus).lower():
             norm_campus = 'RNP'
         elif 'paseo' in str(campus).lower():
             norm_campus = 'PASEO'
 
-        # Get latest settings for this campus
         pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
-        capacity = 500
-        # Directly count live active entries in vehicle_log for this campus (entries without check_out)
-        try:
-            active_res = supabase.table('vehicle_log').select('vehicle_log_id').ilike('campus', f"%{campus}%").is_('check_out', 'null').execute()
-            new_occupied = len(active_res.data) if active_res.data else 0
-        except Exception as e:
-            print(f"DEBUG: Error counting live entries: {e}")
-            new_occupied = 0
+        capacity = 200
+        if pa_res.data and pa_res.data[0].get('parking_capacity'):
+            capacity = pa_res.data[0]['parking_capacity']
 
-        new_unoccupied = max(0, capacity - new_occupied)
-
-        # Get a valid vehicle_log_id if not provided
-        if not vehicle_log_id:
+        ev_name = (pa_res.data[0].get('event_name') or pa_res.data[0].get('event') or '') if pa_res.data else ''
+        if not ev_name:
             try:
-                vl = supabase.table('vehicle_log').select('vehicle_log_id').order('vehicle_log_id', desc=True).limit(1).execute()
-                if vl.data:
-                    vehicle_log_id = vl.data[0]['vehicle_log_id']
+                ce_res = supabase.table('campus_events').select('event_name').ilike('campus', f"%{norm_campus}%").eq('is_active', True).order('created_at', desc=True).limit(1).execute()
+                if ce_res.data and ce_res.data[0].get('event_name'):
+                    ev_name = ce_res.data[0]['event_name']
             except:
                 pass
 
-        supabase.table('parking_availability').insert({
-            "vehicle_log_id": vehicle_log_id,
-            "campus": norm_campus,
-            "parking_capacity": capacity,
-            "slot_occupied": new_occupied,
-            "slot_unoccupied": new_unoccupied,
-            "date_time": datetime.now().isoformat()
-        }).execute()
+        live_occupied = get_live_currently_in()
+        avail = max(0, capacity - live_occupied)
 
-        refresh_parking_data()
-        print(f"DEBUG: Parking availability updated ({norm_campus}) -> Occupied: {new_occupied}, Available: {new_unoccupied}")
-    except Exception as e:
-        print(f"DEBUG: Error updating parking availability: {e}")
-
-def refresh_parking_data():
-    """Manually refresh parking availability data from database"""
-    global global_stats
-    try:
-        parking_response = get_latest_parking_row()
-        if parking_response.data:
-            parking_data = parking_response.data[0]
-            global_stats['maxCapacity'] = parking_data.get('parking_capacity', -1)
-            global_stats['currentlyIn'] = parking_data.get('slot_occupied', 0)
-            global_stats['availableSlots'] = parking_data.get('slot_unoccupied', 0)
-            print(f"Parking data refreshed: Occupied={global_stats['currentlyIn']}, Available={global_stats['availableSlots']}")
-        else:
-            print("Parking data refreshed (no parking_availability rows yet)")
+        global_stats['maxCapacity'] = capacity
+        global_stats['currentlyIn'] = live_occupied
+        global_stats['availableSlots'] = avail
+        global_stats['eventName'] = ev_name.strip() if ev_name else ''
+        print(f"DEBUG: Parking refreshed ({campus}) -> Cap: {capacity}, In: {live_occupied}, Avail: {avail}, Event: {global_stats['eventName']}")
     except Exception as e:
         print(f"Error in refresh_parking_data: {e}")
 
 def poll_supabase():
-    global global_stats, global_logs, is_connected
+    global global_stats, is_connected
     while True:
         try:
-            try:
-                parking_response = get_latest_parking_row()
-                if parking_response.data:
-                    parking_data = parking_response.data[0]
-                    global_stats['maxCapacity'] = parking_data.get('parking_capacity', -1)
-                    global_stats['currentlyIn'] = parking_data.get('slot_occupied', 0)
-                    global_stats['availableSlots'] = parking_data.get('slot_unoccupied', 0)
-            except Exception as e:
-                print(f"Error fetching parking availability: {e}")
+            campus = globals().get('SELECTED_CAMPUS')
+            if campus:
+                norm_campus = 'Main Campus'
+                if 'rnp' in str(campus).lower():
+                    norm_campus = 'RNP'
+                elif 'paseo' in str(campus).lower():
+                    norm_campus = 'PASEO'
+
+                pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+                capacity = 200
+                if pa_res.data and pa_res.data[0].get('parking_capacity'):
+                    capacity = pa_res.data[0]['parking_capacity']
+
+                ev_name = (pa_res.data[0].get('event_name') or pa_res.data[0].get('event') or '') if pa_res.data else ''
+                if not ev_name:
+                    try:
+                        ce_res = supabase.table('campus_events').select('event_name').ilike('campus', f"%{norm_campus}%").eq('is_active', True).order('created_at', desc=True).limit(1).execute()
+                        if ce_res.data and ce_res.data[0].get('event_name'):
+                            ev_name = ce_res.data[0]['event_name']
+                    except:
+                        pass
+
+                live_occupied = get_live_currently_in()
+                avail = max(0, capacity - live_occupied)
+
+                global_stats['maxCapacity'] = capacity
+                global_stats['currentlyIn'] = live_occupied
+                global_stats['availableSlots'] = avail
+                global_stats['eventName'] = ev_name.strip() if ev_name else ''
 
             if not is_connected:
                 print("Supabase Polling: Connection restored!")
@@ -285,10 +381,35 @@ def poll_supabase():
             if is_connected:
                 print(f"Supabase Polling error: {type(e).__name__}: {e}")
                 is_connected = False
-        time.sleep(1)  # Reduced from 5 to 1 second for faster real-time updates
+        time.sleep(2)
 
 print("DEBUG: Startup - Starting Supabase polling thread...")
 threading.Thread(target=poll_supabase, daemon=True).start()
+
+def start_prolong_gate(side):
+    """Open barrier permanently on Exit and start PROLONG mode"""
+    print(f"DEBUG: Activating PROLONG mode on {side.type} gate - Barrier held permanently open")
+    servo = servo_in if side.type == 'in' else servo_out
+    set_servo_angle(servo, 90)
+    side.state = GateState.PROLONG
+    side.scan_cooldown_end = 0.0
+    side.prolong_ready_time = 0.0
+    side.data = None
+    side.logged_status = None
+
+def close_prolong_gate(side):
+    """Close barrier from PROLONG mode and return to normal SCANNING"""
+    print(f"DEBUG: Deactivating PROLONG mode on {side.type} gate - Barrier closing")
+    servo = servo_in if side.type == 'in' else servo_out
+    set_servo_angle(servo, 0)
+    side.state = GateState.SCANNING
+    side.scan_cooldown_end = time.time() + 5.0
+    side.data = None
+    side.logged_status = None
+    if hasattr(side, 'last_prolong_exit'):
+        side.last_prolong_exit = None
+    global latest_scanned_details
+    latest_scanned_details = None
 
 # ==============================================================================
 # ACTION HANDLERS
@@ -338,6 +459,9 @@ def open_gate(side):
         set_servo_angle(servo, 90)
         side.state = GateState.TIMEOUT
         side.timeout_end = time.time() + 15  # 15 seconds countdown for normal operations
+        if side.type == 'out':
+            side.scan_cooldown_end = time.time() + 5.0
+            side.prolong_ready_time = time.time() + 5.0
         print(f"DEBUG: Gate opened, 15-second countdown started")
     except Exception as e:
         print(f"DEBUG: Error in open_gate: {type(e).__name__}: {e}")
@@ -353,6 +477,8 @@ def force_close_gate(side):
     side.data = None
     side.logged_status = None
     side.timeout_end = 0
+    global latest_scanned_details
+    latest_scanned_details = None
 
 def manual_open_gate(side):
     """Manually open gate without database operations - direct motor control only"""
@@ -370,6 +496,8 @@ def close_gate(side):
     side.state = GateState.SCANNING
     side.data = None
     side.logged_status = None
+    global latest_scanned_details
+    latest_scanned_details = None
     print(f"DEBUG: Gate closed successfully")
 
 def process_qr(side, qr_text, frame):
@@ -414,60 +542,78 @@ def process_qr(side, qr_text, frame):
                 print(f"Error fetching vehicle information: {e}")
                 side.vehicle_data = {}
             
-            # --- Cross-campus check: same QR still recorded as ENTRY (no exit) at ANOTHER campus ---
+            # Multi-campus duplicate entry check:
+            # Query recent logs for this registration across ALL campuses to detect if vehicle is currently inside
+            open_cross_log = None
             try:
-                open_res = supabase.table('vehicle_log').select('*').eq('registration_id', reg['registration_id']).is_('check_out', 'null').order('created_at', desc=True).execute()
-                for open_row in (open_res.data or []):
-                    # Guest/VIP logs use a placeholder registration, so they are not this vehicle
-                    if str(open_row.get('logged_status') or '').upper() in ('GUEST', 'VIP'):
-                        continue
-                    other_campus = str(open_row.get('campus') or '')
-                    if SELECTED_CAMPUS.lower() not in other_campus.lower():
-                        since = open_row.get('check_in') or ''
-                        try:
-                            since = datetime.fromisoformat(since.replace('Z', '+00:00')).strftime('%H:%M')
-                        except:
-                            pass
-                        side.logged_status = "REGISTERED"
-                        side.anomaly_desc = f"FLAGGED: QR still INSIDE {other_campus} since {since}"
-                        side.anomaly_id = open_row.get('vehicle_log_id')
-                        print(f"DEBUG: FLAG - QR still recorded as entry at {other_campus} (vehicle_log #{side.anomaly_id})")
-                        side.state = GateState.LOG_WARNING
-                        return
+                all_logs_res = supabase.table('vehicle_log').select('*')\
+                    .eq('registration_id', reg['registration_id'])\
+                    .order('created_at', desc=True).limit(5).execute()
+                if all_logs_res.data:
+                    for l_row in all_logs_res.data:
+                        st = str(l_row.get('logged_status', '')).strip().lower()
+                        has_in = bool(l_row.get('check_in'))
+                        has_out = bool(l_row.get('check_out'))
+                        # Active entry: checked in, not checked out, and not explicitly exited/denied
+                        if (has_in and not has_out) or st == 'inside':
+                            if st not in ('exited', 'exit', 'denied'):
+                                open_cross_log = l_row
+                                break
             except Exception as e:
-                print(f"DEBUG: Cross-campus check error: {e}")
-
-            # Get last log for this registration using correct column names
-            try:
-                last_log_response = supabase.table('vehicle_log').select('*').eq('registration_id', reg['registration_id']).eq('campus', SELECTED_CAMPUS).order('created_at', desc=True).limit(1).execute()
-                last_log = last_log_response.data[0] if last_log_response.data else None
-            except:
-                last_log = None
+                print(f"DEBUG: Error checking multi-campus logs: {e}")
+                open_cross_log = None
 
             # Simple logic: if QR code exists in database, it's REGISTERED
             side.logged_status = "REGISTERED"
             side.status_warning_pending = False
 
-            # --- Same-day log warning check (using check_in/check_out columns) ---
-            if last_log:
-                if side.type == 'in' and last_log.get('check_in') and not last_log.get('check_out'):
-                    # Format timestamp for display
-                    check_in_time = last_log['check_in']
-                    try:
-                        dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
-                        check_in_time = dt.strftime('%H:%M')
-                    except:
-                        pass
-                    side.anomaly_desc = f"Vehicle already IN at {check_in_time}!"
-                    side.anomaly_id = last_log.get('vehicle_log_id')
-                    side.state = GateState.LOG_WARNING
-                    return
-                # For exit gate, skip the "already OUT" check to allow multiple exits
-                # This makes the exit gate more permissive as requested
-            elif side.type == 'out' and not last_log:
-                # For exit gate, allow exit even without entry record (more permissive)
-                print(f"[{side.type}] No entry record found, but allowing exit anyway")
-                # Don't show warning, proceed to automatic opening
+            # --- Duplicate entry warning check across ALL campuses ---
+            if side.type == 'in' and open_cross_log:
+                active_campus = (open_cross_log.get('campus') or 'Another').strip()
+                check_in_time = open_cross_log.get('check_in', '')
+                try:
+                    dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
+                    check_in_time = dt.strftime('%I:%M %p')
+                except:
+                    pass
+                
+                sel_norm = str(SELECTED_CAMPUS or '').strip().lower()
+                act_norm = active_campus.lower()
+                if sel_norm in act_norm or act_norm in sel_norm:
+                    side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {SELECTED_CAMPUS.upper()} CAMPUS (Entered at {check_in_time})!"
+                else:
+                    side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently INSIDE {active_campus.upper()} CAMPUS (Entered at {check_in_time})! Must exit {active_campus.upper()} first."
+                
+                side.anomaly_id = open_cross_log.get('vehicle_log_id')
+                side.state = GateState.LOG_WARNING
+                return
+            elif side.type == 'out' and not open_cross_log:
+                # For exit gate, allow exit even without entry record (permissive)
+                print(f"[{side.type}] No active entry record found, allowing exit anyway")
+
+
+            # Populate latest_scanned_details for dashboard and display
+            first_n = reg.get('first_name', '')
+            last_n = reg.get('last_name', '')
+            driver_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
+            role_name = (reg.get('role') or 'N/A').capitalize()
+            v_plate = side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
+            v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+            v_type = side.vehicle_data.get('type') or reg.get('type') or 'N/A'
+            v_color = side.vehicle_data.get('color') or ''
+            full_brand = f"{v_brand} ({v_color})" if v_color else v_brand
+
+            global latest_scanned_details
+            latest_scanned_details = {
+                "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
+                "name": driver_name,
+                "role": role_name,
+                "plate": v_plate,
+                "brand": full_brand,
+                "type": v_type,
+                "status": side.logged_status or "REGISTERED",
+                "time": datetime.now().strftime("%I:%M:%S %p")
+            }
 
             # --- EXIT GATE: Auto-open for valid QR codes ---
             if side.type == 'out':
@@ -518,68 +664,68 @@ def submit_entry_exit(side):
     def _run():
         action = 'entry' if side.type == 'in' else 'exit'
         current_time = datetime.now().isoformat()
+        reg_id = side.data['registration_id']
         
         try:
-            vehicle_log_id = None
             if side.type == 'out':
-                # Try to find and close the existing open entry log for this registration
+                # EXIT: Close any open entry logs in vehicle_log where check_out is null
+                side.scan_cooldown_end = time.time() + 5.0
+                side.prolong_ready_time = time.time() + 5.0
                 try:
-                    open_log_res = supabase.table('vehicle_log').select('*')\
-                        .eq('registration_id', side.data['registration_id'])\
-                        .ilike('campus', f"%{SELECTED_CAMPUS}%")\
-                        .is_('check_out', 'null')\
-                        .order('created_at', desc=True)\
-                        .limit(1)\
-                        .execute()
-
-                    if open_log_res.data:
-                        open_log = open_log_res.data[0]
-                        vehicle_log_id = open_log['vehicle_log_id']
-                        supabase.table('vehicle_log').update({
+                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
+                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                    if open_rows:
+                        for row in open_rows:
+                            supabase.table('vehicle_log').update({
+                                "check_out": current_time,
+                                "logged_status": "Exited"
+                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
+                        print(f"DEBUG: Closed {len(open_rows)} open vehicle_log row(s) on exit")
+                    else:
+                        # Fallback: create standalone exit log
+                        log_data = {
+                            "vehicle_information_id": side.data.get('vehicle_information_id') or 1,
+                            "registration_id": reg_id,
+                            "check_in": current_time,
                             "check_out": current_time,
-                            "logged_status": getattr(side, 'logged_status', 'REGISTERED')
-                        }).eq('vehicle_log_id', vehicle_log_id).execute()
-                        print(f"DEBUG: Closed existing vehicle_log #{vehicle_log_id} on exit")
+                            "logged_status": "Exited",
+                            "campus": SELECTED_CAMPUS
+                        }
+                        supabase.table('vehicle_log').insert(log_data).execute()
+                        print(f"DEBUG: Standalone exit log created")
                 except Exception as e:
-                    print(f"DEBUG: Error finding/updating open entry log: {e}")
-
-                # Fallback: if no open entry log was found, insert a standalone exit record
-                if not vehicle_log_id:
-                    log_data = {
-                        "vehicle_information_id": side.data.get('vehicle_information_id') or 1,
-                        "registration_id": side.data['registration_id'],
-                        "check_in": current_time,
-                        "check_out": current_time,
-                        "logged_status": getattr(side, 'logged_status', 'REGISTERED'),
-                        "campus": SELECTED_CAMPUS
-                    }
-                    res = supabase.table('vehicle_log').insert(log_data).execute()
-                    vehicle_log_id = res.data[0]['vehicle_log_id'] if res.data else None
-                    print(f"DEBUG: Created standalone exit vehicle_log #{vehicle_log_id}")
-
-                # Update parking availability in DB and refresh stats
-                update_parking_availability('out', vehicle_log_id)
-
+                    print(f"DEBUG: Error updating exit log: {e}")
             else:
-                # ENTRY
+                # ENTRY: Insert new vehicle_log with check_out = None
                 log_data = {
                     "vehicle_information_id": side.data.get('vehicle_information_id') or 1,
-                    "registration_id": side.data['registration_id'],
+                    "registration_id": reg_id,
                     "check_in": current_time,
                     "check_out": None,
-                    "logged_status": getattr(side, 'logged_status', 'REGISTERED'),
+                    "logged_status": "Inside",
                     "campus": SELECTED_CAMPUS
                 }
-                res = supabase.table('vehicle_log').insert(log_data).execute()
-                vehicle_log_id = res.data[0]['vehicle_log_id'] if res.data else None
-                print(f"DEBUG: Created entry vehicle_log #{vehicle_log_id}")
+                supabase.table('vehicle_log').insert(log_data).execute()
+                print(f"DEBUG: Entry log submitted successfully")
+            
+            # Add to global logs table in UI
+            driver_name = side.data.get('first_name', '') + ' ' + side.data.get('last_name', '')
+            driver_name = driver_name.strip() or side.data.get('name', 'User')
+            v_plate = side.vehicle_data.get('plate_number') or side.data.get('plate_number') or 'N/A'
+            global global_logs
+            global_logs.insert(0, {
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "bound": "IN" if side.type == 'in' else "OUT",
+                "name": driver_name[:12],
+                "plate": v_plate[:10]
+            })
 
-                # Update parking availability in DB and refresh stats
-                update_parking_availability('in', vehicle_log_id)
+            # Re-sync parking availability and currentlyIn counts in database
+            sync_parking_availability()
+            refresh_parking_data()
 
-            print(f"DEBUG: {action} log submitted and parking availability updated successfully")
+            # Open gate with 15-second countdown
             open_gate(side)
-
         except Exception as e:
             print(f"DEBUG: Error submitting {action} log: {type(e).__name__}: {e}")
             side.state = GateState.API_ERROR
@@ -613,50 +759,75 @@ def submit_vip(side):
         
         try:
             ids = get_placeholder_ids()
-            if ids is None:
-                raise Exception("No registration row available to attach VIP log")
-            placeholder_reg_id, placeholder_vehicle_id = ids
+            placeholder_reg_id, placeholder_vehicle_id = ids if ids else (None, None)
 
-            # For exit gate, find entry check_in time to avoid null constraint
             if side.type == 'out':
+                # VIP EXIT: Find open VIP record in vehicle_log and close it
+                target_log_id = None
                 try:
-                    last_log_response = supabase.table('vehicle_log').select('*').eq('registration_id', placeholder_reg_id).eq('campus', SELECTED_CAMPUS).order('created_at', desc=True).limit(1).execute()
-                    if last_log_response.data and last_log_response.data[0].get('check_in'):
-                        entry_check_in = last_log_response.data[0]['check_in']
+                    all_campus_logs = supabase.table('vehicle_log').select('*')\
+                        .ilike('campus', f"%{SELECTED_CAMPUS}%")\
+                        .order('created_at', desc=True).limit(30).execute()
+                    
+                    open_vip_logs = [r for r in (all_campus_logs.data or []) if not r.get('check_out')]
+                    if open_vip_logs:
+                        for row in open_vip_logs:
+                            st = str(row.get('logged_status', '')).lower()
+                            if row.get('is_vip') or 'vip' in st:
+                                target_log_id = row['vehicle_log_id']
+                                break
+                        if not target_log_id and open_vip_logs:
+                            target_log_id = open_vip_logs[0]['vehicle_log_id']
+
+                    if target_log_id:
+                        supabase.table('vehicle_log').update({
+                            "check_out": current_time,
+                            "logged_status": "Exited"
+                        }).eq('vehicle_log_id', target_log_id).execute()
+                        print(f"DEBUG: Closed open VIP vehicle_log row {target_log_id} on exit")
                     else:
-                        entry_check_in = current_time
-                except:
-                    entry_check_in = current_time
+                        log_data = {
+                            "vehicle_information_id": placeholder_vehicle_id,
+                            "registration_id": placeholder_reg_id,
+                            "check_in": current_time,
+                            "check_out": current_time,
+                            "logged_status": "Exited",
+                            "is_vip": True,
+                            "campus": SELECTED_CAMPUS
+                        }
+                        supabase.table('vehicle_log').insert(log_data).execute()
+                except Exception as e:
+                    print(f"DEBUG: Error processing VIP exit: {e}")
             else:
-                entry_check_in = current_time
-            
-            log_data = {
-                "vehicle_information_id": placeholder_vehicle_id,
-                "registration_id": placeholder_reg_id,
-                "check_in": entry_check_in,
-                "check_out": current_time if side.type == 'out' else None,
-                "logged_status": "VIP",
-                "campus": SELECTED_CAMPUS  # CAMPUS: tag log with the campus selected at boot
-            }
-            
-            print(f"DEBUG: VIP log data: {log_data}")
-            
-            vehicle_log_result = supabase.table('vehicle_log').insert(log_data).execute()
-            vehicle_log_id = vehicle_log_result.data[0]['vehicle_log_id'] if vehicle_log_result.data else None
-            
-            vip_data = {
-                "vehicle_log_id": vehicle_log_id,
+                # VIP ENTRY: Log directly into vehicle_log with is_vip = True
+                log_data = {
+                    "vehicle_information_id": placeholder_vehicle_id,
+                    "registration_id": placeholder_reg_id,
+                    "check_in": current_time,
+                    "check_out": None,
+                    "logged_status": "VIP",
+                    "is_vip": True,
+                    "campus": SELECTED_CAMPUS
+                }
+                supabase.table('vehicle_log').insert(log_data).execute()
+                print(f"DEBUG: Logged VIP entry in vehicle_log for {SELECTED_CAMPUS}")
+
+            global latest_scanned_details
+            latest_scanned_details = {
+                "gate": "EXIT" if side.type == "out" else "ENTRANCE",
                 "name": "VIP Guest",
-                "vehicle_plate": "VIP",
-                "vip_type": "Emergency Access" if side.form_data[0] == "Override" else "VIP Access",
-                "timestamp": current_time
+                "role": "VIP",
+                "plate": "VIP",
+                "brand": "VIP Access",
+                "type": "VIP Vehicle",
+                "status": "EXITED CAMPUS" if side.type == "out" else "INSIDE CAMPUS",
+                "time": datetime.now().strftime("%I:%M:%S %p")
             }
-            
-            supabase.table('vip_log').insert(vip_data).execute()
-            update_parking_availability('in' if side.type == 'in' else 'out', vehicle_log_id)
+
+            sync_parking_availability()
+            refresh_parking_data()
         except Exception as e:
-            # Logging failed, but the gate must still open for VIP access
-            print(f"DEBUG: VIP logging failed (opening gate anyway): {type(e).__name__}: {e}")
+            print(f"DEBUG: VIP logging failed: {type(e).__name__}: {e}")
         
         open_gate(side)
 
@@ -671,11 +842,14 @@ def submit_manual_guest(side):
     side.state = GateState.PROCESSING
     
     def _run():
+        global latest_scanned_details
         current_time = datetime.now().isoformat()
         
         try:
             if side.type == 'in':
-                vehicle_log_id = None
+                plate_val = side.form_data[0][:20].strip() or "GUEST"
+                id_val = side.form_data[1][:50].strip() or "N/A"
+                purpose_val = side.form_data[2].strip() or "Visitor"
                 try:
                     ids = get_placeholder_ids()
                     if ids is None:
@@ -687,7 +861,7 @@ def submit_manual_guest(side):
                         "registration_id": placeholder_reg_id,
                         "check_in": current_time,
                         "check_out": None,
-                        "logged_status": "GUEST",
+                        "logged_status": "Inside",
                         "campus": SELECTED_CAMPUS  # CAMPUS: tag log with the campus selected at boot
                     }
                     
@@ -696,19 +870,30 @@ def submit_manual_guest(side):
                     
                     guest_data = {
                         "vehicle_log_id": vehicle_log_id,
-                        "plate_number": side.form_data[0][:20],
-                        "id_number": side.form_data[1][:50],
-                        "purpose": side.form_data[2],
+                        "plate_number": plate_val,
+                        "id_number": id_val,
+                        "purpose": purpose_val,
                         "timestamp": current_time
                     }
                     
                     supabase.table('guest_log').insert(guest_data).execute()
+                    sync_parking_availability()
+                    refresh_parking_data()
+
+                    latest_scanned_details = {
+                        "gate": "ENTRANCE",
+                        "name": f"Guest (ID: {id_val})",
+                        "role": "Guest",
+                        "plate": plate_val,
+                        "brand": purpose_val,
+                        "type": "Guest Vehicle",
+                        "status": "INSIDE CAMPUS",
+                        "time": datetime.now().strftime("%I:%M:%S %p")
+                    }
                 except Exception as e:
                     # Logging failed, but the guest must still be let in
                     print(f"DEBUG: Guest logging failed (opening gate anyway): {type(e).__name__}: {e}")
                 
-                update_parking_availability('in', vehicle_log_id)
-
                 # Open gate automatically with 10 seconds delay (direct servo control)
                 servo = servo_in if side.type == 'in' else servo_out
                 set_servo_angle(servo, 90)
@@ -717,7 +902,7 @@ def submit_manual_guest(side):
                 print(f"DEBUG: Guest gate opened, 10-second countdown started")
             else:
                 # Guest exit - find guest by plate and update
-                plate_number = side.form_data[0]
+                plate_number = side.form_data[0].strip()
                 exit_time = datetime.now().isoformat()
                 
                 # Find the guest log entry
@@ -727,13 +912,23 @@ def submit_manual_guest(side):
                     guest_log = guest_response.data[0]
                     vehicle_log_id = guest_log.get('vehicle_log_id')
                     
-                    # Update vehicle log with checkout time (check_in already exists from entry)
+                    # Update vehicle log with checkout time and status Exited
                     if vehicle_log_id:
                         print(f"DEBUG: Updating guest exit for vehicle_log_id: {vehicle_log_id}")
-                        supabase.table('vehicle_log').update({"check_out": exit_time}).eq('vehicle_log_id', vehicle_log_id).execute()
+                        supabase.table('vehicle_log').update({"check_out": exit_time, "logged_status": "Exited"}).eq('vehicle_log_id', vehicle_log_id).execute()
+                        sync_parking_availability()
+                        refresh_parking_data()
+                        latest_scanned_details = {
+                            "gate": "EXIT",
+                            "name": "Guest",
+                            "role": "Guest",
+                            "plate": plate_number or "N/A",
+                            "brand": guest_log.get('purpose', 'Guest Exit'),
+                            "type": "Guest Vehicle",
+                            "status": "EXITED CAMPUS",
+                            "time": datetime.now().strftime("%I:%M:%S %p")
+                        }
                     
-                    update_parking_availability('out', vehicle_log_id)
-
                     # Open gate with 10 seconds delay (direct servo control)
                     servo = servo_in if side.type == 'in' else servo_out
                     set_servo_angle(servo, 90)
@@ -812,11 +1007,24 @@ def submit_guest_exit(side):
         vehicle_log_id = side.data.get('vehicle_log_id')
         
         try:
-            # Update vehicle log with checkout time
+            # Update vehicle log with checkout time and status Exited
             if vehicle_log_id:
-                supabase.table('vehicle_log').update({"check_out": exit_time}).eq('vehicle_log_id', vehicle_log_id).execute()
-                update_parking_availability('out', vehicle_log_id)
+                supabase.table('vehicle_log').update({"check_out": exit_time, "logged_status": "Exited"}).eq('vehicle_log_id', vehicle_log_id).execute()
+                sync_parking_availability()
+                refresh_parking_data()
                 
+                global latest_scanned_details
+                latest_scanned_details = {
+                    "gate": "EXIT",
+                    "name": f"Guest (ID: {side.data.get('id_number', 'N/A')})",
+                    "role": "Guest",
+                    "plate": side.data.get('plate', 'N/A'),
+                    "brand": side.data.get('purpose', 'Guest Exit'),
+                    "type": "Guest Vehicle",
+                    "status": "EXITED CAMPUS",
+                    "time": datetime.now().strftime("%I:%M:%S %p")
+                }
+
                 # Open gate with 10 seconds delay (direct servo control for guest operations)
                 servo = servo_in if side.type == 'in' else servo_out
                 set_servo_angle(servo, 90)
@@ -903,46 +1111,240 @@ def in_rect(x, y, rect):
     rx, ry, rw, rh = rect
     return rx <= x <= rx+rw and ry <= y <= ry+rh
 
-def render_side_dashboard(img):
-    """Render the stats dashboard with parking_availability data"""
-    cv2.rectangle(img, (0, H//2), (W//2, H), (40,40,40), -1)
-    draw_text(img, "STATS DASHBOARD", (20, H//2 + 40), 1.0, (200,200,200), 2)
+def render_guest_entry_bottom(img, side):
+    """Render guest entry fill out form in card box on cream background"""
+    box_x = 520
+    box_y = H//2 + 15
+    box_w = W - 25 - box_x
+    box_h = H - 20 - box_y
+    
+    cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (255, 255, 255), -1)
+    cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (195, 205, 210), 2)
+    
+    campus_name = (SELECTED_CAMPUS or 'CAMPUS').upper()
+    
+    if side.state == GateState.MANUAL_GUEST_CONFIRM:
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 48), (240, 245, 248), -1)
+        draw_text(img, f"{campus_name} - CONFIRM GUEST ENTRY", (box_x + 20, box_y + 34), 0.78, (35, 40, 50), 2)
+        draw_text(img, "Please review details before granting access:", (box_x + 25, box_y + 80), 0.60, (70, 75, 85), 1)
+        
+        plate_str = side.form_data[0] if side.form_data[0] else 'N/A'
+        id_str = side.form_data[1] if side.form_data[1] else 'N/A'
+        purp_str = side.form_data[2] if side.form_data[2] else 'N/A'
+        
+        draw_text(img, f"Plate Number : {plate_str}", (box_x + 35, box_y + 120), 0.72, (20, 25, 35), 2)
+        draw_text(img, f"ID Number    : {id_str}", (box_x + 35, box_y + 155), 0.72, (20, 25, 35), 2)
+        draw_text(img, f"Purpose      : {purp_str}", (box_x + 35, box_y + 190), 0.72, (180, 70, 20), 2)
+        
+        draw_btn(img, (box_x + 35, box_y + 240, 180, 48), "GRANT ACCESS", (40, 160, 60))
+        draw_btn(img, (box_x + 235, box_y + 240, 140, 48), "BACK / EDIT", (140, 60, 60))
+    else:
+        # MANUAL_GUEST_IN
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 48), (240, 245, 248), -1)
+        draw_text(img, f"{campus_name} - GUEST REGISTRATION", (box_x + 20, box_y + 34), 0.78, (35, 40, 50), 2)
+        draw_text(img, "Fill out guest information to grant entry:", (box_x + 25, box_y + 72), 0.58, (80, 85, 95), 1)
+        
+        labels = ["Plate Number:", "ID Number:", "Purpose:"]
+        for idx in range(3):
+            y_base = box_y + 85 + idx * 48
+            is_active = (side.input_field == idx)
+            label_col = (180, 70, 20) if is_active else (50, 55, 65)
+            box_border = (40, 160, 60) if is_active else (190, 200, 205)
+            box_bg = (245, 250, 245) if is_active else (250, 250, 252)
+            
+            draw_text(img, labels[idx], (box_x + 25, y_base + 26), 0.65, label_col, 2 if is_active else 1)
+            cv2.rectangle(img, (box_x + 180, y_base), (box_x + 530, y_base + 38), box_bg, -1)
+            cv2.rectangle(img, (box_x + 180, y_base), (box_x + 530, y_base + 38), box_border, 2 if is_active else 1)
+            
+            val_text = side.form_data[idx] + ("_" if is_active else "")
+            draw_text(img, val_text, (box_x + 190, y_base + 26), 0.68, (20, 25, 35), 2)
+            
+        draw_btn(img, (box_x + 180, box_y + 245, 150, 45), "CONFIRM", (40, 160, 60))
+        draw_btn(img, (box_x + 350, box_y + 245, 130, 45), "CANCEL", (110, 110, 120))
+
+def render_guest_exit_bottom(img, side):
+    """Render guest exit search and verification form in card box on cream background"""
+    box_x = 520
+    box_y = H//2 + 15
+    box_w = W - 25 - box_x
+    box_h = H - 20 - box_y
+    
+    cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (255, 255, 255), -1)
+    cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (195, 205, 210), 2)
+    
+    campus_name = (SELECTED_CAMPUS or 'CAMPUS').upper()
+    
+    if side.state == GateState.MANUAL_GUEST_SEARCH_RESULT:
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 48), (240, 245, 248), -1)
+        draw_text(img, f"{campus_name} - GUEST RECORD FOUND", (box_x + 20, box_y + 34), 0.78, (30, 130, 40), 2)
+        draw_text(img, "Verified guest entry record:", (box_x + 25, box_y + 80), 0.60, (70, 75, 85), 1)
+        
+        if side.data:
+            draw_text(img, f"Plate Number : {side.data.get('plate', 'N/A')}", (box_x + 35, box_y + 118), 0.72, (20, 25, 35), 2)
+            draw_text(img, f"ID Number    : {side.data.get('id_number', 'N/A')}", (box_x + 35, box_y + 152), 0.72, (20, 25, 35), 2)
+            draw_text(img, f"Purpose      : {side.data.get('purpose', 'N/A')}", (box_x + 35, box_y + 186), 0.72, (180, 70, 20), 2)
+            entry_time = side.data.get('timestamp', 'N/A')
+            if entry_time and entry_time != 'N/A':
+                try:
+                    dt = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                    entry_time = dt.strftime('%I:%M %p')
+                except:
+                    pass
+            draw_text(img, f"Check In     : {entry_time}", (box_x + 35, box_y + 218), 0.65, (40, 120, 40), 2)
+            
+        draw_btn(img, (box_x + 35, box_y + 245, 175, 48), "ALLOW EXIT", (40, 160, 60))
+        draw_btn(img, (box_x + 235, box_y + 245, 130, 48), "CANCEL", (110, 110, 120))
+    else:
+        # MANUAL_GUEST_OUT
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 48), (240, 245, 248), -1)
+        draw_text(img, f"{campus_name} - GUEST EXIT SEARCH", (box_x + 20, box_y + 34), 0.78, (35, 40, 50), 2)
+        draw_text(img, "Enter plate number to verify checked-in guest:", (box_x + 25, box_y + 75), 0.58, (80, 85, 95), 1)
+        
+        draw_text(img, "Plate Number:", (box_x + 25, box_y + 125), 0.68, (180, 70, 20), 2)
+        cv2.rectangle(img, (box_x + 180, box_y + 98), (box_x + 530, box_y + 142), (250, 250, 252), -1)
+        cv2.rectangle(img, (box_x + 180, box_y + 98), (box_x + 530, box_y + 142), (40, 160, 60), 2)
+        
+        draw_text(img, side.form_data[0] + "_", (box_x + 195, box_y + 128), 0.72, (20, 25, 35), 2)
+        
+        draw_btn(img, (box_x + 180, box_y + 175, 150, 48), "SEARCH", (40, 160, 60))
+        draw_btn(img, (box_x + 350, box_y + 175, 130, 48), "CANCEL", (110, 110, 120))
+
+def render_bottom_panel(display):
+    """Render full-width cream background bottom dashboard with campus capacity & scanned QR info box"""
+    # Soft cream background
+    display[H//2:H, 0:W] = CREAM_BG
+    cv2.line(display, (0, H//2), (W, H//2), (205, 215, 220), 2)
+    
+    # -------------------------------------------------------------------------
+    # LEFT SECTION: Campus Information & Vehicle Capacity Metrics (x: 25 -> 480)
+    # -------------------------------------------------------------------------
+    campus_name = (SELECTED_CAMPUS or 'CAMPUS').upper()
+    event_name = global_stats.get('eventName', '').strip()
+    if event_name:
+        draw_text(display, f"{campus_name} CAMPUS - {event_name.upper()}", (30, H//2 + 42), 0.82, (120, 40, 10), 2)
+    else:
+        draw_text(display, f"{campus_name} CAMPUS", (30, H//2 + 42), 0.95, (120, 40, 10), 2)
+        
+    cv2.line(display, (30, H//2 + 62), (480, H//2 + 62), (195, 205, 210), 2)
     
     max_cap = global_stats.get('maxCapacity', -1)
-    cap_str = str(max_cap) if max_cap != -1 else "No Limit"
+    cap_str = str(max_cap) if max_cap != -1 else "200"
     currently_in = global_stats.get('currentlyIn', 0)
-    available_slots = global_stats.get('availableSlots', 0)
+    available_slots = global_stats.get('availableSlots', max(0, (max_cap if max_cap != -1 else 200) - currently_in))
     
-    # Display only the three required metrics
-    draw_text(img, f"Total Capacity: {cap_str}", (20, H//2 + 100), 1.0, (255, 255, 255))
-    draw_text(img, f"Currently In: {currently_in}", (20, H//2 + 150), 1.0, (0, 255, 0))
-    draw_text(img, f"Available Slots: {available_slots}", (20, H//2 + 200), 1.0, (0, 200, 255))
+    draw_text(display, f"Total Capacity : {cap_str}", (30, H//2 + 100), 0.78, (45, 45, 45), 2)
+    draw_text(display, f"Currently IN   : {currently_in}", (30, H//2 + 140), 0.78, (20, 130, 30), 2)
+    draw_text(display, f"Available Slots: {available_slots}", (30, H//2 + 180), 0.78, (180, 70, 20), 2)
     
-    draw_btn(img, (20, H - 60, 100, 40), "REFRESH", (50, 150, 200))
+    view_label = "ACTIVE: ENTRANCE CAMERA" if CURRENT_VIEW == 'in' else "ACTIVE: EXIT CAMERA"
+    draw_text(display, view_label, (30, H//2 + 220), 0.65, (90, 95, 105), 2)
+    
+    draw_btn(display, (30, H - 65, 120, 42), "REFRESH", (50, 150, 200))
+    if side_in.state == GateState.SCANNING and side_out.state in (GateState.SCANNING, GateState.PROLONG):
+        draw_btn(display, (165, H - 65, 120, 42), "BACK", (110, 110, 120))
+        
+    # Vertical separator
+    cv2.line(display, (500, H//2 + 15), (500, H - 15), (200, 210, 215), 2)
 
-def render_side(img, side, offset_x):
-    # Base layout
+    # -------------------------------------------------------------------------
+    # RIGHT SECTION: Guest Form Active OR Scanned QR Information Box (x: 520 -> W - 25)
+    # -------------------------------------------------------------------------
+    if side_in.state in (GateState.MANUAL_GUEST_IN, GateState.MANUAL_GUEST_CONFIRM):
+        render_guest_entry_bottom(display, side_in)
+        return
+        
+    if side_out.state in (GateState.MANUAL_GUEST_OUT, GateState.MANUAL_GUEST_SEARCH_RESULT):
+        render_guest_exit_bottom(display, side_out)
+        return
+        
+    # Scanned QR Information Card Box
+    box_x = 520
+    box_y = H//2 + 15
+    box_w = W - 25 - box_x
+    box_h = H - 20 - box_y
+    
+    cv2.rectangle(display, (box_x, box_y), (box_x + box_w, box_y + box_h), (255, 255, 255), -1)
+    cv2.rectangle(display, (box_x, box_y), (box_x + box_w, box_y + box_h), (195, 205, 210), 2)
+    
+    # Card Header
+    cv2.rectangle(display, (box_x, box_y), (box_x + box_w, box_y + 48), (240, 245, 248), -1)
+    cv2.rectangle(display, (box_x, box_y), (box_x + box_w, box_y + 48), (195, 205, 210), 1)
+    draw_text(display, "SCANNED QR INFORMATION", (box_x + 20, box_y + 34), 0.78, (35, 40, 50), 2)
+    
+    # If the barrier is closed, the scanned QR code details display will disappear
+    barrier_open_or_active = (
+        side_in.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING) or
+        side_out.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.PROCESSING)
+    )
+    global latest_scanned_details
+    if not barrier_open_or_active:
+        latest_scanned_details = None
+
+    if latest_scanned_details:
+        gate_txt = latest_scanned_details.get('gate', 'GATE')
+        t_txt = latest_scanned_details.get('time', '')
+        st_txt = latest_scanned_details.get('status', 'OK')
+        st_col = (20, 140, 30) if ("REG" in st_txt.upper() or "APP" in st_txt.upper() or "IN" in st_txt.upper()) else (180, 70, 20)
+        
+        draw_text(display, f"[{gate_txt}] Time: {t_txt}", (box_x + 20, box_y + 85), 0.68, (70, 75, 85), 1)
+        draw_text(display, f"Status: {st_txt}", (box_x + 360, box_y + 85), 0.72, st_col, 2)
+        
+        name_txt = latest_scanned_details.get('name', 'N/A')
+        role_txt = latest_scanned_details.get('role', 'N/A')
+        draw_text(display, f"Driver: {name_txt} ({role_txt})", (box_x + 20, box_y + 125), 0.72, (20, 25, 35), 2)
+        
+        plate_txt = latest_scanned_details.get('plate', 'N/A')
+        type_txt = latest_scanned_details.get('type', 'N/A')
+        draw_text(display, f"Plate: {plate_txt}   |   Type: {type_txt}", (box_x + 20, box_y + 165), 0.72, (170, 60, 20), 2)
+        
+        brand_txt = latest_scanned_details.get('brand', 'N/A')
+        draw_text(display, f"Vehicle: {brand_txt}", (box_x + 20, box_y + 205), 0.70, (40, 45, 55), 1)
+        
+        draw_text(display, "* Realtime registration record synced & verified with Supabase", (box_x + 20, box_y + 250), 0.58, (110, 115, 125), 1)
+    else:
+        draw_text(display, "NO QR CODE SCANNED YET", (box_x + 25, box_y + 105), 0.82, (120, 125, 135), 2)
+        draw_text(display, "Point any vehicle QR sticker to the active camera scanner.", (box_x + 25, box_y + 145), 0.65, (75, 80, 90), 1)
+        draw_text(display, "The vehicle's details and entry/exit status will display here.", (box_x + 25, box_y + 180), 0.62, (95, 100, 110), 1)
+        draw_text(display, "Click 'Exit Camera >' or '< Entrance Camera' button above to switch views.", (box_x + 25, box_y + 225), 0.62, (45, 120, 190), 1)
+
+def render_side(img, side, offset_x=0):
+    # Full-width camera layout (W x H//2)
     cx = offset_x
-    title = "ENTRANCE" if side.type == 'in' else "EXIT"
-    draw_text(img, title, (cx + 10, 30), 1.0, (0, 255, 255), 2)
+    title = "ENTRANCE CAMERA" if side.type == 'in' else "EXIT CAMERA"
+    draw_text(img, title, (25, 38), 1.0, (0, 255, 255), 2)
+
+    # Top-right View Toggle Button
+    if CURRENT_VIEW == 'in':
+        draw_btn(img, (W - 210, 15, 190, 42), "Exit Camera >", (50, 150, 220))
+    else:
+        draw_btn(img, (W - 245, 15, 225, 42), "< Entrance Camera", (50, 150, 220))
 
     # State machine UI
     if side.state == GateState.SCANNING:
-        # Scanning animation line (sweeping up and down)
+        # Full-width laser line
         cycle_duration = 3.0
         t = (time.time() + side.anim_offset) % cycle_duration
         progress = (t / (cycle_duration / 2)) if t < (cycle_duration / 2) else (2.0 - t / (cycle_duration / 2))
-        line_y = int(progress * (H // 2 - 10)) + 5 # Keep it slightly within bounds
-        cv2.line(img, (cx, line_y), (cx + W//2, line_y), (0, 255, 0), 2)
+        line_y = int(progress * (H // 2 - 10)) + 5
+        cv2.line(img, (0, line_y), (W, line_y), (0, 255, 0), 2)
         
-        # Transparent glow effect
         overlay = img.copy()
-        cv2.rectangle(overlay, (cx, max(0, line_y - 30)), (cx + W//2, line_y), (0, 255, 0), -1)
+        cv2.rectangle(overlay, (0, max(0, line_y - 30)), (W, line_y), (0, 255, 0), -1)
         cv2.addWeighted(overlay, 0.2, img, 0.8, 0, img)
 
-        draw_text(img, "No QR Code Detected", (cx + 20, 80), 0.8, (0, 255, 255), 2)
-        draw_text(img, "Hold QR code anywhere in this area", (cx + 20, 110), 0.6)
-        draw_btn(img, (cx + W//2 - 160, H//2 - 60, 150, 50), "MANUAL OPEN", (0,140,255))
+        if side.type == 'out' and time.time() < getattr(side, 'scan_cooldown_end', 0):
+            wait_s = max(1, int(side.scan_cooldown_end - time.time()) + 1)
+            draw_text(img, f"Scanner Cooldown: Ready in {wait_s}s", (25, 80), 0.8, (0, 200, 255), 2)
+            draw_text(img, "Please wait 5s before scanning next exit QR", (25, 110), 0.6)
+        else:
+            draw_text(img, "No QR Code Detected", (25, 80), 0.8, (0, 255, 255), 2)
+            draw_text(img, "Hold QR code in camera view", (25, 110), 0.6)
+
+        if side.type == 'out':
+            draw_btn(img, (W - 350, H//2 - 60, 160, 48), "MANUAL OPEN", (0,140,255))
+            draw_btn(img, (W - 180, H//2 - 60, 160, 48), "PROLONG", (180,100,30))
+        else:
+            draw_btn(img, (W - 180, H//2 - 60, 160, 48), "MANUAL OPEN", (0,140,255))
 
         if side.type == 'in':
             max_cap = global_stats.get('maxCapacity', -1)
@@ -951,13 +1353,8 @@ def render_side(img, side, offset_x):
                 side.state = GateState.CAMPUS_FULL
     
     elif side.state == GateState.DETECTED:
-        # Access vehicle information from separate table
         vehicle_data = getattr(side, 'vehicle_data', {})
-        
-        # Debug print to check vehicle data
         if not vehicle_data:
-            print(f"DEBUG: No vehicle_data for {side.type} gate, attempting to fetch again")
-            # Try to fetch vehicle data again if missing
             try:
                 vehicle_info_id = side.data.get('vehicle_information_id')
                 if vehicle_info_id:
@@ -965,379 +1362,418 @@ def render_side(img, side, offset_x):
                     if vehicle_response.data:
                         side.vehicle_data = vehicle_response.data[0]
                         vehicle_data = side.vehicle_data
-                        print(f"DEBUG: Re-fetched vehicle data: {vehicle_data}")
-            except Exception as e:
-                print(f"DEBUG: Error re-fetching vehicle data: {e}")
+            except:
+                pass
         
-        # Display role, campus, plate number, and color
-        draw_text(img, f"Role: {side.data.get('role', 'N/A')}", (cx + 20, 80), 0.8)
-        draw_text(img, f"Campus: {side.data.get('campus', 'N/A')}", (cx + 20, 110), 0.8)
+        draw_text(img, f"Role: {side.data.get('role', 'N/A')}", (25, 80), 0.8)
+        draw_text(img, f"Campus: {side.data.get('campus', 'N/A')}", (25, 110), 0.8)
         
-        # Access vehicle information for plate number and color
         vehicle_plate = vehicle_data.get('plate_number', 'N/A') if vehicle_data else 'N/A'
         vehicle_color = vehicle_data.get('color', 'N/A') if vehicle_data else 'N/A'
         vehicle_brand = vehicle_data.get('brand', 'N/A') if vehicle_data else 'N/A'
         
-        draw_text(img, f"Plate: {vehicle_plate}", (cx + 20, 140), 0.8)
-        draw_text(img, f"Color: {vehicle_color}", (cx + 20, 170), 0.8)
-        draw_text(img, f"Brand: {vehicle_brand}", (cx + 20, 200), 0.8)
+        draw_text(img, f"Plate: {vehicle_plate}", (25, 140), 0.8)
+        draw_text(img, f"Color: {vehicle_color}", (25, 170), 0.8)
+        draw_text(img, f"Brand: {vehicle_brand}", (25, 200), 0.8)
         
-        # Display the actual logged status
         status_text = getattr(side, 'logged_status', 'UNKNOWN')
-        if status_text == "REGISTERED":
-            draw_text(img, f"STATUS: {status_text}", (cx + 20, 230), 0.8, (0, 255, 0), 2)
-        else:
-            draw_text(img, f"STATUS: {status_text}", (cx + 20, 230), 0.8, (0, 165, 255), 2)
+        status_col = (0, 255, 0) if status_text == "REGISTERED" else (0, 165, 255)
+        draw_text(img, f"STATUS: {status_text}", (25, 230), 0.8, status_col, 2)
         
         btn_text = "LET IN" if side.type == 'in' else "LET OUT"
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), btn_text)
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "SKIP", (0,0,200))
+        draw_btn(img, (25, H//2 - 65, 140, 48), btn_text)
+        draw_btn(img, (185, H//2 - 65, 110, 48), "SKIP", (0,0,200))
         
     elif side.state == GateState.INVALID_QR:
-        draw_text(img, "INVALID QR CODE", (cx + 20, 80), 0.8, (0,0,255), 2)
-        draw_text(img, f"Content: {side.data[:20]}...", (cx + 20, 110), 0.6)
-        draw_text(img, "Not a recognized registration.", (cx + 20, 140), 0.6)
-        draw_btn(img, (cx + 20, H//2 - 70, 180, 50), "OPEN MANUALLY", (0,140,255))
-        draw_btn(img, (cx + 210, H//2 - 70, 100, 50), "DISMISS", (100,100,100))
+        draw_text(img, "INVALID QR CODE", (25, 80), 0.8, (0,0,255), 2)
+        draw_text(img, f"Content: {str(side.data)[:25]}...", (25, 110), 0.6)
+        draw_text(img, "Not a recognized registration.", (25, 140), 0.6)
+        draw_btn(img, (25, H//2 - 65, 180, 48), "OPEN MANUALLY", (0,140,255))
+        draw_btn(img, (220, H//2 - 65, 110, 48), "DISMISS", (100,100,100))
         
     elif side.state == GateState.WARNING:
-        draw_text(img, "ANOMALY WARNING", (cx + 20, 80), 0.8, (0,165,255), 2)
-        draw_text(img, side.anomaly_desc, (cx + 20, 110), 0.6)
-        draw_btn(img, (cx + 20, H//2 - 70, 250, 50), "ACKNOWLEDGE & PROCEED", (0,140,255))
-        draw_btn(img, (cx + 280, H//2 - 70, 100, 50), "SKIP", (0,0,200))
+        draw_text(img, "ANOMALY WARNING", (25, 80), 0.8, (0,165,255), 2)
+        draw_text(img, side.anomaly_desc, (25, 110), 0.6)
+        draw_btn(img, (25, H//2 - 65, 250, 48), "ACKNOWLEDGE & PROCEED", (0,140,255))
+        draw_btn(img, (290, H//2 - 65, 110, 48), "SKIP", (0,0,200))
         
     elif side.state == GateState.LOG_WARNING:
-        # Bold red warning for same-day double-in / double-out
-        draw_text(img, "!! LOG WARNING !!", (cx + 20, 60), 1.0, (0, 0, 255), 3)
-        draw_text(img, side.anomaly_desc[:55], (cx + 20, 105), 0.65, (0, 100, 255), 2)
-        btn_text = "PROCEED ANYWAY" if side.type == 'in' else "PROCEED ANYWAY"
-        draw_btn(img, (cx + 20, H//2 - 70, 200, 50), btn_text, (0, 140, 255))
-        draw_btn(img, (cx + 230, H//2 - 70, 100, 50), "SKIP", (0, 0, 200))
+        # High-impact alert box for cross-campus duplicate entry flag
+        box_x = 25
+        box_y = 55
+        box_w = W - 50
+        box_h = H//2 - 75
+        
+        overlay = img.copy()
+        cv2.rectangle(overlay, (box_x, box_y), (box_x + box_w, box_y + box_h), (10, 10, 60), -1)
+        cv2.addWeighted(overlay, 0.90, img, 0.10, 0, img)
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (0, 0, 255), 3)
+        
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 45), (0, 0, 180), -1)
+        draw_text(img, "!! FLAGGED: DUPLICATE ENTRY WARNING !!", (box_x + 20, box_y + 32), 0.95, (255, 255, 255), 3)
+        
+        draw_text(img, side.anomaly_desc, (box_x + 25, box_y + 80), 0.75, (0, 220, 255), 2)
+        draw_text(img, "Security Notice: Vehicle is currently marked inside a campus and has not checked out.", (box_x + 25, box_y + 115), 0.62, (200, 220, 200), 1)
+        draw_text(img, "To allow entry anyway, security administrator must confirm manual override.", (box_x + 25, box_y + 145), 0.58, (180, 180, 180), 1)
+        
+        draw_btn(img, (box_x + 25, H//2 - 65, 260, 48), "OVERRIDE & LET IN", (0, 140, 255))
+        draw_btn(img, (box_x + 305, H//2 - 65, 160, 48), "DENY (SKIP)", (0, 0, 200))
 
     elif side.state == GateState.API_ERROR:
-        draw_text(img, "API ERROR", (cx + 20, 80), 0.8, (0,0,255), 2)
-        draw_text(img, side.api_error[:40], (cx + 20, 110), 0.6)
-        draw_btn(img, (cx + 20, H//2 - 70, 180, 50), "OPEN MANUALLY", (0,140,255))
-        draw_btn(img, (cx + 210, H//2 - 70, 100, 50), "DISMISS", (100,100,100))
+        draw_text(img, "API ERROR", (25, 80), 0.8, (0,0,255), 2)
+        draw_text(img, side.api_error[:50], (25, 110), 0.6)
+        draw_btn(img, (25, H//2 - 65, 180, 48), "OPEN MANUALLY", (0,140,255))
+        draw_btn(img, (220, H//2 - 65, 110, 48), "DISMISS", (100,100,100))
 
     elif side.state == GateState.TIMEOUT:
         rem = max(0, int(side.timeout_end - time.time()))
-        draw_text(img, f"GATE OPEN - Closing in {rem}s", (cx + 20, 150), 1.0, (0,255,0), 2)
+        draw_text(img, f"GATE OPEN - Closing in {rem}s", (25, 140), 1.0, (0,255,0), 2)
         if side.type == 'out':
-            draw_text(img, "Scan QR to refresh timer", (cx + 20, 180), 0.6, (200, 200, 200))
-        draw_btn(img, (cx + 20, H//2 - 70, 150, 50), "FORCE CLOSE", (0,0,200))
+            now = time.time()
+            if now < getattr(side, 'scan_cooldown_end', 0):
+                wait_s = max(1, int(side.scan_cooldown_end - now) + 1)
+                draw_text(img, f"Exit Logged! Next scan ready in: {wait_s}s", (25, 175), 0.65, (0, 200, 255), 2)
+            else:
+                draw_text(img, "Scan QR to refresh timer (5s delay)", (25, 175), 0.6, (200, 200, 200))
+            draw_btn(img, (25, H//2 - 65, 150, 48), "FORCE CLOSE", (0,0,200))
+            draw_btn(img, (190, H//2 - 65, 150, 48), "PROLONG", (180,100,30))
+        else:
+            draw_btn(img, (25, H//2 - 65, 150, 48), "FORCE CLOSE", (0,0,200))
         if rem == 0: force_close_gate(side)
+
+    elif side.state == GateState.PROLONG:
+        now = time.time()
+        cd_end = max(getattr(side, 'scan_cooldown_end', 0), getattr(side, 'prolong_ready_time', 0))
+        if now < cd_end:
+            wait_s = max(1, int(cd_end - now) + 1)
+            
+            # Full-width EXITED feature card
+            card_x = 25
+            card_y = 15
+            card_w = W - 50
+            card_h = H//2 - 80
+            
+            overlay = img.copy()
+            cv2.rectangle(overlay, (card_x, card_y), (card_x + card_w, card_y + card_h), (10, 42, 16), -1)
+            cv2.addWeighted(overlay, 0.90, img, 0.10, 0, img)
+            cv2.rectangle(img, (card_x, card_y), (card_x + card_w, card_y + card_h), (0, 255, 0), 3)
+            
+            cv2.rectangle(img, (card_x, card_y), (card_x + card_w, card_y + 55), (0, 160, 45), -1)
+            draw_text(img, "EXITED", (card_x + card_w//2 - 75, card_y + 40), 1.3, (255, 255, 255), 4)
+            
+            draw_text(img, "VEHICLE DEPARTURE CONFIRMED & LOGGED", (card_x + 30, card_y + 85), 0.68, (0, 255, 200), 2)
+            
+            p_info = getattr(side, 'last_prolong_exit', {})
+            plate_txt = p_info.get('plate') or (latest_scanned_details.get('plate') if latest_scanned_details else 'N/A')
+            driver_txt = p_info.get('name') or (latest_scanned_details.get('name') if latest_scanned_details else 'Driver')
+            role_txt = p_info.get('role') or (latest_scanned_details.get('role') if latest_scanned_details else '')
+            time_txt = p_info.get('time') or datetime.now().strftime("%I:%M:%S %p")
+            
+            draw_text(img, f"Plate Number : {plate_txt}", (card_x + 30, card_y + 125), 0.85, (255, 255, 255), 2)
+            draw_text(img, f"Driver / Role: {driver_txt} ({role_txt})", (card_x + 30, card_y + 160), 0.72, (0, 255, 255), 2)
+            draw_text(img, f"Time Logged  : {time_txt}", (card_x + 30, card_y + 192), 0.68, (200, 220, 200), 1)
+            
+            draw_text(img, f"Scanner ready in {wait_s}s to scan next vehicle...", (card_x + 30, card_y + 225), 0.68, (0, 230, 255), 2)
+            draw_btn(img, (card_x + 30, H//2 - 60, 150, 45), "CLOSE", (0, 0, 200))
+        else:
+            draw_text(img, "BARRIER PERMANENT OPEN (PROLONG)", (25, 50), 0.85, (0, 255, 0), 2)
+            draw_text(img, "SCANNING FOR EXIT QR CODES", (25, 90), 0.85, (0, 255, 255), 2)
+            draw_text(img, "Hold QR code in camera view to exit (5s delay between cars)", (25, 120), 0.6, (200, 200, 200), 1)
+            draw_btn(img, (25, H//2 - 60, 150, 45), "CLOSE", (0, 0, 200))
         
     elif side.state == GateState.CAMPUS_FULL:
-        draw_text(img, "CAMPUS FULL", (cx + 20, 80), 1.0, (0,0,255), 3)
+        draw_text(img, "CAMPUS FULL", (25, 80), 1.0, (0,0,255), 3)
         max_cap = global_stats.get('maxCapacity', -1)
         cap_str = str(max_cap) if max_cap != -1 else "No Limit"
         currently_in = global_stats.get('currentlyIn', 0)
         available_slots = global_stats.get('availableSlots', 0)
         
-        draw_text(img, f"Total Capacity: {cap_str}", (cx + 20, 120), 0.7)
-        draw_text(img, f"Currently In: {currently_in}", (cx + 20, 150), 0.7)
-        draw_text(img, f"Available Slots: {available_slots}", (cx + 20, 180), 0.7, (0, 200, 255))
-        draw_btn(img, (cx + 20, H//2 - 70, 230, 50), "OVERRIDE (LET IN)", (0,140,255))
-        draw_btn(img, (cx + 260, H//2 - 70, 150, 50), "VIP ACCESS", (200,50,200))
+        draw_text(img, f"Total Capacity: {cap_str}", (25, 120), 0.7)
+        draw_text(img, f"Currently In: {currently_in}", (25, 150), 0.7)
+        draw_text(img, f"Available Slots: {available_slots}", (25, 180), 0.7, (0, 200, 255))
+        draw_btn(img, (25, H//2 - 65, 230, 48), "OVERRIDE (LET IN)", (0,140,255))
+        draw_btn(img, (270, H//2 - 65, 150, 48), "VIP ACCESS", (200,50,200))
         
-        # Check if capacity clears
         if max_cap == -1 or currently_in < max_cap:
             side.state = GateState.SCANNING
 
     elif side.state == GateState.MANUAL_TYPE:
-        draw_text(img, "MANUAL ENTRY", (cx + 20, 80), 0.8, (255,255,255), 2)
-        draw_btn(img, (cx + 20, 110, 120, 50), "REG ID", (150,100,50))
-        draw_btn(img, (cx + 150, 110, 100, 50), "GUEST", (100,150,50))
-        draw_btn(img, (cx + 260, 110, 150, 50), "VIP ACCESS", (200,50,200))
-        draw_btn(img, (cx + 20, H//2 - 70, 100, 50), "CANCEL", (100,100,100))
+        draw_text(img, "MANUAL ENTRY", (25, 80), 0.8, (255,255,255), 2)
+        draw_btn(img, (25, 110, 120, 50), "REG ID", (150,100,50))
+        draw_btn(img, (160, 110, 100, 50), "GUEST", (100,150,50))
+        draw_btn(img, (280, 110, 150, 50), "VIP ACCESS", (200,50,200))
+        draw_btn(img, (25, H//2 - 65, 100, 48), "CANCEL", (100,100,100))
         
     elif side.state == GateState.MANUAL_REG:
-        draw_text(img, "ENTER REG ID (Type on keyboard)", (cx + 20, 80), 0.7)
-        cv2.rectangle(img, (cx + 20, 100), (cx + 300, 140), (255,255,255), 1)
-        draw_text(img, side.form_data[0] + "_", (cx + 30, 125), 0.7)
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), "LOOKUP", (50,200,50))
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "CANCEL", (100,100,100))
+        draw_text(img, "ENTER REG ID (Type on keyboard)", (25, 80), 0.7)
+        cv2.rectangle(img, (25, 100), (320, 140), (255,255,255), 1)
+        draw_text(img, side.form_data[0] + "_", (35, 125), 0.7)
+        draw_btn(img, (25, H//2 - 65, 120, 48), "LOOKUP", (50,200,50))
+        draw_btn(img, (160, H//2 - 65, 100, 48), "CANCEL", (100,100,100))
         
-    elif side.state == GateState.MANUAL_GUEST_IN:
-        draw_text(img, "GUEST IN (Type on keyboard & Click field)", (cx + 20, 40), 0.6)
-        
-        c1 = (255,255,0) if side.input_field == 0 else (255,255,255)
-        draw_text(img, "Plate Number:", (cx + 20, 70), 0.6, c1)
-        cv2.rectangle(img, (cx + 130, 50), (cx + 400, 80), c1, 1)
-        draw_text(img, side.form_data[0] + ("_" if side.input_field==0 else ""), (cx + 135, 70), 0.6)
-        
-        c2 = (255,255,0) if side.input_field == 1 else (255,255,255)
-        draw_text(img, "ID Number:", (cx + 20, 100), 0.6, c2)
-        cv2.rectangle(img, (cx + 130, 80), (cx + 400, 110), c2, 1)
-        draw_text(img, side.form_data[1] + ("_" if side.input_field==1 else ""), (cx + 135, 100), 0.6)
-        
-        c3 = (255,255,0) if side.input_field == 2 else (255,255,255)
-        draw_text(img, "Purpose:", (cx + 20, 130), 0.6, c3)
-        cv2.rectangle(img, (cx + 130, 110), (cx + 400, 140), c3, 1)
-        draw_text(img, side.form_data[2] + ("_" if side.input_field==2 else ""), (cx + 135, 130), 0.6)
-        
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), "CONFIRM", (50,200,50))
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "CANCEL", (100,100,100))
-
-    elif side.state == GateState.MANUAL_GUEST_CONFIRM:
-        draw_text(img, "CONFIRM GUEST ENTRY", (cx + 20, 60), 0.8, (0, 255, 255), 2)
-        draw_text(img, f"Plate: {side.form_data[0]}", (cx + 20, 90), 0.7)
-        draw_text(img, f"ID Number: {side.form_data[1]}", (cx + 20, 110), 0.7)
-        draw_text(img, f"Purpose: {side.form_data[2]}", (cx + 20, 130), 0.7)
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), "PROCEED", (50,200,50))
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "REJECT", (0,0,200))
+    elif side.state in (GateState.MANUAL_GUEST_IN, GateState.MANUAL_GUEST_CONFIRM):
+        draw_text(img, "GUEST FORM ACTIVE", (25, 65), 0.85, (0, 255, 255), 2)
+        draw_text(img, "Fill out guest details in panel below.", (25, 100), 0.62, (200, 200, 200), 1)
+        draw_btn(img, (25, 130, 120, 42), "CANCEL", (100,100,100))
     
-    elif side.state == GateState.MANUAL_GUEST_OUT:
-        draw_text(img, "GUEST OUT - SEARCH GUEST", (cx + 20, 60), 0.7, (0, 255, 255), 2)
-        draw_text(img, "Enter Plate Number:", (cx + 20, 90), 0.6)
-        cv2.rectangle(img, (cx + 20, 100), (cx + 300, 140), (255,255,255), 1)
-        draw_text(img, side.form_data[0] + "_", (cx + 30, 125), 0.7)
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), "SEARCH", (50,200,50))
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "CANCEL", (100,100,100))
-    
-    elif side.state == GateState.MANUAL_GUEST_SEARCH_RESULT:
-        draw_text(img, "GUEST RECORD FOUND", (cx + 20, 60), 0.8, (0, 255, 0), 2)
-        if side.data:
-            draw_text(img, f"Plate: {side.data.get('plate', 'N/A')}", (cx + 20, 90), 0.7)
-            draw_text(img, f"ID: {side.data.get('id_number', 'N/A')}", (cx + 20, 110), 0.7)
-            draw_text(img, f"Purpose: {side.data.get('purpose', 'N/A')}", (cx + 20, 130), 0.7)
-            # Format entry time
-            entry_time = side.data.get('timestamp', 'N/A')
-            if entry_time and entry_time != 'N/A':
-                try:
-                    dt = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
-                    entry_time = dt.strftime('%H:%M')
-                except:
-                    pass
-            draw_text(img, f"Entry Time: {entry_time}", (cx + 20, 150), 0.6)
-        draw_btn(img, (cx + 20, H//2 - 70, 120, 50), "EXIT", (50,200,50))
-        draw_btn(img, (cx + 150, H//2 - 70, 100, 50), "CANCEL", (100,100,100))
+    elif side.state in (GateState.MANUAL_GUEST_OUT, GateState.MANUAL_GUEST_SEARCH_RESULT):
+        draw_text(img, "GUEST EXIT ACTIVE", (25, 65), 0.85, (0, 255, 255), 2)
+        draw_text(img, "Search guest by plate in panel below.", (25, 100), 0.62, (200, 200, 200), 1)
+        draw_btn(img, (25, 130, 120, 42), "CANCEL", (100,100,100))
     
     elif side.state == GateState.GUEST_WARNING:
-        draw_text(img, "GUEST ANOMALY", (cx + 20, 80), 0.8, (0,165,255), 2)
-        draw_text(img, side.anomaly_desc[:55], (cx + 20, 110), 0.55, (0,200,255))
-        draw_btn(img, (cx + 20, H//2 - 70, 250, 50), "ACKNOWLEDGE & PROCEED", (0,140,255))
-        draw_btn(img, (cx + 280, H//2 - 70, 100, 50), "SKIP", (0,0,200))
+        draw_text(img, "GUEST ANOMALY", (25, 80), 0.8, (0,165,255), 2)
+        draw_text(img, side.anomaly_desc[:55], (25, 110), 0.55, (0,200,255))
+        draw_btn(img, (25, H//2 - 65, 250, 48), "ACKNOWLEDGE & PROCEED", (0,140,255))
+        draw_btn(img, (290, H//2 - 65, 100, 48), "SKIP", (0,0,200))
 
 def mouse_callback(event, x, y, flags, param):
-    global log_scroll_offset  # FIX: without this, mouse-wheel scrolling raised UnboundLocalError
+    global log_scroll_offset
     global BACK_TO_CAMPUS
+    global CURRENT_VIEW
     
     if event == cv2.EVENT_MOUSEWHEEL:
-        if x > W//2 and y > H//2: # Only scroll if hovering over logs area
-            max_visible = 8
-            max_offset = max(0, len(global_logs) - max_visible)
-            if flags > 0: # Scroll up
-                log_scroll_offset = max(0, log_scroll_offset - 1)
-            else: # Scroll down
-                log_scroll_offset = min(max_offset, log_scroll_offset + 1)
         return
         
-    if event != cv2.EVENT_LBUTTONDOWN: return
-    
-    # Bottom Left - Refresh
-    if in_rect(x, y, (20, H - 60, 100, 40)):
-        print("Refresh clicked - updating parking availability data")
-        refresh_parking_data()
+    if event != cv2.EVENT_LBUTTONDOWN:
         return
         
-    # Bottom Left - BACK to campus selection (only when both gates are idle)
-    if in_rect(x, y, (130, H - 60, 100, 40)):
-        if side_in.state == GateState.SCANNING and side_out.state == GateState.SCANNING:
-            print("DEBUG: BACK clicked - returning to campus selection")
-            BACK_TO_CAMPUS = True
+    # --- BOTTOM HALF CLICKS (y > H//2) ---
+    if y > H//2:
+        # Left side buttons (REFRESH & BACK)
+        if x < 500:
+            if in_rect(x, y, (30, H - 65, 120, 42)):
+                print("Refresh clicked - updating parking availability data")
+                refresh_parking_data()
+                return
+            if in_rect(x, y, (165, H - 65, 120, 42)):
+                if side_in.state == GateState.SCANNING and side_out.state in (GateState.SCANNING, GateState.PROLONG):
+                    print("DEBUG: BACK clicked - returning to campus selection")
+                    BACK_TO_CAMPUS = True
+                return
+            return
+
+        # Right side Guest Entry Form Clicks
+        box_x = 520
+        box_y = H//2 + 15
+        if side_in.state == GateState.MANUAL_GUEST_IN:
+            if in_rect(x, y, (box_x + 180, box_y + 85, 350, 38)):
+                side_in.input_field = 0
+                return
+            elif in_rect(x, y, (box_x + 180, box_y + 133, 350, 38)):
+                side_in.input_field = 1
+                return
+            elif in_rect(x, y, (box_x + 180, box_y + 181, 350, 38)):
+                side_in.input_field = 2
+                return
+            elif in_rect(x, y, (box_x + 180, box_y + 245, 150, 45)): # CONFIRM
+                side_in.state = GateState.MANUAL_GUEST_CONFIRM
+                return
+            elif in_rect(x, y, (box_x + 350, box_y + 245, 130, 45)): # CANCEL
+                close_gate(side_in)
+                return
+        elif side_in.state == GateState.MANUAL_GUEST_CONFIRM:
+            if in_rect(x, y, (box_x + 35, box_y + 240, 180, 48)): # GRANT ACCESS
+                if side_in.form_data[0] == "VIP":
+                    submit_vip(side_in)
+                else:
+                    submit_manual_guest(side_in)
+                return
+            elif in_rect(x, y, (box_x + 235, box_y + 240, 140, 48)): # BACK / EDIT
+                side_in.state = GateState.MANUAL_GUEST_IN
+                return
+
+        # Right side Guest Exit Form Clicks
+        if side_out.state == GateState.MANUAL_GUEST_OUT:
+            if in_rect(x, y, (box_x + 180, box_y + 98, 350, 44)):
+                side_out.input_field = 0
+                return
+            elif in_rect(x, y, (box_x + 180, box_y + 175, 150, 48)): # SEARCH
+                search_guest(side_out)
+                return
+            elif in_rect(x, y, (box_x + 350, box_y + 175, 130, 48)): # CANCEL
+                close_gate(side_out)
+                return
+        elif side_out.state == GateState.MANUAL_GUEST_SEARCH_RESULT:
+            if in_rect(x, y, (box_x + 35, box_y + 245, 175, 48)): # ALLOW EXIT
+                submit_guest_exit(side_out)
+                return
+            elif in_rect(x, y, (box_x + 235, box_y + 245, 130, 48)): # CANCEL
+                close_gate(side_out)
+                return
+
         return
 
-    # Check sides
-    for side, cx in [(side_in, 0), (side_out, W//2)]:
-        if y > H//2: continue # Only top half has buttons
-        
-        if side.state == GateState.SCANNING:
-            if in_rect(x, y, (cx + W//2 - 160, H//2 - 60, 150, 50)):
+    # --- TOP HALF CLICKS (y <= H//2) ---
+    # Tab View Switch Button (top right)
+    if CURRENT_VIEW == 'in':
+        if in_rect(x, y, (W - 210, 15, 190, 42)): # Exit Camera >
+            CURRENT_VIEW = 'out'
+            print("Switched view to EXIT CAMERA")
+            return
+    else:
+        if in_rect(x, y, (W - 245, 15, 225, 42)): # < Entrance Camera
+            CURRENT_VIEW = 'in'
+            print("Switched view to ENTRANCE CAMERA")
+            return
+
+    # Route top click to the currently visible gate side
+    side = side_in if CURRENT_VIEW == 'in' else side_out
+    
+    if side.state == GateState.SCANNING:
+        if side.type == 'out':
+            if in_rect(x, y, (W - 180, H//2 - 60, 160, 48)): # PROLONG
+                start_prolong_gate(side)
+            elif in_rect(x, y, (W - 350, H//2 - 60, 160, 48)): # MANUAL OPEN
                 side.state = GateState.MANUAL_TYPE
                 side.form_data = ["", "", ""]
                 side.snapshot = getattr(side, 'latest_crop', None)
-        
-        elif side.state == GateState.DETECTED:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)):
-                print(f"DEBUG: LET IN button clicked for {side.type}")
-                submit_entry_exit(side)
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                close_gate(side)
-                
-        elif side.state == GateState.INVALID_QR or side.state == GateState.API_ERROR:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 180, 50)): # MANUAL OPEN
-                print(f"DEBUG: Manual open button clicked for {side.type}")
-                manual_open_gate(side)  # Direct motor control without database
-            elif in_rect(x, y, (cx + 210, H//2 - 70, 100, 50)): # DISMISS
-                close_gate(side)
-                
-        elif side.state == GateState.WARNING:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 250, 50)):
-                submit_entry_exit(side)
-            elif in_rect(x, y, (cx + 280, H//2 - 70, 100, 50)):
-                close_gate(side)
-
-        elif side.state == GateState.LOG_WARNING:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 200, 50)):  # PROCEED ANYWAY
-                side.state = GateState.DETECTED
-            elif in_rect(x, y, (cx + 230, H//2 - 70, 100, 50)):  # SKIP
-                close_gate(side)
-                
-        elif side.state == GateState.TIMEOUT:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 150, 50)):
-                force_close_gate(side)
-                
-        elif side.state == GateState.CAMPUS_FULL:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 230, 50)):
-                side.form_data = ["Override", "N/A", "Campus Full Override"]
-                if side.form_data[0] == "VIP":
-                    submit_vip(side)
-                else:
-                    submit_manual_guest(side)
-            elif in_rect(x, y, (cx + 260, H//2 - 70, 150, 50)):
-                side.form_data = ["VIP", "VIP", "VIP Access"]
-                submit_vip(side)
-                
-        elif side.state == GateState.MANUAL_TYPE:
-            if in_rect(x, y, (cx + 20, 110, 120, 50)): # REG
-                side.state = GateState.MANUAL_REG
-            elif in_rect(x, y, (cx + 150, 110, 100, 50)): # GUEST
-                side.state = GateState.MANUAL_GUEST_IN if side.type == 'in' else GateState.MANUAL_GUEST_OUT
-            elif in_rect(x, y, (cx + 260, 110, 150, 50)): # VIP
-                side.form_data = ["VIP", "VIP", "VIP Access"]
-                submit_vip(side)
-            elif in_rect(x, y, (cx + 20, H//2 - 70, 100, 50)):
-                close_gate(side)
-                
-        elif side.state == GateState.MANUAL_REG:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)): # LOOKUP
-                # Look up by registration ID directly
-                reg_id = side.form_data[0].strip()
-                if reg_id:
-                    try:
-                        response = supabase.table('registration').select('*').eq('registration_id', reg_id).execute()
-                        if response.data:
-                            reg = response.data[0]
-                            side.data = reg
-                            side.snapshot = side.snapshot if side.snapshot is not None else np.zeros((H//2, W//2, 3), dtype=np.uint8)
-                            side.logged_status = "REGISTERED"
-                            
-                            # Fetch vehicle information from separate table
-                            try:
-                                print(f"DEBUG (Manual lookup): Registration data: {reg}")
-                                vehicle_info_id = reg.get('vehicle_information_id')
-                                print(f"DEBUG (Manual lookup): vehicle_information_id: {vehicle_info_id}")
-                                
-                                if vehicle_info_id:
-                                    vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
-                                    print(f"DEBUG (Manual lookup): Vehicle response: {vehicle_response.data}")
-                                    if vehicle_response.data:
-                                        side.vehicle_data = vehicle_response.data[0]
-                                        print(f"DEBUG (Manual lookup): Vehicle data loaded: {side.vehicle_data}")
-                                    else:
-                                        print(f"DEBUG (Manual lookup): No vehicle found with ID: {vehicle_info_id}")
-                                        side.vehicle_data = {}
-                                else:
-                                    print(f"DEBUG (Manual lookup): No vehicle_information_id in registration")
-                                    side.vehicle_data = {}
-                            except Exception as e:
-                                print(f"DEBUG (Manual lookup): Error fetching vehicle information: {e}")
-                                side.vehicle_data = {}
-                            
-                            # Get last log for this registration using correct column names
-                            try:
-                                last_log_response = supabase.table('vehicle_log').select('*').eq('registration_id', reg['registration_id']).eq('campus', SELECTED_CAMPUS).order('created_at', desc=True).limit(1).execute()
-                                last_log = last_log_response.data[0] if last_log_response.data else None
-                            except:
-                                last_log = None
-
-                            # Simple logic: if registration exists in database, it's REGISTERED
-                            side.logged_status = "REGISTERED"
-                            side.status_warning_pending = False
-
-                            # Check for same-day log warning (using check_in/check_out columns)
-                            if last_log:
-                                if side.type == 'in' and last_log.get('check_in') and not last_log.get('check_out'):
-                                    # Format timestamp for display
-                                    check_in_time = last_log['check_in']
-                                    try:
-                                        dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
-                                        check_in_time = dt.strftime('%H:%M')
-                                    except:
-                                        pass
-                                    side.anomaly_desc = f"Vehicle already IN at {check_in_time}!"
-                                    side.anomaly_id = last_log.get('vehicle_log_id')
-                                    side.state = GateState.LOG_WARNING
-                                elif side.type == 'out' and last_log.get('check_out') and not last_log.get('check_in'):
-                                    # Format timestamp for display
-                                    check_out_time = last_log['check_out']
-                                    try:
-                                        dt = datetime.fromisoformat(check_out_time.replace('Z', '+00:00'))
-                                        check_out_time = dt.strftime('%H:%M')
-                                    except:
-                                        pass
-                                    side.anomaly_desc = f"Vehicle already OUT at {check_out_time}!"
-                                    side.anomaly_id = last_log.get('vehicle_log_id')
-                                    side.state = GateState.LOG_WARNING
-                                else:
-                                    side.state = GateState.DETECTED
-                            else:
-                                side.state = GateState.DETECTED
-                        else:
-                            side.state = GateState.INVALID_QR
-                            side.data = reg_id
-                    except Exception as e:
-                        side.state = GateState.API_ERROR
-                        side.api_error = f"Lookup failed: {str(e)}"
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                close_gate(side)
-                
-        elif side.state == GateState.MANUAL_GUEST_IN:
-            if in_rect(x, y, (cx + 130, 50, 270, 30)): side.input_field = 0
-            elif in_rect(x, y, (cx + 130, 80, 270, 30)): side.input_field = 1
-            elif in_rect(x, y, (cx + 130, 110, 270, 30)): side.input_field = 2
-            elif in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)):
-                # Move to confirm screen
-                side.state = GateState.MANUAL_GUEST_CONFIRM
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                close_gate(side)
-        
-        elif side.state == GateState.MANUAL_GUEST_CONFIRM:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)):
-                # Proceed with manual guest entry
-                if side.form_data[0] == "VIP":
-                    submit_vip(side)
-                else:
-                    submit_manual_guest(side)
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                # Reject - go back to entry form
-                side.state = GateState.MANUAL_GUEST_IN
+        else:
+            if in_rect(x, y, (W - 180, H//2 - 60, 160, 48)): # MANUAL OPEN
+                side.state = GateState.MANUAL_TYPE
                 side.form_data = ["", "", ""]
-                
-        elif side.state == GateState.MANUAL_GUEST_OUT:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)):
-                # Search for guest by name or plate
-                search_guest(side)
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                close_gate(side)
-        
-        elif side.state == GateState.MANUAL_GUEST_SEARCH_RESULT:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 120, 50)):
-                # Exit guest - open gate automatically
-                submit_guest_exit(side)
-            elif in_rect(x, y, (cx + 150, H//2 - 70, 100, 50)):
-                close_gate(side)
-                
-        elif side.state == GateState.GUEST_WARNING:
-            if in_rect(x, y, (cx + 20, H//2 - 70, 250, 50)):
-                if side.form_data[0] == "VIP":
-                    submit_vip(side)
-                else:
-                    submit_manual_guest(side)
-            elif in_rect(x, y, (cx + 280, H//2 - 70, 100, 50)):
-                close_gate(side)
+                side.snapshot = getattr(side, 'latest_crop', None)
+    
+    elif side.state == GateState.DETECTED:
+        if in_rect(x, y, (25, H//2 - 65, 140, 48)):
+            print(f"DEBUG: LET IN/OUT clicked for {side.type}")
+            submit_entry_exit(side)
+        elif in_rect(x, y, (185, H//2 - 65, 110, 48)):
+            close_gate(side)
+            
+    elif side.state in (GateState.INVALID_QR, GateState.API_ERROR):
+        if in_rect(x, y, (25, H//2 - 65, 180, 48)): # MANUAL OPEN
+            print(f"DEBUG: Manual open clicked for {side.type}")
+            manual_open_gate(side)
+        elif in_rect(x, y, (220, H//2 - 65, 110, 48)): # DISMISS
+            close_gate(side)
+            
+    elif side.state == GateState.WARNING:
+        if in_rect(x, y, (25, H//2 - 65, 250, 48)):
+            submit_entry_exit(side)
+        elif in_rect(x, y, (290, H//2 - 65, 110, 48)):
+            close_gate(side)
+
+    elif side.state == GateState.LOG_WARNING:
+        # Buttons on enhanced duplicate entry banner
+        box_x = 25
+        if in_rect(x, y, (box_x + 25, H//2 - 65, 260, 48)):  # OVERRIDE & LET IN
+            submit_entry_exit(side)
+        elif in_rect(x, y, (box_x + 305, H//2 - 65, 160, 48)):  # DENY (SKIP)
+            close_gate(side)
+            
+    elif side.state == GateState.TIMEOUT:
+        if in_rect(x, y, (25, H//2 - 65, 150, 48)):
+            force_close_gate(side)
+        elif side.type == 'out' and in_rect(x, y, (190, H//2 - 65, 150, 48)): # PROLONG from timeout
+            start_prolong_gate(side)
+
+    elif side.state == GateState.PROLONG:
+        # CLOSE button
+        if in_rect(x, y, (25, H//2 - 60, 160, 48)) or in_rect(x, y, (55, H//2 - 60, 160, 48)):
+            close_prolong_gate(side)
+            
+    elif side.state == GateState.CAMPUS_FULL:
+        if in_rect(x, y, (25, H//2 - 65, 230, 48)):
+            side.form_data = ["Override", "N/A", "Campus Full Override"]
+            submit_manual_guest(side)
+        elif in_rect(x, y, (270, H//2 - 65, 150, 48)):
+            side.form_data = ["VIP", "VIP", "VIP Access"]
+            submit_vip(side)
+            
+    elif side.state == GateState.MANUAL_TYPE:
+        if in_rect(x, y, (25, 110, 120, 50)): # REG ID
+            side.state = GateState.MANUAL_REG
+        elif in_rect(x, y, (160, 110, 100, 50)): # GUEST
+            side.state = GateState.MANUAL_GUEST_IN if side.type == 'in' else GateState.MANUAL_GUEST_OUT
+        elif in_rect(x, y, (280, 110, 150, 50)): # VIP ACCESS
+            side.form_data = ["VIP", "VIP", "VIP Access"]
+            submit_vip(side)
+        elif in_rect(x, y, (25, H//2 - 65, 100, 48)):
+            close_gate(side)
+            
+    elif side.state == GateState.MANUAL_REG:
+        if in_rect(x, y, (25, H//2 - 65, 120, 48)): # LOOKUP
+            reg_id = side.form_data[0].strip()
+            if reg_id:
+                try:
+                    response = supabase.table('registration').select('*').eq('registration_id', reg_id).execute()
+                    if response.data:
+                        reg = response.data[0]
+                        side.data = reg
+                        side.snapshot = side.snapshot if side.snapshot is not None else np.zeros((H//2, W, 3), dtype=np.uint8)
+                        side.logged_status = "REGISTERED"
+                        
+                        try:
+                            vehicle_info_id = reg.get('vehicle_information_id')
+                            if vehicle_info_id:
+                                vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
+                                side.vehicle_data = vehicle_response.data[0] if vehicle_response.data else {}
+                            else:
+                                side.vehicle_data = {}
+                        except:
+                            side.vehicle_data = {}
+                        
+                        # Cross-campus open log check for duplicate entry
+                        open_cross_log = None
+                        try:
+                            all_logs_res = supabase.table('vehicle_log').select('*')\
+                                .eq('registration_id', reg['registration_id'])\
+                                .order('created_at', desc=True).limit(5).execute()
+                            if all_logs_res.data:
+                                for l_row in all_logs_res.data:
+                                    st = str(l_row.get('logged_status', '')).strip().lower()
+                                    has_in = bool(l_row.get('check_in'))
+                                    has_out = bool(l_row.get('check_out'))
+                                    if (has_in and not has_out) or st == 'inside':
+                                        if st not in ('exited', 'exit', 'denied'):
+                                            open_cross_log = l_row
+                                            break
+                        except:
+                            open_cross_log = None
+
+                        side.logged_status = "REGISTERED"
+                        side.status_warning_pending = False
+
+                        if side.type == 'in' and open_cross_log:
+                            active_campus = (open_cross_log.get('campus') or 'Another').strip()
+                            check_in_time = open_cross_log.get('check_in', '')
+                            try:
+                                dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
+                                check_in_time = dt.strftime('%I:%M %p')
+                            except:
+                                pass
+                            sel_norm = str(SELECTED_CAMPUS or '').strip().lower()
+                            act_norm = active_campus.lower()
+                            if sel_norm in act_norm or act_norm in sel_norm:
+                                side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {SELECTED_CAMPUS.upper()} CAMPUS (Entered at {check_in_time})!"
+                            else:
+                                side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently INSIDE {active_campus.upper()} CAMPUS (Entered at {check_in_time})! Must exit {active_campus.upper()} first."
+                            side.anomaly_id = open_cross_log.get('vehicle_log_id')
+                            side.state = GateState.LOG_WARNING
+                        else:
+                            side.state = GateState.DETECTED
+                    else:
+                        side.state = GateState.INVALID_QR
+                        side.data = reg_id
+                except Exception as e:
+                    side.state = GateState.API_ERROR
+                    side.api_error = f"Lookup failed: {str(e)}"
+        elif in_rect(x, y, (160, H//2 - 65, 100, 48)):
+            close_gate(side)
+            
+    elif side.state in (GateState.MANUAL_GUEST_IN, GateState.MANUAL_GUEST_CONFIRM, GateState.MANUAL_GUEST_OUT, GateState.MANUAL_GUEST_SEARCH_RESULT):
+        if in_rect(x, y, (25, 130, 120, 42)): # Top Cancel button
+            close_gate(side)
+            
+    elif side.state == GateState.GUEST_WARNING:
+        if in_rect(x, y, (25, H//2 - 65, 250, 48)):
+            if side.form_data[0] == "VIP":
+                submit_vip(side)
+            else:
+                submit_manual_guest(side)
+        elif in_rect(x, y, (290, H//2 - 65, 100, 48)):
+            close_gate(side)
 
 
 print("DEBUG: Startup - Creating UI window...")
@@ -1385,11 +1821,12 @@ BACK_TO_CAMPUS = False
 
 def reselect_campus():
     """Show the campus selection screen again, then return to the gate UI."""
-    global SELECTED_CAMPUS
+    global SELECTED_CAMPUS, CURRENT_VIEW
     SELECTED_CAMPUS = None
+    CURRENT_VIEW = 'in'
     # Clear stats from the previous campus; the poller reloads them for the new one
     global_stats.clear()
-    global_stats.update({"currentlyIn": 0, "visitsToday": 0})
+    global_stats.update({"currentlyIn": 0, "visitsToday": 0, "maxCapacity": 200, "availableSlots": 200, "eventName": ""})
     cv2.setMouseCallback("GateQR Dashboard", campus_mouse_callback)
     print("DEBUG: Waiting for campus selection (BACK)...")
     while SELECTED_CAMPUS is None:
@@ -1407,9 +1844,6 @@ def reselect_campus():
             raise SystemExit
     cv2.setMouseCallback("GateQR Dashboard", mouse_callback)
 
-# Seconds a QR must be out of the camera's view before it counts as a NEW scan during the exit countdown
-QR_REPEAT_GAP = 4
-
 print("DEBUG: Startup - Entering main loop...")
 while True:
     if BACK_TO_CAMPUS:
@@ -1425,144 +1859,252 @@ while True:
         frame1 = apply_zoom(frame1, CAMERA_ZOOM)
         frame2 = apply_zoom(frame2, CAMERA_ZOOM)
         
-        frame1 = cv2.resize(frame1, (W//2, H//2))
-        frame2 = cv2.resize(frame2, (W//2, H//2))
+        crops = [(side_in, frame1), (side_out, frame2)]
+        active_frame = frame1 if CURRENT_VIEW == 'in' else frame2
+        disp_frame = cv2.resize(active_frame, (W, H//2))
         
-        display = cv2.resize(frame1, (W, H)) # base
-        display[0:H//2, 0:W//2] = frame1
-        display[0:H//2, W//2:W] = frame2
-        display[H//2:H, 0:W] = (30,30,30)
-
-        crops = [(side_in, 0, frame1), (side_out, W//2, frame2)]
+        display = np.zeros((H, W, 3), dtype=np.uint8)
+        display[0:H//2, 0:W] = disp_frame
     else:
         if has_cam1:
             ret, frame = cap1.read()
             if not ret: break
             frame = apply_zoom(frame, CAMERA_ZOOM)
         else:
-            frame = np.zeros((H, W, 3), dtype=np.uint8)
-            cv2.putText(frame, "NO CAMERA DETECTED (MOCK PREVIEW)", (W//2 - 250, H//2 - 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            frame = np.zeros((H//2, W, 3), dtype=np.uint8)
+            cv2.putText(frame, "NO CAMERA DETECTED (MOCK PREVIEW)", (W//2 - 250, H//4), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             time.sleep(0.05)
             
-        frame = cv2.resize(frame, (W, H//2))
-        
-        display = cv2.resize(frame, (W, H))
-        display[0:H//2, 0:W] = frame
-        display[H//2:H, 0:W] = (30,30,30)
+        disp_frame = cv2.resize(frame, (W, H//2))
+        display = np.zeros((H, W, 3), dtype=np.uint8)
+        display[0:H//2, 0:W] = disp_frame
 
-        crops = [(side_in, 0, frame[:, 0:W//2]), (side_out, W//2, frame[:, W//2:W])]
+        crops = [(side_in, frame), (side_out, frame)]
 
     # Process QR for both sides if scanning
-    for side, cx, crop in crops:
+    for side, crop in crops:
         side.latest_crop = crop.copy()
-        # Gate just opened: the QR that opened it may still be in view, so start ignoring it from now
-        if side.state != GateState.TIMEOUT:
-            side._timeout_armed = False
-        elif not getattr(side, '_timeout_armed', False):
-            side._timeout_armed = True
-            side.last_qr_time = time.time()
         if side.state == GateState.SCANNING:
-            decoded_objects = decode(crop, symbols=[ZBarSymbol.QRCODE])
-            if decoded_objects:
-                data = decoded_objects[0].data.decode("utf-8")
-                print(f"[{side.type}] QR: {data}")
-                side.state = GateState.PROCESSING  # Block re-trigger immediately
-                side.last_qr = data  # remember the QR that opens this gate
-                crop_copy = crop.copy()
-                threading.Thread(target=process_qr, args=(side, data, crop_copy), daemon=True).start()
+            if side.type == 'out' and time.time() < getattr(side, 'scan_cooldown_end', 0):
+                pass  # 5-second cooldown active on exit camera
+            else:
+                decoded_objects = decode(crop, symbols=[ZBarSymbol.QRCODE])
+                if decoded_objects:
+                    data = decoded_objects[0].data.decode("utf-8")
+                    print(f"[{side.type}] QR: {data}")
+                    if side.type == 'out':
+                        side.scan_cooldown_end = time.time() + 5.0
+                        side.prolong_ready_time = time.time() + 5.0
+                    side.state = GateState.PROCESSING  # Block re-trigger immediately
+                    crop_copy = crop.copy()
+                    threading.Thread(target=process_qr, args=(side, data, crop_copy), daemon=True).start()
         elif side.state == GateState.TIMEOUT and side.type == 'out':
-            # For exit gate, keep scanning while the barrier is open: every NEW QR resets the countdown to 15s
-            decoded_objects = decode(crop, symbols=[ZBarSymbol.QRCODE])
-            # Same QR still in front of the camera (e.g. the one that opened the gate) -> ignore it
-            if decoded_objects:
-                _seen = decoded_objects[0].data.decode("utf-8")
-                _now = time.time()
-                _repeat = (_seen == getattr(side, 'last_qr', None) and _now - getattr(side, 'last_qr_time', 0) < QR_REPEAT_GAP)
-                side.last_qr_time = _now
-                if _repeat:
-                    decoded_objects = []
-            if decoded_objects:
-                data = decoded_objects[0].data.decode("utf-8")
-                side.last_qr = data
-                print(f"[{side.type}] New QR detected during countdown: {data}")
-                # Process the QR to log the exit (but don't open gate again since it's already open)
-                side.snapshot = crop.copy()
-                def _log_exit(data=data, side=side):
-                    try:
-                        # Look up registration by qr_unique_code
-                        response = supabase.table('registration').select('*').eq('qr_unique_code', data).execute()
-                        if response.data:
-                            # Valid QR scanned during the countdown -> reset the countdown to 15 seconds
-                            side.timeout_end = time.time() + 15
-                            print(f"[{side.type}] Countdown reset to 15s")
-                            reg = response.data[0]
-                            current_time = datetime.now().isoformat()
-                            vehicle_log_id = None
-                            
-                            # Find and close the existing open entry log
-                            try:
-                                open_log_res = supabase.table('vehicle_log').select('*')\
-                                    .eq('registration_id', reg['registration_id'])\
-                                    .ilike('campus', f"%{SELECTED_CAMPUS}%")\
-                                    .is_('check_out', 'null')\
-                                    .order('created_at', desc=True)\
-                                    .limit(1)\
-                                    .execute()
+            # For exit gate, allow QR scanning during timeout to refresh countdown (with 5 seconds delay)
+            now = time.time()
+            if now >= getattr(side, 'scan_cooldown_end', 0):
+                decoded_objects = decode(crop, symbols=[ZBarSymbol.QRCODE])
+                if decoded_objects:
+                    data = decoded_objects[0].data.decode("utf-8")
+                    side.scan_cooldown_end = now + 5.0
+                    side.prolong_ready_time = now + 5.0
+                    print(f"[{side.type}] QR detected during countdown - refreshing: {data} (5s cooldown)")
+                    # Refresh countdown to 15 seconds
+                    old_timeout = side.timeout_end
+                    side.timeout_end = time.time() + 15
+                    print(f"[{side.type}] Countdown refreshed from {max(0, int(old_timeout - time.time()))}s to 15s")
+                    side.snapshot = crop.copy()
+                    def _log_exit(qr_text=data):
+                        try:
+                            response = supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute()
+                            if response.data:
+                                reg = response.data[0]
+                                current_time = datetime.now().isoformat()
+                                reg_id = reg['registration_id']
+                                
+                                # Fetch vehicle info
+                                vehicle_data = {}
+                                v_info_id = reg.get('vehicle_information_id')
+                                if v_info_id:
+                                    try:
+                                        vres = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_info_id).execute()
+                                        if vres.data: vehicle_data = vres.data[0]
+                                    except: pass
+                                
+                                # Close open vehicle_log row
+                                try:
+                                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
+                                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                                    if open_rows:
+                                        for row in open_rows:
+                                            supabase.table('vehicle_log').update({
+                                                "check_out": current_time,
+                                                "logged_status": "Exited"
+                                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
+                                        print(f"[{side.type}] Closed {len(open_rows)} open log(s) during countdown")
+                                    else:
+                                        supabase.table('vehicle_log').insert({
+                                            "vehicle_information_id": v_info_id or 1,
+                                            "registration_id": reg_id,
+                                            "check_in": current_time,
+                                            "check_out": current_time,
+                                            "logged_status": "Exited",
+                                            "campus": SELECTED_CAMPUS
+                                        }).execute()
+                                except Exception as e:
+                                    print(f"DEBUG: Error updating exit log during countdown: {e}")
 
-                                if open_log_res.data:
-                                    open_log = open_log_res.data[0]
-                                    vehicle_log_id = open_log['vehicle_log_id']
-                                    supabase.table('vehicle_log').update({
-                                        "check_out": current_time,
-                                        "logged_status": "REGISTERED"
-                                    }).eq('vehicle_log_id', vehicle_log_id).execute()
-                            except Exception as e:
-                                print(f"DEBUG: Error updating open entry during countdown: {e}")
+                                # Update latest_scanned_details
+                                first_n = reg.get('first_name', '')
+                                last_n = reg.get('last_name', '')
+                                d_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
+                                d_role = (reg.get('role') or 'N/A').capitalize()
+                                d_plate = vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
+                                d_brand = vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+                                d_type = vehicle_data.get('type') or reg.get('type') or 'N/A'
+                                d_col = vehicle_data.get('color') or ''
+                                if d_col: d_brand = f"{d_brand} ({d_col})"
 
-                            if not vehicle_log_id:
-                                log_data = {
-                                    "vehicle_information_id": reg.get('vehicle_information_id') or 1,
-                                    "registration_id": reg['registration_id'],
-                                    "check_in": current_time,
-                                    "check_out": current_time,
-                                    "logged_status": "REGISTERED",
-                                    "campus": SELECTED_CAMPUS
+                                global latest_scanned_details, global_logs
+                                latest_scanned_details = {
+                                    "gate": "EXIT",
+                                    "name": d_name,
+                                    "role": d_role,
+                                    "plate": d_plate,
+                                    "brand": d_brand,
+                                    "type": d_type,
+                                    "status": "EXIT APPROVED",
+                                    "time": datetime.now().strftime("%I:%M:%S %p")
                                 }
-                                res = supabase.table('vehicle_log').insert(log_data).execute()
-                                vehicle_log_id = res.data[0]['vehicle_log_id'] if res.data else None
+                                global_logs.insert(0, {
+                                    "time": datetime.now().strftime("%H:%M:%S"),
+                                    "bound": "OUT",
+                                    "name": d_name[:12],
+                                    "plate": d_plate[:10]
+                                })
+                                sync_parking_availability()
+                                refresh_parking_data()
+                                print(f"[{side.type}] Exit logged and capacity synced for {data}")
+                        except Exception as e:
+                            print(f"Error logging exit during countdown: {e}")
+                    threading.Thread(target=_log_exit, daemon=True).start()
 
-                            update_parking_availability('out', vehicle_log_id)
-                            print(f"[{side.type}] Exit logged and capacity updated successfully for {data}")
-                    except Exception as e:
-                        print(f"Error logging exit during countdown: {e}")
-                threading.Thread(target=_log_exit, daemon=True).start()
+        elif side.state == GateState.PROLONG and side.type == 'out':
+            # PROLONG mode: Barrier permanently open, scan QR with 5 seconds delay between vehicles
+            now = time.time()
+            cd_end = max(getattr(side, 'scan_cooldown_end', 0), getattr(side, 'prolong_ready_time', 0))
+            if now >= cd_end:
+                decoded_objects = decode(crop, symbols=[ZBarSymbol.QRCODE])
+                if decoded_objects:
+                    data = decoded_objects[0].data.decode("utf-8")
+                    # Set 5 seconds delay before next scan is accepted
+                    side.scan_cooldown_end = now + 5.0
+                    side.prolong_ready_time = now + 5.0
+                    side.last_prolong_exit = {
+                        "plate": "PROCESSING...",
+                        "name": "VERIFYING EXIT...",
+                        "role": "EXIT",
+                        "time": datetime.now().strftime("%I:%M:%S %p"),
+                        "status": "EXITED"
+                    }
+                    print(f"[{side.type}] PROLONG: QR detected: {data} -> 5-second cooldown active")
+                    side.snapshot = crop.copy()
+                    
+                    def _log_prolong_exit(qr_text=data):
+                        try:
+                            response = supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute()
+                            if response.data:
+                                reg = response.data[0]
+                                current_time = datetime.now().isoformat()
+                                reg_id = reg['registration_id']
+                                
+                                # Fetch vehicle info
+                                vehicle_data = {}
+                                v_info_id = reg.get('vehicle_information_id')
+                                if v_info_id:
+                                    try:
+                                        vres = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_info_id).execute()
+                                        if vres.data: vehicle_data = vres.data[0]
+                                    except: pass
+                                
+                                # Close open vehicle_log row
+                                try:
+                                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
+                                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                                    if open_rows:
+                                        for row in open_rows:
+                                            supabase.table('vehicle_log').update({
+                                                "check_out": current_time,
+                                                "logged_status": "Exited"
+                                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
+                                        print(f"[{side.type}] PROLONG: Closed {len(open_rows)} open log(s)")
+                                    else:
+                                        supabase.table('vehicle_log').insert({
+                                            "vehicle_information_id": v_info_id or 1,
+                                            "registration_id": reg_id,
+                                            "check_in": current_time,
+                                            "check_out": current_time,
+                                            "logged_status": "Exited",
+                                            "campus": SELECTED_CAMPUS
+                                        }).execute()
+                                except Exception as e:
+                                    print(f"DEBUG: Error updating exit log in prolong: {e}")
+
+                                # Update latest_scanned_details and last_prolong_exit
+                                first_n = reg.get('first_name', '')
+                                last_n = reg.get('last_name', '')
+                                d_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
+                                d_role = (reg.get('role') or 'N/A').capitalize()
+                                d_plate = vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
+                                d_brand = vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+                                d_type = vehicle_data.get('type') or reg.get('type') or 'N/A'
+                                d_col = vehicle_data.get('color') or ''
+                                if d_col: d_brand = f"{d_brand} ({d_col})"
+
+                                side.last_prolong_exit = {
+                                    "plate": d_plate,
+                                    "name": d_name,
+                                    "role": d_role,
+                                    "brand": d_brand,
+                                    "type": d_type,
+                                    "time": datetime.now().strftime("%I:%M:%S %p"),
+                                    "status": "EXITED"
+                                }
+
+                                global latest_scanned_details, global_logs
+                                latest_scanned_details = {
+                                    "gate": "EXIT",
+                                    "name": d_name,
+                                    "role": d_role,
+                                    "plate": d_plate,
+                                    "brand": d_brand,
+                                    "type": d_type,
+                                    "status": "EXITED",
+                                    "time": datetime.now().strftime("%I:%M:%S %p")
+                                }
+                                global_logs.insert(0, {
+                                    "time": datetime.now().strftime("%H:%M:%S"),
+                                    "bound": "OUT",
+                                    "name": d_name[:12],
+                                    "plate": d_plate[:10]
+                                })
+                                sync_parking_availability()
+                                refresh_parking_data()
+                                print(f"[{side.type}] PROLONG exit logged for {d_plate} ({d_name})")
+                        except Exception as e:
+                            print(f"Error in prolong exit: {e}")
+                    threading.Thread(target=_log_prolong_exit, daemon=True).start()
+
         elif side.state == GateState.PROCESSING:
-            draw_text(display, "PROCESSING...", (cx + 20, 80), 0.8, (255, 255, 0), 2)
-                
-        render_side(display, side, cx)
+            pass
 
-    # Render Bottom Left (Dashboard)
-    render_side_dashboard(display)
-    if side_in.state == GateState.SCANNING and side_out.state == GateState.SCANNING:
-        draw_btn(display, (130, H - 60, 100, 40), "BACK", (100,100,100))
+    # Render active camera overlay (full width W x H//2)
+    active_side = side_in if CURRENT_VIEW == 'in' else side_out
+    if active_side.state == GateState.PROCESSING:
+        draw_text(display, "PROCESSING...", (25, 80), 0.8, (255, 255, 0), 2)
+    render_side(display, active_side, 0)
 
-    # Render Bottom Right (Table)
-    cv2.rectangle(display, (W//2, H//2), (W, H), (50,50,50), -1)
-    draw_text(display, "LOGS TABLE (Scroll to view)", (W//2 + 20, H//2 + 40), 1.0, (200,200,200), 2)
-    y_off = H//2 + 80
-    max_visible_logs = 8
-    
-    # Render scrollbar track
-    if len(global_logs) > max_visible_logs:
-        cv2.rectangle(display, (W - 15, H//2 + 70), (W - 5, H - 20), (30,30,30), -1)
-        scroll_h = max(20, int((max_visible_logs / len(global_logs)) * (H//2 - 90)))
-        max_offset = max(1, len(global_logs) - max_visible_logs)
-        scroll_y = H//2 + 70 + int((log_scroll_offset / max_offset) * (H//2 - 90 - scroll_h))
-        cv2.rectangle(display, (W - 15, scroll_y), (W - 5, scroll_y + scroll_h), (150,150,150), -1)
-
-    visible_logs = global_logs[log_scroll_offset : log_scroll_offset + max_visible_logs]
-    for i, log in enumerate(visible_logs):
-        draw_text(display, f"{log['time']} | {log['bound']} | {log['name']} | {log['plate']}", (W//2 + 20, y_off + i*35), 0.6)
+    # Render full-width cream bottom panel with campus capacity & scanned QR info box
+    render_bottom_panel(display)
 
     cv2.imshow("GateQR Dashboard", display)
     

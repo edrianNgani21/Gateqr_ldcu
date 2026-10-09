@@ -116,7 +116,7 @@ export const POST: RequestHandler = async ({ request }) => {
                     .select('campus, registration:registration_id(campus)')
                     .is('check_out', null);
 
-                current_occupied = (insideLogs || []).filter(l => {
+                current_occupied = (insideLogs || []).filter((l: any) => {
                     const c = (l.campus || l.registration?.campus || '').toLowerCase();
                     if (exitCampus === 'RNP') return c.includes('rnp');
                     if (exitCampus === 'PASEO') return c.includes('paseo');

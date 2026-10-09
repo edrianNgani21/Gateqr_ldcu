@@ -2,26 +2,18 @@
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import { invalidateAll } from '$app/navigation';
-    import { supabaseClient } from '$lib/supabaseClient';
+    import { startLiveSync } from '$lib/utils/liveSync';
     import type { PageData } from './$types';
 
     let { data }: { data: PageData } = $props();
 
-    // Realtime live subscription for applicant status updates
+    // Dual-engine live sync for applicant status updates without page refresh
     $effect(() => {
-        const channel = supabaseClient
-            .channel('applicant-status-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
-                invalidateAll();
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
-                invalidateAll();
-            })
-            .subscribe();
-
-        return () => {
-            supabaseClient.removeChannel(channel);
-        };
+        return startLiveSync({
+            channelName: 'applicant-status-realtime',
+            tables: ['registration', 'change_vehicle_requests'],
+            intervalMs: 5000
+        });
     });
 
     async function handleLogout() {
@@ -178,25 +170,18 @@
   <meta name="description" content="Track the status of your vehicle sticker application at Liceo de Cagayan University." />
 </svelte:head>
 
-<AppShell>
-  <!-- User greeting -->
-  <div class="welcome-bar">
-    <div class="wb-user">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span>{data.userEmail}</span>
+<AppShell userRole="applicant" userEmail={data.userEmail} showSidebar={false}>
+  <!-- Welcome Banner matching Dashboard Aesthetic -->
+  <div class="welcome-banner">
+    <div class="wb-content">
+      <h1 class="wb-title">Welcome to GateQR!</h1>
+      <p class="wb-sub">Track your vehicle sticker application status in real-time.</p>
     </div>
-    <div class="wb-actions">
-      <a href="/complaints" class="wb-action" class:wb-action-alert={(data.scheduledCount ?? 0) > 0}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-        My Complaints
-        {#if (data.scheduledCount ?? 0) > 0}
-          <span class="wb-badge"></span>
-        {/if}
-      </a>
-      <button class="wb-action wb-logout" onclick={handleLogout}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        Logout
-      </button>
+    <div class="wb-icon-shield">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
     </div>
   </div>
 
@@ -238,8 +223,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step 1</span>
-            <span class="ps-desc">College Head Approval</span>
+            <span class="ps-label">Step 1 — Department Head or Dean Approval</span>
+            <span class="ps-desc">Wait for your Department Head or Dean to approve your Parking Agreement Form.</span>
           </div>
         </div>
 
@@ -255,8 +240,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 1 : 2}</span>
-            <span class="ps-desc">OSA Review and Schedule</span>
+            <span class="ps-label">Step {skipDean ? 1 : 2} — OSA Application Review</span>
+            <span class="ps-desc">Wait for the Office of Student Affairs (OSA) to review your application details and schedule your office visit.</span>
             {#if app.dist_sched}
               <div class="sched-pill" class:sched-overdue={!app.osa_dist_at && new Date(app.dist_sched) < new Date()}>
                 Schedule: {new Date(app.dist_sched).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}
@@ -279,8 +264,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 2 : 3}</span>
-            <span class="ps-desc">OSA Checked Hardcopies</span>
+            <span class="ps-label">Step {skipDean ? 2 : 3} — OSA Document Verification</span>
+            <span class="ps-desc">Visit the OSA Office and present your physical documents for verification against the information and files you submitted online.</span>
             {#if app.osa_dist_at}
               <div class="sched-pill sched-done">Checked by OSA: {new Date(app.osa_dist_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
             {/if}
@@ -298,8 +283,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 3 : 4}</span>
-            <span class="ps-desc">Security Check Hardcopies</span>
+            <span class="ps-label">Step {skipDean ? 3 : 4} — Safety and Security Verification</span>
+            <span class="ps-desc">Visit the Safety and Security Office to have your physical documents inspected and verified.</span>
             {#if app.security_checked_at}
               <div class="sched-pill sched-done">Checked by Security: {new Date(app.security_checked_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
             {/if}
@@ -317,8 +302,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 4 : 5}</span>
-            <span class="ps-desc">OSA Release Sticker</span>
+            <span class="ps-label">Step {skipDean ? 4 : 5} — Final Review and Sticker Release</span>
+            <span class="ps-desc">Return to the OSA Office for a review of the verification marks from Safety and Security. Settle the required payment at the Registrar's Office and claim your vehicle sticker.</span>
             {#if app.sticker_released_at}
               <div class="sched-pill sched-done">Released by OSA: {new Date(app.sticker_released_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
             {/if}
@@ -336,8 +321,8 @@
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 5 : 6} — Final</span>
-            <span class="ps-desc">Security Installed Sticker</span>
+            <span class="ps-label">Step {skipDean ? 5 : 6} — Vehicle Sticker Installation (Mandatory)</span>
+            <span class="ps-desc">Proceed to the Safety and Security Office to have your vehicle sticker installed. This step is mandatory to complete your vehicle registration process.</span>
             {#if app.sticker_installed_at}
               <div class="sched-pill sched-done">Installed: {new Date(app.sticker_installed_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})} — Registration Completed</div>
             {/if}
@@ -541,62 +526,49 @@
 </AppShell>
 
 <style>
-  .welcome-bar {
+  /* Welcome Banner matching Dashboard aesthetic */
+  .welcome-banner {
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border-radius: 18px;
+    padding: 1.75rem 2.25rem;
+    color: #ffffff;
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-    background: var(--surface);
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.875rem;
-    flex-wrap: wrap;
-  }
-
-  @media (max-width: 480px) {
-    .welcome-bar {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    .wb-actions {
-      width: 100%;
-      justify-content: flex-end;
-    }
-  }
-
-  .wb-user {
-    display: flex;
     align-items: center;
-    gap: 0.5rem;
-  }
-
-  .wb-user svg { color: var(--maroon); flex-shrink: 0; }
-
-  .wb-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .wb-action {
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    margin-bottom: 1.5rem;
     position: relative;
+    overflow: hidden;
+  }
+
+  .wb-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    z-index: 1;
+  }
+
+  .wb-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #E9C25E;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .wb-sub {
+    font-size: 0.9rem;
+    color: #F5D5DE;
+    margin: 0;
+    font-weight: 500;
+  }
+
+  .wb-icon-shield {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.75rem;
-    background: var(--maroon);
-    color: white;
-    border-radius: var(--radius-sm);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.75rem;
-    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-    box-shadow: 0 2px 8px rgba(107,26,42,0.25);
-    border: none;
-    cursor: pointer;
+    justify-content: center;
+    opacity: 0.85;
   }
 
   .wb-logout {
@@ -692,19 +664,19 @@
   }
 
   .ps-label {
-    font-size: 0.68rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--maroon);
+    line-height: 1.3;
   }
 
   .step-pending .ps-label { color: var(--text-muted); }
 
   .ps-desc {
-    font-size: 0.8rem;
-    font-weight: 500;
+    font-size: 0.825rem;
+    font-weight: 400;
     color: var(--text-primary);
+    line-height: 1.45;
   }
 
   .step-pending .ps-desc { color: var(--text-muted); }

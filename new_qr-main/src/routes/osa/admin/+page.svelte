@@ -13,6 +13,8 @@
 
     let showForm = $state(false);
     let adminEmail = $state('');
+    let adminPassword = $state('');
+    let adminPin = $state('');
     let adminType = $state('Osa');
     let adminIdentification = $state('Faculty');
     let loading = $state(false);
@@ -20,9 +22,28 @@
     let success = $state('');
     let admins = $state<any[]>([]);
     let loadingAdmins = $state(false);
+    let hasPin = $state(false);
+    let checkingPin = $state(true);
+
+    const isPrimaryAdmin = $derived((data?.userEmail || '').trim().toLowerCase() === 'aluban98304@liceo.edu.ph');
 
     const adminTypes = ['Osa', 'Safety Security', 'dean'];
     const identificationTypes = ['Admin', 'Staff', 'Faculty', 'Student', 'Visitor', 'Guard'];
+
+    async function checkPinStatus() {
+        checkingPin = true;
+        try {
+            const res = await fetch('/api/auth/settings');
+            if (res.ok) {
+                const sData = await res.json();
+                hasPin = Boolean(sData.has_pin);
+            }
+        } catch (err) {
+            console.error('Error checking PIN status:', err);
+        } finally {
+            checkingPin = false;
+        }
+    }
 
     async function loadAdmins() {
         loadingAdmins = true;
@@ -39,9 +60,10 @@
         }
     }
 
-    // Load admins on component mount & subscribe to realtime updates
+    // Load admins & check PIN on component mount & subscribe to realtime updates
     $effect(() => {
         loadAdmins();
+        checkPinStatus();
         const channel = supabaseClient
             .channel('osa-admins-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'user' }, () => {
@@ -55,8 +77,28 @@
     });
 
     async function handleSubmit() {
-        if (!adminEmail || !adminType || !adminIdentification) {
-            error = 'Please fill in all fields';
+        if (!isPrimaryAdmin) {
+            error = 'Permission denied. Only the primary OSA administrator (aluban98304@liceo.edu.ph) is authorized to add new admins.';
+            return;
+        }
+
+        if (!adminEmail || !adminType || !adminIdentification || !adminPassword) {
+            error = 'Please fill in all fields including email, password, and identification';
+            return;
+        }
+
+        if (adminPassword.length < 6) {
+            error = 'Password must be at least 6 characters long';
+            return;
+        }
+
+        if (!hasPin) {
+            error = 'You must set up your 4-digit security PIN in Admin Settings (top-right gear icon) first before adding an admin.';
+            return;
+        }
+
+        if (!adminPin || !/^\d{4}$/.test(adminPin.trim())) {
+            error = 'Please enter your 4-digit security PIN to authorize adding this admin account';
             return;
         }
 
@@ -70,15 +112,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: adminEmail,
+                    password: adminPassword,
                     user_type: adminType,
-                    identification: adminIdentification
+                    identification: adminIdentification,
+                    pin: adminPin.trim()
                 })
             });
 
             if (res.ok) {
-                success = 'Admin added successfully!';
+                success = 'Admin added successfully with secure password and PIN authorization!';
                 adminEmail = '';
-                adminIdentification = '';
+                adminPassword = '';
+                adminPin = '';
+                adminIdentification = 'Faculty';
                 showForm = false;
                 loadAdmins(); // Reload admin list
             } else {
@@ -95,7 +141,9 @@
     function cancelForm() {
         showForm = false;
         adminEmail = '';
-        adminIdentification = '';
+        adminPassword = '';
+        adminPin = '';
+        adminIdentification = 'Faculty';
         error = '';
         success = '';
     }
@@ -176,7 +224,33 @@
             </div>
         {/if}
 
-        {#if !showForm}
+        {#if !isPrimaryAdmin}
+            <div class="restriction-notice-card">
+                <div class="restriction-badge">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    <span>RESTRICTED ACCESS</span>
+                </div>
+                <h2>Admin Management Restricted</h2>
+                <p>
+                    Only the primary OSA administrator (<strong>aluban98304@liceo.edu.ph</strong>) is authorized to create, activate, deactivate, or delete administrator accounts. You have view-only access to the administrator directory below.
+                </p>
+            </div>
+        {:else if !showForm}
+            {#if !checkingPin && !hasPin}
+                <div class="pin-warning-alert">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <div>
+                        <strong>4-Digit Security PIN Required:</strong>
+                        <span>You must create your 4-digit Security PIN first in Admin Settings before adding new admin accounts.</span>
+                    </div>
+                </div>
+            {/if}
+
             <div class="empty-state-card">
                 <div class="empty-icon">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -187,8 +261,8 @@
                     </svg>
                 </div>
                 <h2>No Admin Creation in Progress</h2>
-                <p>Click the button below to create a new admin account</p>
-                <button class="primary-btn" onclick={() => showForm = true}>
+                <p>Click the button below to create a new admin account (4-digit PIN required)</p>
+                <button class="primary-btn" onclick={() => showForm = true} disabled={!hasPin}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/>
                         <line x1="5" y1="12" x2="19" y2="12"/>
@@ -200,7 +274,7 @@
             <div class="form-card">
                 <div class="form-header">
                     <h2>New Admin Details</h2>
-                    <p class="form-subtitle">Fill in the information below to create a new admin account</p>
+                    <p class="form-subtitle">Fill in the information below and authorize with your 4-digit security PIN to proceed</p>
                 </div>
                 
                 <div class="form-grid">
@@ -265,24 +339,71 @@
                             </select>
                         </div>
                     </div>
+
+                    <div class="form-group full-width">
+                        <label for="adminPassword">
+                            <span class="label-text">Account Password</span>
+                            <span class="label-required">*</span>
+                        </label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <input 
+                                id="adminPassword" 
+                                type="password" 
+                                bind:value={adminPassword} 
+                                placeholder="Enter password for this admin/dean (min. 6 characters)"
+                                disabled={loading}
+                                class="form-input"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label for="adminPin">
+                            <span class="label-text">Authorize with Your 4-Digit Security PIN</span>
+                            <span class="label-required">*</span>
+                        </label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                <circle cx="12" cy="16" r="1.5"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <input 
+                                id="adminPin" 
+                                type="password" 
+                                maxlength="4"
+                                pattern="[0-9]*"
+                                inputmode="numeric"
+                                bind:value={adminPin} 
+                                placeholder="••••"
+                                disabled={loading}
+                                class="form-input pin-input"
+                            />
+                        </div>
+                        <span class="field-hint">Enter the 4-digit security PIN set on your account to authorize creating this admin.</span>
+                    </div>
                 </div>
 
                 <div class="form-actions">
                     <button class="btn-secondary" onclick={cancelForm} disabled={loading}>
                         Cancel
                     </button>
-                    <button class="btn-primary" onclick={handleSubmit} disabled={loading}>
+                    <button class="btn-primary" onclick={handleSubmit} disabled={loading || !hasPin || adminPin.length < 4}>
                         {#if loading}
                             <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                             </svg>
-                            Adding...
+                            Authorizing...
                         {:else}
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            Add Admin
+                            Authorize & Add Admin
                         {/if}
                     </button>
                 </div>
@@ -318,7 +439,7 @@
                         <line x1="23" y1="11" x2="17" y2="11"/>
                         <line x1="20" y1="8" x2="20" y2="14"/>
                     </svg>
-                    <p>No admin accounts found. Create your first admin above.</p>
+                    <p>No admin accounts found.</p>
                 </div>
             {:else}
                 <div class="admin-grid">
@@ -355,36 +476,40 @@
                                 </div>
                             </div>
                             <div class="admin-actions">
-                                <button 
-                                    class="toggle-btn"
-                                    class:activate={!admin.is_active}
-                                    class:deactivate={admin.is_active}
-                                    onclick={() => toggleAdminStatus(admin.user_id, admin.is_active)}
-                                    title={admin.is_active ? 'Deactivate account' : 'Activate account'}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        {#if admin.is_active}
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                            <line x1="9" y1="9" x2="15" y2="15"/>
-                                            <line x1="15" y1="9" x2="9" y2="15"/>
-                                        {:else}
-                                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                                            <polyline points="22 4 12 14.01 9 11.01"/>
-                                        {/if}
-                                    </svg>
-                                    {admin.is_active ? 'Deactivate' : 'Activate'}
-                                </button>
-                                <button 
-                                    class="delete-btn" 
-                                    onclick={() => deleteAdmin(admin.user_id)}
-                                    title="Delete admin"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polyline points="3 6 5 6 21 6"/>
-                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                    </svg>
-                                    Delete
-                                </button>
+                                {#if isPrimaryAdmin}
+                                    <button 
+                                        class="toggle-btn"
+                                        class:activate={!admin.is_active}
+                                        class:deactivate={admin.is_active}
+                                        onclick={() => toggleAdminStatus(admin.user_id, admin.is_active)}
+                                        title={admin.is_active ? 'Deactivate account' : 'Activate account'}
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            {#if admin.is_active}
+                                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                                <line x1="9" y1="9" x2="15" y2="15"/>
+                                                <line x1="15" y1="9" x2="9" y2="15"/>
+                                            {:else}
+                                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                                <polyline points="22 4 12 14.01 9 11.01"/>
+                                            {/if}
+                                        </svg>
+                                        {admin.is_active ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                    <button 
+                                        class="delete-btn" 
+                                        onclick={() => deleteAdmin(admin.user_id)}
+                                        title="Delete admin"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                        </svg>
+                                        Delete
+                                    </button>
+                                {:else}
+                                    <span class="read-only-badge">View Only</span>
+                                {/if}
                             </div>
                         </div>
                     {/each}
@@ -921,5 +1046,91 @@
     .delete-btn:hover {
         background: #fee2e2;
         border-color: #f87171;
+    }
+
+    .pin-input {
+        letter-spacing: 0.35rem;
+        font-family: monospace;
+        font-size: 1.15rem;
+        font-weight: 700;
+    }
+
+    .field-hint {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .pin-warning-alert {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 1rem 1.25rem;
+        background: #FFFBEB;
+        border: 1px solid #FCD34D;
+        border-left: 4px solid #D97706;
+        border-radius: 12px;
+        color: #92400E;
+        font-size: 0.88rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .pin-warning-alert strong {
+        display: block;
+        color: #78350F;
+        font-weight: 700;
+        margin-bottom: 0.15rem;
+    }
+
+    .restriction-notice-card {
+        background: var(--card-bg, #ffffff);
+        border: 1.5px solid rgba(107, 29, 47, 0.2);
+        border-radius: 16px;
+        padding: 2.25rem 2rem;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.85rem;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    }
+
+    .restriction-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.85rem;
+        background: #FEF2F2;
+        border: 1px solid #FCA5A5;
+        border-radius: 9999px;
+        color: #991B1B;
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+    }
+
+    .restriction-notice-card h2 {
+        font-size: 1.35rem;
+        font-weight: 800;
+        color: var(--maroon, #6B1D2F);
+        margin: 0;
+    }
+
+    .restriction-notice-card p {
+        font-size: 0.92rem;
+        color: var(--text-secondary, #64748B);
+        max-width: 580px;
+        line-height: 1.6;
+        margin: 0;
+    }
+
+    .read-only-badge {
+        display: inline-block;
+        padding: 0.35rem 0.75rem;
+        background: #F1F5F9;
+        color: #64748B;
+        border-radius: 6px;
+        font-size: 0.78rem;
+        font-weight: 600;
     }
 </style>

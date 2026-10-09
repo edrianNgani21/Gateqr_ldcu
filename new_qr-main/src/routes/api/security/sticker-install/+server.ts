@@ -2,6 +2,31 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 
+async function createNotification(
+    userId: number,
+    notificationType: string,
+    message: string,
+    actorId?: number,
+    actionType?: string,
+    targetEntityType?: string,
+    targetEntityId?: number
+) {
+    try {
+        await supabase.from('notifications').insert({
+            user_id: userId,
+            notification_type: notificationType,
+            message: message,
+            actor_id: actorId || null,
+            action_type: actionType || null,
+            target_entity_type: targetEntityType || null,
+            target_entity_id: targetEntityId || null,
+            is_read: false
+        });
+    } catch (e) {
+        console.error('Failed to create notification:', e);
+    }
+}
+
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'security') {
         return json({ error: 'Unauthorized' }, { status: 403 });
@@ -17,7 +42,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // Verify the registration exists and OSA has already released the sticker
         const { data: reg, error: fetchError } = await supabase
             .from('registration')
-            .select('registration_id, status, sticker_released_at, sticker_installed_at')
+            .select('registration_id, user_id, status, sticker_released_at, sticker_installed_at, users:user_id(email)')
             .eq('registration_id', registration_id)
             .single();
 
@@ -86,6 +111,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         } catch (cvErr) {
             console.error('Error finalizing change vehicle request:', cvErr);
+        }
+
+        // Notify the applicant
+        if (reg.user_id) {
+            await createNotification(
+                reg.user_id,
+                'sticker_installed',
+                'Campus Security has successfully installed your vehicle RFID sticker. Congratulations! You have completed the vehicle registration process and your vehicle is now officially registered.',
+                locals.user?.user_id,
+                'install_sticker',
+                'registration',
+                registration_id
+            );
+        }
+
+        // Notify the security officer
+        if (locals.user?.user_id) {
+            await createNotification(
+                locals.user.user_id,
+                'sticker_installed',
+                `Successfully installed RFID sticker for ${(reg.users as any)?.email || 'applicant'}. Registration finalized.`,
+                locals.user.user_id,
+                'install_sticker_success',
+                'registration',
+                registration_id
+            );
         }
 
         return json({ message: 'Sticker marked as installed. Registration completed.' });

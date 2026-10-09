@@ -40,6 +40,31 @@ export const GET: RequestHandler = async ({ locals, url }) => {
     }
 };
 
+async function createNotification(
+    userId: number,
+    notificationType: string,
+    message: string,
+    actorId?: number,
+    actionType?: string,
+    targetEntityType?: string,
+    targetEntityId?: number
+) {
+    try {
+        await supabase.from('notifications').insert({
+            user_id: userId,
+            notification_type: notificationType,
+            message: message,
+            actor_id: actorId || null,
+            action_type: actionType || null,
+            target_entity_type: targetEntityType || null,
+            target_entity_id: targetEntityId || null,
+            is_read: false
+        });
+    } catch (e) {
+        console.error('Failed to create notification:', e);
+    }
+}
+
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
         return json({ error: 'Unauthorized' }, { status: 403 });
@@ -53,16 +78,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         // Create department without any dean account
-        const { error } = await supabase
+        const { data: newDept, error } = await supabase
             .from('department')
             .insert({ 
                 department: name,
                 email: null, // No dean assigned yet
                 user_id: null,
                 is_active: true
-            });
+            })
+            .select('department_id, department')
+            .single();
 
         if (error) throw error;
+
+        // Notify OSA admin
+        if (locals.user?.user_id) {
+            await createNotification(
+                locals.user.user_id,
+                'department_added',
+                'Department added successfully.',
+                locals.user.user_id,
+                'create_department',
+                'department',
+                newDept?.department_id
+            );
+        }
 
         return json({ message: 'Department created successfully' }, { status: 201 });
     } catch (error) {

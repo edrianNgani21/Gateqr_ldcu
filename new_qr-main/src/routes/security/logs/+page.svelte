@@ -13,18 +13,16 @@
   const pageSize = 25;
   let loading = $state(false);
 
-  // Realtime subscription for vehicle logs
-  $effect(() => {
-    const channel = supabaseClient
-      .channel('security-logs-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
-        fetchLogs();
-      })
-      .subscribe();
+  import { startLiveSync } from '$lib/utils/liveSync';
 
-    return () => {
-      supabaseClient.removeChannel(channel);
-    };
+  // Dual-engine live sync for vehicle logs without manual refresh
+  $effect(() => {
+    return startLiveSync({
+      channelName: 'security-logs-realtime',
+      tables: ['vehicle_log'],
+      intervalMs: 5000,
+      onSync: () => fetchLogs()
+    });
   });
 
   let selectedDate = $state(new Date().toISOString().split('T')[0]);
@@ -75,6 +73,12 @@
   }
 
   async function fetchLogs() {
+    if (!selectedCampus) {
+      logs = [];
+      totalLogs = 0;
+      totalPages = 1;
+      return;
+    }
     loading = true;
     try {
       const params = new URLSearchParams({
@@ -196,9 +200,8 @@
           <thead>
             <tr>
               <th>Log ID</th>
-              <th>Plate / Vehicle</th>
+              <th>Plate Number</th>
               <th>Driver / Role</th>
-              <th>Bound</th>
               <th>Check In</th>
               <th>Check Out</th>
               <th>Status</th>
@@ -208,12 +211,11 @@
             ${selectedLogsData.map((log: any) => `
               <tr>
                 <td><strong>#${log.vehicle_log_id}</strong></td>
-                <td>${log.vehicle_plate || log.plate || 'N/A'}</td>
-                <td>${log.driver_name || log.name || 'N/A'} (${log.role || 'Guest'})</td>
-                <td>${log.bound ? log.bound.toUpperCase() : 'IN'}</td>
-                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : (log.in ? new Date(log.in).toLocaleString() : 'N/A')}</td>
-                <td>${log.check_out ? new Date(log.check_out).toLocaleString() : (log.out ? new Date(log.out).toLocaleString() : 'Still Inside')}</td>
-                <td>${log.logged_status || 'OK'}</td>
+                <td>${log.vehicle_plate || log.plate || (log.is_vip ? 'VIP' : log.is_guest ? 'Guest Vehicle' : 'No Plate')}</td>
+                <td>${log.is_vip ? 'VIP Access [VIP]' : log.is_guest ? (log.driver_name + ' [GUEST]') : ((log.driver_name || log.name || 'N/A') + ' (' + (log.role || 'Visitor') + ')')}</td>
+                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
+                <td>${log.check_out ? new Date(log.check_out).toLocaleString() : '—'}</td>
+                <td><strong style="color: ${log.check_out ? '#64748b' : '#059669'}">${log.check_out ? 'EXITED' : 'INSIDE CAMPUS'}</strong></td>
               </tr>
             `).join('')}
           </tbody>
@@ -349,10 +351,9 @@
                 <th>Log ID</th>
                 <th>Plate Number</th>
                 <th>Driver / Role</th>
-                <th>Bound</th>
                 <th>Check In</th>
                 <th>Check Out</th>
-                <th>Logged Status</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -371,43 +372,53 @@
                     <span class="id-tag">#{log.vehicle_log_id}</span>
                   </td>
                   <td class="td-plate">
-                    <span class="plate-badge">{log.vehicle_plate || log.plate || 'No Plate'}</span>
+                    {#if log.is_vip || log.role?.toLowerCase() === 'vip'}
+                      <span class="plate-badge plate-vip">VIP</span>
+                    {:else if log.is_guest || log.role?.toLowerCase() === 'guest'}
+                      <span class="plate-badge plate-guest">{log.vehicle_plate || log.plate || 'Guest Vehicle'}</span>
+                    {:else}
+                      <span class="plate-badge">{log.vehicle_plate || log.plate || 'No Plate'}</span>
+                    {/if}
                   </td>
                   <td>
                     <div class="driver-info">
-                      <span class="driver-name">{log.driver_name || log.name || 'Registered Driver'}</span>
-                      <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-top: 2px;">
-                        <span class="role-badge">{log.role || 'Student'}</span>
-                        {#if log.campus}
-                          <span class="campus-badge" style="font-size: 0.7rem; font-weight: 500; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1);">{log.campus}</span>
+                      <span class="driver-name">{log.driver_name || log.name || 'Driver'}</span>
+                      <div class="role-tags">
+                        {#if log.is_vip || log.role?.toLowerCase() === 'vip'}
+                          <span class="badge-role badge-vip">👑 VIP</span>
+                        {:else if log.is_guest || log.role?.toLowerCase() === 'guest'}
+                          <span class="badge-role badge-guest">🏷️ Guest</span>
+                        {:else if log.role?.toLowerCase() === 'student'}
+                          <span class="badge-role badge-student">Student</span>
+                        {:else if log.role?.toLowerCase() === 'employee'}
+                          <span class="badge-role badge-employee">Employee</span>
+                        {:else}
+                          <span class="badge-role badge-default">{log.role || 'Visitor'}</span>
                         {/if}
                       </div>
                     </div>
                   </td>
-                  <td>
-                    <span class="bound-tag" class:in={log.bound !== 'out'} class:out={log.bound === 'out'}>
-                      {log.bound ? log.bound.toUpperCase() : 'IN'}
-                    </span>
+                  <td class="td-time">
+                    {log.check_in ? new Date(log.check_in).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                   </td>
                   <td class="td-time">
-                    {log.check_in ? new Date(log.check_in).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (log.in ? new Date(log.in).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—')}
-                  </td>
-                  <td class="td-time">
-                    {#if log.check_out || log.out}
-                      {new Date(log.check_out || log.out).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                    {#if log.check_out}
+                      {new Date(log.check_out).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                     {:else}
-                      <span class="status-inside">Inside Campus</span>
+                      <span style="color: #64748b; font-size: 0.85rem;">—</span>
                     {/if}
                   </td>
                   <td>
-                    <span class="status-pill" class:ok={log.logged_status === 'Inside' || log.logged_status === 'OK'} class:warn={log.logged_status && log.logged_status !== 'Inside' && log.logged_status !== 'OK'}>
-                      {log.logged_status || 'OK'}
-                    </span>
+                    {#if !log.check_out && (log.logged_status || '').toLowerCase() !== 'exited'}
+                      <span class="status-pill status-inside-pill">INSIDE CAMPUS</span>
+                    {:else}
+                      <span class="status-pill status-exited-pill">EXITED</span>
+                    {/if}
                   </td>
                 </tr>
               {:else}
                 <tr>
-                  <td colspan={printModeActive ? 8 : 7} class="empty-state-cell">
+                  <td colspan={printModeActive ? 7 : 6} class="empty-state-cell">
                     No vehicle logs found for this date or search filter.
                   </td>
                 </tr>
@@ -720,6 +731,120 @@
     font-weight: 600;
   }
 
+  .role-tags {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 3px;
+  }
+
+  .badge-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.2;
+  }
+
+  .badge-vip {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+  }
+
+  :global(.dark) .badge-vip {
+    background: rgba(245, 158, 11, 0.22);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.45);
+  }
+
+  .badge-guest {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+
+  :global(.dark) .badge-guest {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+  }
+
+  .badge-student {
+    background: rgba(147, 51, 234, 0.12);
+    color: #7e22ce;
+    border: 1px solid rgba(147, 51, 234, 0.25);
+  }
+
+  :global(.dark) .badge-student {
+    background: rgba(147, 51, 234, 0.2);
+    color: #c084fc;
+    border-color: rgba(147, 51, 234, 0.35);
+  }
+
+  .badge-employee {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+
+  :global(.dark) .badge-employee {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.35);
+  }
+
+  .badge-default {
+    background: rgba(100, 116, 139, 0.1);
+    color: #64748b;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+  }
+
+  .campus-badge {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #64748b;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+  }
+
+  :global(.dark) .campus-badge {
+    color: #cbd5e1;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .plate-vip {
+    background: #fffbeb !important;
+    border-color: #fcd34d !important;
+    color: #b45309 !important;
+  }
+
+  :global(.dark) .plate-vip {
+    background: rgba(245, 158, 11, 0.18) !important;
+    border-color: rgba(245, 158, 11, 0.4) !important;
+    color: #fbbf24 !important;
+  }
+
+  .plate-guest {
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+    color: #1d4ed8 !important;
+  }
+
+  :global(.dark) .plate-guest {
+    background: rgba(59, 130, 246, 0.18) !important;
+    border-color: rgba(59, 130, 246, 0.4) !important;
+    color: #93c5fd !important;
+  }
+
   .role-badge {
     font-size: 0.7rem;
     color: var(--text-muted);
@@ -752,10 +877,24 @@
 
   .status-pill {
     display: inline-block;
-    padding: 0.2rem 0.55rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .status-inside-pill {
+    background: rgba(16, 185, 129, 0.14);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.28);
+  }
+
+  .status-exited-pill {
+    background: rgba(100, 116, 139, 0.12);
+    color: #475569;
+    border: 1px solid rgba(100, 116, 139, 0.22);
   }
 
   .status-pill.ok {

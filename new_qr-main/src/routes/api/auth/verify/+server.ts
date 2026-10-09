@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { verifyOtp } from '$lib/server/otp';
 import jwt from 'jsonwebtoken';
 import { env } from '$env/dynamic/private';
 
@@ -8,118 +9,84 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
     try {
         const body = await request.json();
         const rawEmail = body.email;
-        const rawOtp = body.otp;
+        const otp = body.otp;
 
-        if (!rawEmail || !rawOtp) {
-            return json({ error: 'Email and OTP are required' }, { status: 400 });
+        if (!rawEmail || !otp) {
+            return json({ error: 'Email and 6-digit verification code are required' }, { status: 400 });
         }
 
-        const email = String(rawEmail).trim().toLowerCase();
-        const otp = String(rawOtp).trim();
+        const email = rawEmail.trim().toLowerCase();
 
-        // Verify OTP from Supabase with optimized query
-        const { data: otpData, error: otpError } = await supabase
-            .from('otp_codes')
-            .select('*')
-            .ilike('email', email)
-            .eq('otp', otp)
-            .gt('expires_at', new Date().toISOString())
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        console.log('[OTP] Query result - Error:', otpError, 'Data:', otpData);
-
-        if (otpError || !otpData) {
-            console.error('[OTP] Verification failed - OTP not found or expired');
-            return json({ error: 'Invalid or expired OTP' }, { status: 401 });
+        // 1. Verify OTP code
+        const verifyResult = verifyOtp(email, otp);
+        if (!verifyResult.valid) {
+            return json({ error: verifyResult.reason || 'Invalid verification code' }, { status: 400 });
         }
 
-        // Clean up used OTP (and old ones) - fire and forget
-        supabase
-            .from('otp_codes')
-            .delete()
-            .eq('email', email)
-            .then(({ error }) => {
-                if (error) console.error('OTP cleanup error:', error);
-            });
-
-        // Get user from Supabase with optimized query
-        const { data: userList } = await supabase
+        // 2. Fetch or create applicant in the database
+        const { data: userList, error: queryError } = await supabase
             .from('user')
-            .select('user_id, user_type, identification, department_id')
+            .select('user_id, email, user_type, identification, department_id, is_active')
             .ilike('email', email)
-            .order('user_id', { ascending: true })
             .limit(1);
 
-        const users = userList && userList.length > 0 ? userList[0] : null;
+        if (queryError) {
+            console.error('[Verify] Database error querying user:', queryError);
+            return json({ error: 'Database error. Please try again.' }, { status: 500 });
+        }
 
-        let userId;
-        let userType = 'Applicants';
-        let identification = 'Visitor';
-        let department_id = null;
+        let user = userList && userList.length > 0 ? userList[0] : null;
 
-        if (users) {
-            userId = users.user_id;
-            userType = users.user_type || 'Applicants';
-            identification = users.identification || 'Visitor';
-            department_id = users.department_id || null;
+        if (user) {
+            if (user.is_active === false) {
+                return json({ error: 'Account is deactivated. Please contact OSA administration.' }, { status: 403 });
+            }
         } else {
-            // Create user if doesn't exist
+            // Create new applicant account
             const { data: newUser, error: createError } = await supabase
                 .from('user')
                 .insert({
                     email,
                     user_type: 'Applicants',
-                    identification: 'Visitor'
+                    identification: 'Visitor',
+                    is_active: true
                 })
-                .select('user_id')
+                .select('user_id, email, user_type, identification, department_id, is_active')
                 .single();
 
-            if (createError) throw createError;
-            userId = newUser.user_id;
+            if (createError || !newUser) {
+                console.error('[Verify] Failed to create user:', createError);
+                return json({ error: 'Failed to create applicant profile' }, { status: 500 });
+            }
+
+            user = newUser;
         }
 
-        // Map user_type to role for JWT
-        let role = 'applicant';
+        // 3. Check for existing vehicle sticker application
+        const { data: regList } = await supabase
+            .from('registration')
+            .select('registration_id, status')
+            .eq('user_id', user.user_id)
+            .order('created_at', { ascending: false })
+            .limit(1);
 
-        if (userType === 'Osa') {
-            role = 'osa';
-        } else if (userType === 'Safety Security') {
-            role = 'security';
-        } else if (userType === 'dean') {
-            role = 'dean';
-            // department_id is already fetched from user table
-        } else {
-            role = 'applicant';
-        }
+        const hasExistingApplication = regList && regList.length > 0;
+        const redirectUrl = hasExistingApplication ? '/status' : '/';
 
-        // Determine redirect URL based on role
-        let redirectUrl = '/status';
-        if (role === 'osa') {
-            redirectUrl = '/osa';
-        } else if (role === 'security') {
-            redirectUrl = '/security';
-        } else if (role === 'dean') {
-            redirectUrl = '/dean';
-        } else {
-            redirectUrl = '/status';
-        }
-
-        // Generate JWT with both role and user_type
+        // 4. Issue JWT session token
         const token = jwt.sign(
-            { 
-                email, 
-                role, 
-                user_type: userType,
-                department_id,
-                user_id: userId
+            {
+                email: user.email,
+                role: 'applicant',
+                user_type: 'Applicants',
+                department_id: null,
+                user_id: user.user_id
             },
             env.JWT_SECRET as string,
-            { expiresIn: '7d' } // 7 days
+            { expiresIn: '7d' }
         );
 
-        // Set HttpOnly cookie
+        // 5. Set session cookie
         cookies.set('gateqr_session', token, {
             path: '/',
             httpOnly: true,
@@ -128,9 +95,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             maxAge: 60 * 60 * 24 * 7 // 7 days
         });
 
-        return json({ message: 'Verified successfully', role, user_type: userType, redirectUrl });
+        console.log(`[Verify] OTP successfully verified for ${user.email} -> ${redirectUrl}`);
+
+        return json({
+            success: true,
+            message: 'Email verified successfully',
+            role: 'applicant',
+            redirectUrl,
+            hasExistingApplication
+        });
     } catch (error) {
-        console.error('Verify error:', error);
-        return json({ error: 'Failed to verify OTP' }, { status: 500 });
+        console.error('[Verify Error]:', error);
+        return json({ error: 'An unexpected error occurred during OTP verification' }, { status: 500 });
     }
 };

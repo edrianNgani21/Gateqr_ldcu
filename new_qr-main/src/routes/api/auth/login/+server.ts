@@ -1,99 +1,122 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { sendEmail } from '$lib/server/email';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { env } from '$env/dynamic/private';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
     try {
         const body = await request.json();
         const rawEmail = body.email;
+        const rawPassword = body.password;
 
         if (!rawEmail || typeof rawEmail !== 'string') {
-            return json({ error: 'Email is required' }, { status: 400 });
+            return json({ error: 'Email address is required' }, { status: 400 });
+        }
+
+        if (!rawPassword || typeof rawPassword !== 'string') {
+            return json({ error: 'Password is required' }, { status: 400 });
         }
 
         const email = rawEmail.trim().toLowerCase();
+        const password = rawPassword.trim();
 
-        // Fast random 6-digit OTP
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        // Fetch user record
+        const { data: userList, error: queryError } = await supabase
+            .from('user')
+            .select('user_id, email, user_type, identification, department_id, password_hash, is_active')
+            .ilike('email', email)
+            .limit(1);
 
-        // Run user lookup and old OTP cleanup concurrently in parallel
-        const [userRes, _cleanupRes] = await Promise.all([
-            supabase
-                .from('user')
-                .select('user_id, user_type')
-                .ilike('email', email)
-                .order('user_id', { ascending: true })
-                .limit(1),
-            supabase
-                .from('otp_codes')
-                .delete()
-                .ilike('email', email)
-        ]);
-
-        let userId = userRes?.data && userRes.data.length > 0 ? userRes.data[0].user_id : null;
-
-        if (!userId) {
-            // Create user if doesn't exist yet
-            const { data: newUser, error: createError } = await supabase
-                .from('user')
-                .insert({
-                    email,
-                    user_type: 'Applicants',
-                    identification: 'Visitor'
-                })
-                .select('user_id')
-                .single();
-
-            if (createError) throw createError;
-            userId = newUser.user_id;
+        if (queryError) {
+            console.error('[Login] Database query error:', queryError);
+            return json({ error: 'Database error occurred. Please try again.' }, { status: 500 });
         }
 
-        // Store OTP in database quickly
-        const { error: otpError } = await supabase
-            .from('otp_codes')
-            .insert({
-                user_id: userId,
-                email,
-                otp,
-                expires_at: expiresAt.toISOString()
-            });
+        const user = userList && userList.length > 0 ? userList[0] : null;
 
-        if (otpError) {
-            console.error('[OTP] Database insertion error:', otpError);
-            throw otpError;
+        if (!user) {
+            return json({ error: 'Invalid email or password' }, { status: 401 });
         }
 
-        // Send email with OSA sender concurrently in background without blocking
-        sendEmail(
-            email,
-            'Your GateQR Login OTP Code',
-            `Your login code is: ${otp}. It will expire in 10 minutes.`,
-            `<div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <h2 style="color: #7f1d1d; margin: 0; font-size: 22px;">Liceo GateQR</h2>
-                    <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Office of Student Affairs (OSA)</p>
-                </div>
-                <div style="background: #f8fafc; border-radius: 10px; padding: 20px; text-align: center; border: 1px dashed #cbd5e1; margin-bottom: 20px;">
-                    <p style="font-size: 14px; color: #475569; margin: 0 0 10px 0;">Your One-Time Password (OTP) is:</p>
-                    <div style="font-size: 34px; font-weight: 800; letter-spacing: 6px; color: #7f1d1d; font-family: monospace;">${otp}</div>
-                    <p style="font-size: 12px; color: #94a3b8; margin: 12px 0 0 0;">This code is valid for 10 minutes. Do not share it with anyone.</p>
-                </div>
-                <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0; line-height: 1.4;">
-                    Liceo de Cagayan University &bull; Office of Student Affairs<br>
-                    <a href="mailto:aluban98304@liceo.edu.ph" style="color: #7f1d1d; text-decoration: none;">aluban98304@liceo.edu.ph</a>
-                </p>
-            </div>`,
-            `"Liceo OSA - GateQR" <aluban98304@liceo.edu.ph>`
-        ).catch(err => console.error('[Email Error]:', err));
+        if (user.is_active === false) {
+            return json({ error: 'Account is deactivated. Please contact OSA administration.' }, { status: 403 });
+        }
 
-        console.log(`[OTP] Sent for ${email}: ${otp}`);
+        // Verify password
+        let isPasswordValid = false;
 
-        // Return immediately
-        return json({ message: 'OTP sent successfully' });
+        if (user.password_hash) {
+            isPasswordValid = bcrypt.compareSync(password, user.password_hash);
+        } else if (email === 'aluban98304@liceo.edu.ph' && password === 'Admin123!') {
+            // Bootstrap fallback for default OSA Admin before/during manual migration
+            isPasswordValid = true;
+            try {
+                const newHash = bcrypt.hashSync('Admin123!', 10);
+                await supabase
+                    .from('user')
+                    .update({ password_hash: newHash, user_type: 'Osa', identification: 'Admin' })
+                    .eq('user_id', user.user_id);
+            } catch (syncErr) {
+                console.warn('[Login] Note: Could not auto-sync password_hash column:', syncErr);
+            }
+        }
+
+        if (!isPasswordValid) {
+            return json({ error: 'Invalid email or password' }, { status: 401 });
+        }
+
+        // Map user_type to system role
+        let role = 'applicant';
+        let redirectUrl = '/status';
+
+        if (user.user_type === 'Osa') {
+            role = 'osa';
+            redirectUrl = '/osa';
+        } else if (user.user_type === 'Safety Security') {
+            role = 'security';
+            redirectUrl = '/security';
+        } else if (user.user_type === 'dean') {
+            role = 'dean';
+            redirectUrl = '/dean';
+        } else {
+            role = 'applicant';
+            redirectUrl = '/status';
+        }
+
+        // Generate JWT session token
+        const token = jwt.sign(
+            {
+                email: user.email,
+                role,
+                user_type: user.user_type,
+                department_id: user.department_id || null,
+                user_id: user.user_id
+            },
+            env.JWT_SECRET as string,
+            { expiresIn: '7d' }
+        );
+
+        // Store HttpOnly session cookie
+        cookies.set('gateqr_session', token, {
+            path: '/',
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 7 // 7 days
+        });
+
+        console.log(`[Login] Successful login for ${user.email} (Role: ${role})`);
+
+        return json({
+            message: 'Login successful',
+            role,
+            user_type: user.user_type,
+            redirectUrl
+        });
     } catch (error) {
-        console.error('Login error:', error);
-        return json({ error: 'Failed to process login request' }, { status: 500 });
+        console.error('[Login Error]:', error);
+        return json({ error: 'An unexpected error occurred during login' }, { status: 500 });
     }
 };

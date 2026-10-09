@@ -2,29 +2,18 @@
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
   import { invalidateAll } from '$app/navigation';
-  import { supabaseClient } from '$lib/supabaseClient';
+  import { startLiveSync } from '$lib/utils/liveSync';
 
   let { data } = $props();
   let userRole = $derived(data.userRole || 'security');
 
-  // Realtime subscription
+  // Dual-engine live sync for instant automatic updates without page refresh
   $effect(() => {
-    const channel = supabaseClient
-        .channel('dashboard-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
-            invalidateAll();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'complaint' }, () => {
-            invalidateAll();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_availability' }, () => {
-            invalidateAll();
-        })
-        .subscribe();
-
-    return () => {
-        supabaseClient.removeChannel(channel);
-    };
+    return startLiveSync({
+      channelName: 'security-dashboard-realtime',
+      tables: ['vehicle_log', 'complaint', 'parking_availability', 'registration'],
+      intervalMs: 5000
+    });
   });
 
   const navLinks = $derived([
@@ -61,8 +50,8 @@
       desc: `2-Wheels: ${statsData.main2W || 0} • 4-Wheels: ${statsData.main4W || 0}`,
       capacity: statsData.mainCapacity,
       icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
-      color: '#059669',
-      bg: 'rgba(5,150,105,0.08)',
+      color: '#8B1A3C',
+      bg: 'rgba(139,26,60,0.08)',
       event: statsData.mainEvent
     },
     {
@@ -71,8 +60,8 @@
       desc: `2-Wheels: ${statsData.rnp2W || 0} • 4-Wheels: ${statsData.rnp4W || 0}`,
       capacity: statsData.rnpCapacity,
       icon: `<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>`,
-      color: '#2563eb',
-      bg: 'rgba(37,99,235,0.08)',
+      color: '#D4A62A',
+      bg: 'rgba(212,166,42,0.1)',
       event: statsData.rnpEvent
     },
     {
@@ -81,8 +70,8 @@
       desc: `2-Wheels: ${statsData.paseo2W || 0} • 4-Wheels: ${statsData.paseo4W || 0}`,
       capacity: statsData.paseoCapacity,
       icon: `<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>`,
-      color: '#7c3aed',
-      bg: 'rgba(124,58,237,0.08)',
+      color: '#A21C46',
+      bg: 'rgba(162,28,70,0.08)',
       event: statsData.paseoEvent
     }
   ]);
@@ -98,6 +87,18 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
   <NavBar title="Security Dashboard" />
   <div class="dashboard-wrapper">
+    <!-- Welcome Banner matching Dashboard Aesthetic -->
+    <div class="welcome-banner">
+      <div class="wb-content">
+        <h1 class="wb-title">Welcome back, Security Officer!</h1>
+        <p class="wb-sub">Here's what's happening across all university campus gates today.</p>
+      </div>
+      <div class="wb-icon-shield">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+    </div>
 
     <!-- Stats Cards Grid -->
     <div class="stats-grid">
@@ -124,8 +125,8 @@
             <div class="stat-desc" style="font-size: 0.75rem; color: #a0aec0; margin-top: 4px;">{card.desc}</div>
             <div class="capacity-stats">
                 <div class="cap-item"><span>Cap:</span> {card.capacity?.capacity ?? 0}</div>
-                <div class="cap-item"><span>Occ:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
-                <div class="cap-item"><span>Avail:</span> <strong style="color:#38a169">{card.capacity?.available ?? 0}</strong></div>
+                <div class="cap-item"><span>Currently IN:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
+                <div class="cap-item"><span>Avail:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? 0}</strong></div>
             </div>
           </div>
           <div class="role-breakdown-toggle" onclick={() => toggleRoleBreakdown(card.label)} onkeydown={(e) => e.key === 'Enter' && toggleRoleBreakdown(card.label)} role="button" tabindex="0" aria-label="Toggle role breakdown">
@@ -153,6 +154,7 @@
         </div>
       {/each}
     </div>
+
 
     <!-- Analytics Grid: Hourly Traffic Chart + Role Breakdown -->
     <div class="analytics-row">
@@ -264,6 +266,50 @@
     margin: 0 auto;
     width: 100%;
     padding: 1.5rem;
+  }
+
+  /* Welcome Banner matching Dashboard aesthetic */
+  .welcome-banner {
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border-radius: 18px;
+    padding: 1.75rem 2.25rem;
+    color: #ffffff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .wb-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    z-index: 1;
+  }
+
+  .wb-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #E9C25E;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .wb-sub {
+    font-size: 0.9rem;
+    color: #F5D5DE;
+    margin: 0;
+    font-weight: 500;
+  }
+
+  .wb-icon-shield {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
   }
 
   /* Stats Grid */
@@ -526,9 +572,9 @@
   .campus-tag {
     display: inline-block;
     padding: 0.15rem 0.5rem;
-    background: #ebf8ff;
+    background: #fdf2f4;
     border-radius: 6px;
-    color: #2b6cb0;
+    color: #8B1A3C;
     font-size: 0.75rem;
     font-weight: 600;
   }
@@ -611,13 +657,13 @@
   .bar-fill {
     width: 70%;
     min-height: 4px;
-    background: #805ad5; /* Purple tone like image */
+    background: #8B1A3C;
     border-radius: 4px 4px 0 0;
     transition: height 0.3s ease, background 0.2s;
   }
   
   .bar-col:nth-child(even) .bar-fill {
-    background: #38b2ac; /* Teal tone like image */
+    background: #D4A62A;
   }
 
   .bar-hour {
@@ -672,14 +718,15 @@
 
   .progress-fill {
     height: 100%;
-    background: #805ad5;
+    background: linear-gradient(90deg, #8B1A3C, #D4A62A);
     border-radius: 4px;
     transition: width 0.4s ease;
   }
 
   .capacity-stats {
     display: flex;
-    gap: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
     margin-top: 0.75rem;
     padding-top: 0.75rem;
     border-top: 1px dashed #e2e8f0;

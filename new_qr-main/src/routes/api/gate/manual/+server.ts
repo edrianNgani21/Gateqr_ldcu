@@ -207,7 +207,7 @@ export const POST: RequestHandler = async ({ request }) => {
                     .select('vehicle_log_id')
                     .order('vehicle_log_id', { ascending: false })
                     .limit(1)
-                const vehicle_log_id = vehicleLog?.vehicle_log_id || null;
+                const vehicle_log_id = (vehicleLog as any)?.[0]?.vehicle_log_id || null;
                 const { error: parkingError } = await supabase
                     .from('parking_availability')
                     .insert({

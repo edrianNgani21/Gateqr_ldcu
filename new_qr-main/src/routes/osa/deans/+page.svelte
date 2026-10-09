@@ -27,6 +27,7 @@
 
     let showForm = $state(false);
     let newDeanEmail = $state('');
+    let newDeanPassword = $state('');
     let selectedDepartment = $state('');
     let loading = $state(false);
     let editingDeanId: number | null = $state(null);
@@ -48,12 +49,22 @@
 
     async function handleSave() {
         if (!newDeanEmail) return;
+
+        if (!editingDeanId && (!newDeanPassword || newDeanPassword.length < 6)) {
+            alert('Password is required for new dean accounts (minimum 6 characters)');
+            return;
+        }
+
         loading = true;
         try {
             const method = editingDeanId ? 'PUT' : 'POST';
-            const body = editingDeanId
+            const body: any = editingDeanId
                 ? { user_id: editingDeanId, email: newDeanEmail, department_id: selectedDepartment ? parseInt(selectedDepartment) : null }
-                : { email: newDeanEmail, department_id: selectedDepartment ? parseInt(selectedDepartment) : null };
+                : { email: newDeanEmail, password: newDeanPassword, department_id: selectedDepartment ? parseInt(selectedDepartment) : null };
+
+            if (editingDeanId && newDeanPassword) {
+                body.password = newDeanPassword;
+            }
 
             const res = await fetch('/api/deans', {
                 method,
@@ -63,6 +74,7 @@
             if (res.ok) {
                 showForm = false;
                 newDeanEmail = '';
+                newDeanPassword = '';
                 selectedDepartment = '';
                 editingDeanId = null;
                 await invalidateAll();
@@ -119,7 +131,7 @@
           </svg>
           Department Management
         </a>
-        <button class="primary-button" onclick={() => { showForm = true; editingDeanId = null; newDeanEmail = ''; selectedDepartment = ''; }}>
+        <button class="primary-button" onclick={() => { showForm = true; editingDeanId = null; newDeanEmail = ''; newDeanPassword = ''; selectedDepartment = ''; }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Dean
         </button>
@@ -156,7 +168,7 @@
             <h2>{editingDeanId ? 'Edit Dean' : 'Add New Dean'}</h2>
             <p class="form-subtitle">Fill in the dean details below</p>
           </div>
-          <button class="close-button" onclick={() => { showForm = false; editingDeanId = null; newDeanEmail = ''; selectedDepartment = ''; }}>
+          <button class="close-button" onclick={() => { showForm = false; editingDeanId = null; newDeanEmail = ''; newDeanPassword = ''; selectedDepartment = ''; }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -184,6 +196,27 @@
           </div>
           
           <div class="form-group">
+            <label for="dean-password">Account Password</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              <input 
+                id="dean-password" 
+                type="password" 
+                placeholder={editingDeanId ? "Leave blank to keep current password" : "Enter password (min. 6 characters)"}
+                bind:value={newDeanPassword} 
+                disabled={loading}
+                class="form-input"
+              />
+            </div>
+            <p class="input-hint">
+              {editingDeanId ? "Only enter if you wish to reset this dean's password" : "Password used by dean to sign in at /login"}
+            </p>
+          </div>
+
+          <div class="form-group">
             <label for="department">Assign to Department</label>
             <div class="input-wrapper">
               <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -209,7 +242,7 @@
         </div>
 
         <div class="form-actions">
-          <button class="secondary-button" onclick={() => { showForm = false; editingDeanId = null; newDeanEmail = ''; selectedDepartment = ''; }} disabled={loading}>
+          <button class="secondary-button" onclick={() => { showForm = false; editingDeanId = null; newDeanEmail = ''; newDeanPassword = ''; selectedDepartment = ''; }} disabled={loading}>
             Cancel
           </button>
           <button class="primary-button" onclick={handleSave} disabled={loading}>

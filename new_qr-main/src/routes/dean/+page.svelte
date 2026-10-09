@@ -4,7 +4,7 @@
   import ApplicationCard from "$lib/components/ApplicationCard.svelte";
   import ActionBar from "$lib/components/ActionBar.svelte";
   import { invalidateAll } from "$app/navigation";
-  import { supabaseClient } from "$lib/supabaseClient";
+  import { startLiveSync } from "$lib/utils/liveSync";
 
   let { data } = $props();
   let apps = $derived((data.applications as any[]) || []);
@@ -14,18 +14,13 @@
 
   let searchQuery = $state("");
 
-  // Realtime subscription for Dean portal
+  // Dual-engine live sync for Dean portal (instant automatic updates without page refresh)
   $effect(() => {
-    const channel = supabaseClient
-      .channel('dean-applications-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
-        invalidateAll();
-      })
-      .subscribe();
-
-    return () => {
-      supabaseClient.removeChannel(channel);
-    };
+    return startLiveSync({
+      channelName: "dean-applications-realtime",
+      tables: ["registration", "department"],
+      intervalMs: 5000
+    });
   });
 
   $effect(() => {
@@ -78,6 +73,10 @@
     }
   }
 
+  let pendingCount = $derived(apps.filter((a) => a.status === "dept_val").length);
+  let historyCount = $derived(apps.filter((a) => a.status !== "dept_val").length);
+  let totalCount = $derived(apps.length);
+
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
@@ -92,20 +91,63 @@
   />
 </svelte:head>
 
-<AppShell userEmail={data.userEmail}>
-  <div class="page-header">
-    <div class="header-content">
-      <div>
-        <h1>Department Head Portal</h1>
-        <p class="page-subtitle">Review and approve vehicle sticker applications</p>
-        {#if data.departmentName}
-          <p class="department-name">{data.departmentName}</p>
-        {/if}
+<AppShell userEmail={data.userEmail} userRole="dean" showSidebar={false}>
+  <!-- Welcome Banner matching Dashboard Aesthetic -->
+  <div class="welcome-banner">
+    <div class="wb-content">
+      <h1 class="wb-title">Welcome back, Dean!</h1>
+      <p class="wb-sub">Review and verify department vehicle registration applications{data.departmentName ? ` for ${data.departmentName}` : ''} today.</p>
+    </div>
+    <div class="wb-icon-shield">
+      <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
+        <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+        <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Summary Stats Grid matching Dashboard Aesthetic -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-left">
+        <div class="stat-icon-circle maroon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
       </div>
-      <button class="logout-btn" onclick={handleLogout}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        Logout
-      </button>
+      <div class="stat-content">
+        <div class="stat-value">{totalCount}</div>
+        <div class="stat-label">TOTAL APPLICATIONS</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-left">
+        <div class="stat-icon-circle gold">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-content">
+        <div class="stat-value">{pendingCount}</div>
+        <div class="stat-label">PENDING VALIDATION</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-left">
+        <div class="stat-icon-circle rose">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-content">
+        <div class="stat-value">{historyCount}</div>
+        <div class="stat-label">PROCESSED / HISTORY</div>
+      </div>
     </div>
   </div>
 
@@ -182,64 +224,119 @@
 </AppShell>
 
 <style>
-  .page-header {
+  /* Welcome Banner matching Dashboard aesthetic */
+  .welcome-banner {
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border-radius: 18px;
+    padding: 1.75rem 2.25rem;
+    color: #ffffff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .wb-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    z-index: 1;
+  }
+
+  .wb-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #E9C25E;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .wb-sub {
+    font-size: 0.9rem;
+    color: #F5D5DE;
+    margin: 0;
+    font-weight: 500;
+  }
+
+  .wb-icon-shield {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
+  }
+
+  /* Stats Grid matching Screenshot 1 */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.25rem;
     margin-bottom: 1.5rem;
   }
 
-  .cards-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-  }
-
-  .header-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .page-header h1 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0;
-  }
-
-  .logout-btn {
+  .stat-card {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: var(--maroon);
-    color: white;
-    border: none;
-    border-radius: var(--radius-sm);
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    box-shadow: 0 2px 8px rgba(107,26,42,0.25);
+    gap: 1.25rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+    border: 1px solid #edf2f7;
+    transition: all 0.2s ease;
   }
 
-  .logout-btn:hover {
-    background: #551320;
-    box-shadow: 0 4px 12px rgba(107,26,42,0.35);
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.07);
   }
 
-  .page-subtitle {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin: 0.25rem 0 0 0;
-    font-weight: 400;
+  .stat-icon-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
-  .department-name {
-    font-size: 1.25rem;
-    color: var(--maroon);
-    margin: 0.5rem 0 0 0;
+  .stat-icon-circle.maroon {
+    background: #fdf2f4;
+    color: #8B1A3C;
+  }
+
+  .stat-icon-circle.gold {
+    background: #fffbeb;
+    color: #D4A62A;
+  }
+
+  .stat-icon-circle.rose {
+    background: #fff1f2;
+    color: #BE123C;
+  }
+
+  .stat-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.1;
+  }
+
+  .stat-label {
+    font-size: 0.725rem;
     font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #64748b;
   }
 
   .controls-row {

@@ -7,6 +7,8 @@
   import { invalidateAll } from "$app/navigation";
   import { supabaseClient } from "$lib/supabaseClient";
 
+  import { startLiveSync } from "$lib/utils/liveSync";
+
   let { data } = $props();
   let userRole = $derived(data.userRole || "security");
 
@@ -26,38 +28,17 @@
     vehicles = data.vehicles;
   });
 
-  // Realtime subscriptions
+  // Dual-engine live sync for instant automatic updates without page refresh
   $effect(() => {
-    const channel = supabaseClient
-      .channel("security-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "registration" },
-        () => {
-          invalidateAll();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "vehicle_log" },
-        () => {
-          // To fetch new logs without refreshing
-          fetchLogs();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "parking_availability" },
-        () => {
-          invalidateAll();
-          fetchParkingStatus();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabaseClient.removeChannel(channel);
-    };
+    return startLiveSync({
+      channelName: "security-realtime",
+      tables: ["registration", "vehicle_log", "parking_availability"],
+      intervalMs: 5000,
+      onSync: () => {
+        fetchLogs();
+        fetchParkingStatus();
+      }
+    });
   });
 
   let searchQuery = $state("");

@@ -13,14 +13,19 @@ export const POST: RequestHandler = async ({ params, locals }) => {
         const userId = locals.user.user_id;
 
         // Mark notification as read
-        const { error } = await supabase
+        let updateQuery = supabase
             .from('notifications')
             .update({ 
                 is_read: true, 
                 read_at: new Date().toISOString() 
             })
-            .eq('notification_id', notificationId)
-            .eq('user_id', userId);
+            .eq('notification_id', notificationId);
+
+        if (locals.user.role !== 'osa') {
+            updateQuery = updateQuery.eq('user_id', userId);
+        }
+
+        const { error } = await updateQuery;
 
         if (error) {
             console.error('Error marking notification as read:', error);

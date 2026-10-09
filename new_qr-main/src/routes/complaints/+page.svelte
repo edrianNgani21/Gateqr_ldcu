@@ -28,18 +28,16 @@
         loadComplaints();
     });
 
-    // Realtime subscription for complaints
-    $effect(() => {
-        const channel = supabaseClient
-            .channel('user-complaints-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'complaint' }, () => {
-                loadComplaints();
-            })
-            .subscribe();
+    import { startLiveSync } from '$lib/utils/liveSync';
 
-        return () => {
-            supabaseClient.removeChannel(channel);
-        };
+    // Dual-engine live sync for complaints without manual refresh
+    $effect(() => {
+        return startLiveSync({
+            channelName: 'user-complaints-realtime',
+            tables: ['complaint'],
+            intervalMs: 5000,
+            onSync: () => loadComplaints()
+        });
     });
 
     async function submitComplaint() {
@@ -94,25 +92,17 @@
   <meta name="description" content="View and submit complaints." />
 </svelte:head>
 
-<AppShell>
-  <div class="welcome-bar">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    <span>{data.userEmail}</span>
-    <a href="/status" class="btn-back">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      Back to Status
-    </a>
-  </div>
-
-  <div class="page-header">
-    <div class="page-header-left">
-      <div class="page-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-      </div>
-      <div>
-        <h2 class="page-title">My Complaints</h2>
-        <p class="page-subtitle">Submit and track your complaints to the security office</p>
-      </div>
+<AppShell userRole="applicant" userEmail={data.userEmail} showSidebar={false}>
+  <div class="welcome-banner">
+    <div class="wb-content">
+      <h1 class="wb-title">My Complaints</h1>
+      <p class="wb-sub">Submit and track your complaints to the Safety & Security Office.</p>
+    </div>
+    <div class="wb-actions-right">
+      <a href="/status" class="btn-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back to Status
+      </a>
     </div>
   </div>
 
@@ -230,38 +220,67 @@
 </AppShell>
 
 <style>
-  .welcome-bar {
+  /* Welcome Banner matching Dashboard aesthetic */
+  .welcome-banner {
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border-radius: 18px;
+    padding: 1.75rem 2.25rem;
+    color: #ffffff;
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-    background: var(--surface);
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.45rem 0.875rem;
-    margin-bottom: 1rem;
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
   }
-  .welcome-bar svg { color: var(--maroon); flex-shrink: 0; }
-  .welcome-bar span { flex: 1; }
+
+  .wb-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    z-index: 1;
+  }
+
+  .wb-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #E9C25E;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .wb-sub {
+    font-size: 0.9rem;
+    color: #F5D5DE;
+    margin: 0;
+    font-weight: 500;
+  }
 
   .btn-back {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.875rem;
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    color: var(--text-secondary);
-    font-size: 0.8125rem;
-    font-weight: 600;
+    gap: 0.45rem;
+    padding: 0.5rem 1.1rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #ffffff;
+    font-size: 0.825rem;
+    font-weight: 700;
     text-decoration: none;
-    transition: all 0.15s;
-    flex-shrink: 0;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(4px);
   }
-  .btn-back:hover { background: var(--maroon-muted); color: var(--maroon); border-color: var(--maroon); }
+
+  .btn-back:hover {
+    background: #ffffff;
+    color: #8B1A3C;
+    border-color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
 
   .page-header {
     display: flex;

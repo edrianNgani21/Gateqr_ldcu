@@ -12,23 +12,43 @@ export const GET: RequestHandler = async ({ locals }) => {
         const userId = locals.user.user_id;
         console.log('Fetching notifications for user_id:', userId);
 
-        // Fetch notifications for the current user with actor email
-        const { data: notifications, error } = await supabase
+        let query = supabase
             .from('notifications')
             .select(`
                 *,
-                user:user_id(email),
-                actor:actor_id(email)
+                user:user_id(email)
             `)
-            .eq('user_id', userId)
             .order('created_at', { ascending: false })
             .limit(50);
+
+        // Show only notifications addressed to this authenticated user
+        query = query.eq('user_id', userId);
+
+        const { data: notifications, error } = await query;
 
         console.log('Notifications query result:', { error, count: notifications?.length });
 
         if (error) {
             console.error('Error fetching notifications:', error);
             return json({ error: 'Failed to fetch notifications' }, { status: 500 });
+        }
+
+        // Safely resolve actor email if actor_id is present
+        if (notifications && notifications.length > 0) {
+            const actorIds = [...new Set(notifications.map(n => n.actor_id).filter(Boolean))];
+            if (actorIds.length > 0) {
+                const { data: actors } = await supabase
+                    .from('user')
+                    .select('user_id, email')
+                    .in('user_id', actorIds);
+                
+                const actorMap = new Map((actors || []).map(a => [a.user_id, a.email]));
+                notifications.forEach(n => {
+                    if (n.actor_id && actorMap.has(n.actor_id)) {
+                        n.actor = { email: actorMap.get(n.actor_id) };
+                    }
+                });
+            }
         }
 
         return json({ notifications: notifications || [] });

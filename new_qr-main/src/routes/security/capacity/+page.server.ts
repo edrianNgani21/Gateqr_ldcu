@@ -48,16 +48,16 @@ export const load: PageServerLoad = async ({ locals }) => {
                 .select('campus, logged_status, registration:registration_id(campus)')
                 .is('check_out', null);
             
-            const liveOccupied = (activeLogs || []).filter(l => {
+            const liveOccupied = (activeLogs || []).filter((l: any) => {
                 const st = (l.logged_status || '').toLowerCase();
-                if (st === 'denied' || st === 'exit' || st === 'out') return false;
+                if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited') return false;
                 const c = (l.campus || l.registration?.campus || '').toLowerCase();
                 if (normName.includes('rnp')) return c.includes('rnp');
                 if (normName.includes('paseo')) return c.includes('paseo');
                 return !c.includes('rnp') && !c.includes('paseo');
             }).length;
 
-            const capacity = paData?.parking_capacity ?? 500;
+            const capacity = paData?.parking_capacity ?? 200;
             const occupied = liveOccupied;
             const available = Math.max(0, capacity - occupied);
 
@@ -75,9 +75,9 @@ export const load: PageServerLoad = async ({ locals }) => {
             // Fallback if column does not exist yet
             campuses.push({
                 name,
-                capacity: 500,
+                capacity: 200,
                 occupied: 0,
-                available: 500,
+                available: 200,
                 event_name: '',
                 event_start: '',
                 event_end: '',

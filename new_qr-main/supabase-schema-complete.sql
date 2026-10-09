@@ -289,6 +289,12 @@ CREATE TABLE "user" (
         UNIQUE,
 
 
+    password_hash VARCHAR(255),
+
+
+    security_pin_hash VARCHAR(255),
+
+
     user_type user_type_enum
         NOT NULL
         DEFAULT 'Applicants',
@@ -580,12 +586,10 @@ CREATE TABLE vehicle_log (
     vehicle_log_id SERIAL PRIMARY KEY,
 
 
-    vehicle_information_id INTEGER
-        NOT NULL,
+    vehicle_information_id INTEGER,
 
 
-    registration_id INTEGER
-        NOT NULL,
+    registration_id INTEGER,
 
 
     check_in TIMESTAMPTZ
@@ -606,6 +610,10 @@ CREATE TABLE vehicle_log (
         DEFAULT 'Main',
 
 
+    is_vip BOOLEAN
+        DEFAULT false,
+
+
     created_at TIMESTAMPTZ
         NOT NULL
         DEFAULT NOW(),
@@ -614,13 +622,13 @@ CREATE TABLE vehicle_log (
     CONSTRAINT fk_vehicle_log_vehicle
         FOREIGN KEY (vehicle_information_id)
         REFERENCES vehicle_information(vehicle_information_id)
-        ON DELETE RESTRICT,
+        ON DELETE SET NULL,
 
 
     CONSTRAINT fk_vehicle_log_registration
         FOREIGN KEY (registration_id)
         REFERENCES registration(registration_id)
-        ON DELETE RESTRICT
+        ON DELETE SET NULL
 );
 
 
@@ -731,38 +739,10 @@ CREATE TABLE complaint (
 
 
 -- ============================================================
--- 22. VIP_LOG TABLE
+-- 22. VIP_LOG TABLE (REMOVED - VIP STORED DIRECTLY IN VEHICLE_LOG)
 -- ============================================================
-
-
-CREATE TABLE vip_log (
-    vip_log_id SERIAL PRIMARY KEY,
-
-
-    vehicle_log_id INTEGER
-        NOT NULL,
-
-
-    name VARCHAR(150)
-        NOT NULL,
-
-
-    vehicle_plate VARCHAR(20),
-
-
-    vip_type VARCHAR(50),
-
-
-    timestamp TIMESTAMPTZ
-        NOT NULL
-        DEFAULT NOW(),
-
-
-    CONSTRAINT fk_vip_vehicle_log
-        FOREIGN KEY (vehicle_log_id)
-        REFERENCES vehicle_log(vehicle_log_id)
-        ON DELETE CASCADE
-);
+-- VIP access requires no separate forms or tables. It is logged directly
+-- into vehicle_log with is_vip = true, check_in, and check_out.
 
 
 
@@ -806,47 +786,8 @@ CREATE TABLE guest_log (
 
 
 -- ============================================================
--- 24. OTP_CODES TABLE
+-- 24. OTP CODES (REMOVED - SYSTEM USES PASSWORD AUTH)
 -- ============================================================
---
--- NOTE:
--- device_tokens IS NOT CREATED.
--- ============================================================
-
-
-CREATE TABLE otp_codes (
-    otp_id SERIAL PRIMARY KEY,
-
-
-    user_id INTEGER
-        NOT NULL,
-
-
-    email VARCHAR(255)
-        NOT NULL,
-
-
-    otp VARCHAR(10)
-        NOT NULL,
-
-
-    expires_at TIMESTAMPTZ
-        NOT NULL,
-
-
-    created_at TIMESTAMPTZ
-        NOT NULL
-        DEFAULT NOW(),
-
-
-    used_at TIMESTAMPTZ,
-
-
-    CONSTRAINT fk_otp_user
-        FOREIGN KEY (user_id)
-        REFERENCES "user"(user_id)
-        ON DELETE CASCADE
-);
 
 
 
@@ -1057,20 +998,12 @@ CREATE INDEX idx_complaint_status
 ON complaint(status);
 
 
-CREATE INDEX idx_vip_vehicle_log
-ON vip_log(vehicle_log_id);
+CREATE INDEX idx_vehicle_log_is_vip
+ON vehicle_log(is_vip);
 
 
 CREATE INDEX idx_guest_vehicle_log
 ON guest_log(vehicle_log_id);
-
-
-CREATE INDEX idx_otp_email
-ON otp_codes(email);
-
-
-CREATE INDEX idx_otp_user
-ON otp_codes(user_id);
 
 
 CREATE INDEX idx_change_vehicle_user
@@ -1391,17 +1324,20 @@ $$;
 INSERT INTO "user" (
     email,
     user_type,
-    identification
+    identification,
+    password_hash
 )
 VALUES (
     'aluban98304@liceo.edu.ph',
     'Osa',
-    'Faculty'
+    'Admin',
+    '$2b$10$/ShvmvVm2Uk8nfCqVNFg9.3fxQs4K8cIqmAayu77FuOKHcahsJPvW'
 )
 ON CONFLICT (email)
 DO UPDATE SET
     user_type = 'Osa',
-    identification = 'Faculty';
+    identification = 'Admin',
+    password_hash = '$2b$10$/ShvmvVm2Uk8nfCqVNFg9.3fxQs4K8cIqmAayu77FuOKHcahsJPvW';
 
 
 
@@ -1509,6 +1445,31 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.application_form_settings;
     EXCEPTION WHEN duplicate_object THEN NULL;
     END;
+END $$;
+
+-- ============================================================
+-- 41. VEHICLE_LOG & GUEST_LOG SCHEMA UPDATES
+-- ============================================================
+-- Ensure vehicle_log allows VIP and Guest records without requiring registered account foreign keys
+ALTER TABLE public.vehicle_log ALTER COLUMN registration_id DROP NOT NULL;
+ALTER TABLE public.vehicle_log ALTER COLUMN vehicle_information_id DROP NOT NULL;
+ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS is_vip BOOLEAN DEFAULT false;
+
+-- Remove standalone vip_log table (VIP entries are recorded directly in vehicle_log with is_vip = true)
+DROP TABLE IF EXISTS public.vip_log CASCADE;
+
+-- Ensure guest_log foreign key links directly to vehicle_log
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_guest_vehicle_log'
+    ) THEN
+        ALTER TABLE public.guest_log
+        ADD CONSTRAINT fk_guest_vehicle_log
+        FOREIGN KEY (vehicle_log_id)
+        REFERENCES public.vehicle_log(vehicle_log_id)
+        ON DELETE CASCADE;
+    END IF;
 END $$;
 
 -- ============================================================

@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import QRCode from 'qrcode';
 import { join } from 'path';
+import fs from 'fs';
 import { sendEmail } from '$lib/server/email';
 import { generateStyledQR, generateStyledQRBuffer } from '$lib/server/qr';
 import { uploadToStorage, deleteFromStorage } from '$lib/server/storage';
@@ -140,19 +141,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 `<p>Congrats your registration has been accepted. You are scheduled to visit OSA to pass the notarized filled up hardcopied agreements and notarized requirements, and receive your QR sticker code.</p><p>Schedule: <strong>${new Date(schedule).toLocaleString()}</strong>.</p>`
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'application_approved',
-                    `Your vehicle registration application has been accepted by OSA! Scheduled visit: ${new Date(schedule).toLocaleString()}`,
+                    `Your vehicle registration application has been approved by OSA. Your physical hardcopy compliance visit is scheduled on: ${new Date(schedule).toLocaleString()}.`,
                     actorId,
                     'approve_application',
                     'registration',
                     registration_id,
                     registration_id,
                     { schedule: new Date(schedule).toISOString() }
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'application_approved',
+                    `Successfully approved application for ${reg.user.email} and scheduled visit for: ${new Date(schedule).toLocaleString()}.`,
+                    actorId,
+                    'approve_application_success',
+                    'registration',
+                    registration_id,
+                    registration_id
                 );
             }
         } 
@@ -177,19 +190,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 `<p>Your vehicle sticker application was <strong>rejected by OSA</strong>.</p><p>Reason: <em>${reason}</em></p>`
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'application_rejected',
-                    `Your vehicle registration application was rejected by OSA. Reason: ${reason}`,
+                    `Your vehicle registration application was reviewed and rejected by OSA. Reason: ${reason}`,
                     actorId,
                     'reject_application',
                     'registration',
                     registration_id,
                     registration_id,
                     { reason }
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'application_rejected',
+                    `Successfully rejected application for ${reg.user.email}. Reason: ${reason}`,
+                    actorId,
+                    'reject_application_success',
+                    'registration',
+                    registration_id,
+                    registration_id
                 );
             }
         }
@@ -208,15 +233,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 '<p>Your hardcopy documents have been <strong>received by OSA</strong> and are now under review by Safety and Security.</p>'
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'hardcopy_received',
-                    'Your hardcopy documents have been received and verified by OSA.',
+                    'OSA has verified and confirmed your physical hardcopy compliance documents.',
                     actorId,
                     'check_hardcopy',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'hardcopy_received',
+                    `Successfully verified hardcopy compliance documents for ${reg.user.email}.`,
+                    actorId,
+                    'check_hardcopy_success',
                     'registration',
                     registration_id,
                     registration_id
@@ -304,16 +341,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     'Sticker Released - Liceo GateQR',
                     'Your vehicle sticker has been released by OSA. Please proceed to Safety and Security for sticker installation.',
                     '<p>Your vehicle sticker has been <strong>released by OSA</strong>. Please proceed to Safety and Security for sticker installation.</p>'
-                );
-
-                if (reg.user?.user_id) {
+                );                if (reg.user?.user_id) {
                     const actorId = locals.user?.user_id;
                     await createNotification(
                         reg.user.user_id,
                         'sticker_released',
-                        'Your vehicle sticker has been released by OSA. Proceed to Safety and Security for installation.',
+                        'Your vehicle sticker has been authorized and released by OSA. Please proceed to Safety and Security for sticker installation.',
                         actorId,
                         'release_sticker',
+                        'registration',
+                        registration_id,
+                        registration_id
+                    );
+                }
+                const actorId = locals.user?.user_id;
+                if (actorId) {
+                    await createNotification(
+                        actorId,
+                        'sticker_released',
+                        `Successfully released vehicle sticker authorization for ${reg.user.email}.`,
+                        actorId,
+                        'release_sticker_success',
                         'registration',
                         registration_id,
                         registration_id
@@ -343,12 +391,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 `<p>Your OSA visit for hardcopy submission has been <strong>rescheduled</strong>.</p><p>New schedule: <strong>${new Date(schedule).toLocaleString()}</strong>.</p><p>Please make sure to visit OSA on this date to submit your hardcopy documents.</p>`
             );
 
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'schedule_updated',
-                    `Your OSA visit has been rescheduled to ${new Date(schedule).toLocaleString()}`,
+                    `Your OSA visit for hardcopy compliance has been rescheduled to ${new Date(schedule).toLocaleString()}.`,
                     actorId,
                     'reschedule_visit',
                     'registration',
@@ -356,20 +404,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     registration_id,
                     { schedule: new Date(schedule).toISOString() }
                 );
-                
-                // Notify the OSA Admin
-                if (actorId) {
-                    await createNotification(
-                        actorId,
-                        'osa_action_success',
-                        `Successfully rescheduled the application for ${reg.user.email}.`,
-                        actorId,
-                        'reschedule_visit_success',
-                        'registration',
-                        registration_id,
-                        registration_id
-                    );
-                }
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'schedule_updated',
+                    `Successfully rescheduled the application visit for ${reg.user.email}.`,
+                    actorId,
+                    'reschedule_visit_success',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
             }
         }
         else if (action === 'proceed_overdue' && reg.status === 'distributed') {
@@ -384,32 +430,30 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (updateError) throw updateError;
 
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'schedule_updated',
-                    `Your OSA visit has been marked as OVERDUE and proceeded to Hardcopies Compliance.`,
+                    `Your OSA visit was marked as overdue and has proceeded to Hardcopy Compliance.`,
                     actorId,
                     'proceed_overdue',
                     'registration',
                     registration_id,
                     registration_id
                 );
-                
-                // Notify the OSA Admin
-                if (actorId) {
-                    await createNotification(
-                        actorId,
-                        'osa_action_success',
-                        `Successfully proceeded the overdue application for ${reg.user.email} directly to Hardcopies Compliance.`,
-                        actorId,
-                        'proceed_overdue_success',
-                        'registration',
-                        registration_id,
-                        registration_id
-                    );
-                }
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'schedule_updated',
+                    `Successfully proceeded overdue application for ${reg.user.email} directly to Hardcopy Compliance.`,
+                    actorId,
+                    'proceed_overdue_success',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
             }
         }
         else if (action === 'revoke' && (reg.status === 'distributed' || reg.status === 'completed')) {
@@ -433,19 +477,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 `<p>Your parking access has been <strong>revoked</strong> by OSA.</p><p>Reason: <em>${reason}</em></p>`
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'access_revoked',
-                    `Your vehicle registration access was revoked by OSA. Reason: ${reason}`,
+                    `Your vehicle registration access has been revoked by OSA. Reason: ${reason}`,
                     actorId,
                     'revoke_access',
                     'registration',
                     registration_id,
                     registration_id,
                     { reason }
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'access_revoked',
+                    `Successfully revoked vehicle registration access for ${reg.user.email}. Reason: ${reason}`,
+                    actorId,
+                    'revoke_access_success',
+                    'registration',
+                    registration_id,
+                    registration_id
                 );
             }
         }
@@ -473,15 +529,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 '<p>Your application approval has been <strong>retracted</strong> by OSA and is back under review.</p>'
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'approval_retracted',
-                    'Your vehicle registration approval was retracted by OSA and is back under review.',
+                    'Your vehicle registration approval was retracted by OSA and placed back under review.',
                     actorId,
                     'retract_approval',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'approval_retracted',
+                    `Successfully retracted application approval for ${reg.user.email}.`,
+                    actorId,
+                    'retract_approval_success',
                     'registration',
                     registration_id,
                     registration_id
@@ -496,10 +564,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const restoredStatus = reg.sticker_released_at ? 'completed' : 'distributed';
             const { error: updateError } = await supabase
                 .from('registration')
-                .update({
-                    status: restoredStatus,
-                    revoked_at: null,
-                    invalid_reason: null
+                .update({ 
+                    status: restoredStatus, 
+                    revoked_at: null, 
+                    invalid_reason: null 
                 })
                 .eq('registration_id', registration_id);
 
@@ -512,15 +580,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 '<p>Your parking access has been <strong>restored</strong> by OSA.</p>'
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'access_restored',
                     'Your vehicle registration access has been restored by OSA.',
                     actorId,
                     'restore_access',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'access_restored',
+                    `Successfully restored vehicle registration access for ${reg.user.email}.`,
+                    actorId,
+                    'restore_access_success',
                     'registration',
                     registration_id,
                     registration_id
@@ -558,15 +638,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 '<p>Your vehicle sticker application has been <strong>permanently deleted</strong> by OSA.</p>'
             );
 
-            // Create notification for the applicant
+            // Create notification for the applicant and OSA admin
+            const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
-                const actorId = locals.user?.user_id;
                 await createNotification(
                     reg.user.user_id,
                     'application_deleted',
-                    'Your vehicle registration application has been deleted by OSA.',
+                    'Your vehicle registration application record has been permanently deleted by OSA.',
                     actorId,
                     'delete_application',
+                    'registration',
+                    registration_id,
+                    registration_id
+                );
+            }
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'application_deleted',
+                    `Successfully deleted application record for ${reg.user.email}.`,
+                    actorId,
+                    'delete_application_success',
                     'registration',
                     registration_id,
                     registration_id
