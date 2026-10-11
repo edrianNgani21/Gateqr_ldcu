@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { sendEmail } from '$lib/server/email';
 
 async function createNotification(
     userId: number,
@@ -12,8 +13,9 @@ async function createNotification(
     targetEntityId?: number
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
+            activity: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -39,10 +41,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Registration ID is required' }, { status: 400 });
         }
 
-        // Verify the registration exists and OSA has already released the sticker
+        // Verify the registration exists
         const { data: reg, error: fetchError } = await supabase
             .from('registration')
-            .select('registration_id, user_id, status, sticker_released_at, sticker_installed_at, users:user_id(email)')
+            .select('registration_id, user_id, status, security_check_at, users:user_id(email)')
             .eq('registration_id', registration_id)
             .single();
 
@@ -51,63 +53,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Registration not found' }, { status: 404 });
         }
 
-        if (!reg.sticker_released_at) {
-            return json({ error: 'Sticker has not been released by OSA yet' }, { status: 400 });
-        }
-
-        if (reg.sticker_installed_at) {
-            return json({ error: 'Sticker has already been marked as installed' }, { status: 400 });
-        }
-
-        // Mark sticker as installed and update status to completed
+        // Mark sticker as installed / security check complete and update status to approved
         const { error: updateError } = await supabase
             .from('registration')
             .update({
                 sticker_installed_at: new Date().toISOString(),
-                status: 'completed'
+                security_check_at: reg.security_check_at || new Date().toISOString(),
+                status: 'approved'
             })
             .eq('registration_id', registration_id);
+
+        if (updateError) throw updateError;
 
         // If this application was undergoing a change vehicle request, finalize it
         try {
             const { data: changeReq } = await supabase
-                .from('change_vehicle_requests')
+                .from('change_vehicle_request')
                 .select('*')
                 .eq('registration_id', registration_id)
-                .in('status', ['approved', 'Approved', 'in_progress'])
-                .order('requested_at', { ascending: false })
+                .in('status', ['approved', 'pending'])
+                .order('request_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
             if (changeReq) {
-                if (changeReq.new_vehicle_id) {
-                    await supabase
-                        .from('registration')
-                        .update({ vehicle_information_id: changeReq.new_vehicle_id })
-                        .eq('registration_id', registration_id);
-                } else if (changeReq.new_vehicle_plate) {
-                    // Update existing vehicle_information if no separate record
-                    const { data: currentReg } = await supabase
-                        .from('registration')
-                        .select('vehicle_information_id')
-                        .eq('registration_id', registration_id)
-                        .single();
-                    if (currentReg?.vehicle_information_id) {
-                        await supabase
-                            .from('vehicle_information')
-                            .update({
-                                plate_number: changeReq.new_vehicle_plate,
-                                brand: changeReq.new_vehicle_make || undefined,
-                                type: changeReq.new_vehicle_type || undefined
-                            })
-                            .eq('vehicle_information_id', currentReg.vehicle_information_id);
-                    }
-                }
-
                 await supabase
-                    .from('change_vehicle_requests')
-                    .update({ status: 'completed' })
-                    .eq('request_id', changeReq.request_id);
+                    .from('change_vehicle_request')
+                    .update({ status: 'approved', process_at: new Date().toISOString() })
+                    .eq('change_vehicle_request_id', changeReq.change_vehicle_request_id);
             }
         } catch (cvErr) {
             console.error('Error finalizing change vehicle request:', cvErr);
@@ -115,15 +88,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Notify the applicant
         if (reg.user_id) {
+            const notifMsg = 'Campus Security has successfully installed your vehicle QR code Sticker. Congratulations! You have completed the vehicle registration process and your vehicle is now officially registered.';
             await createNotification(
                 reg.user_id,
                 'sticker_installed',
-                'Campus Security has successfully installed your vehicle RFID sticker. Congratulations! You have completed the vehicle registration process and your vehicle is now officially registered.',
+                notifMsg,
                 locals.user?.user_id,
                 'install_sticker',
                 'registration',
                 registration_id
             );
+
+            // Send email
+            const targetEmail = (reg.users as any)?.email;
+            if (targetEmail) {
+                await sendEmail(
+                    targetEmail,
+                    'Application Update: QR Code Sticker Installed & Registration Complete',
+                    notifMsg
+                );
+            }
         }
 
         // Notify the security officer
@@ -131,7 +115,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             await createNotification(
                 locals.user.user_id,
                 'sticker_installed',
-                `Successfully installed RFID sticker for ${(reg.users as any)?.email || 'applicant'}. Registration finalized.`,
+                `Successfully installed QR code Sticker for ${(reg.users as any)?.email || 'applicant'}. Registration finalized.`,
                 locals.user.user_id,
                 'install_sticker_success',
                 'registration',

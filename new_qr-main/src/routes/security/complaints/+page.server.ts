@@ -8,11 +8,11 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     try {
-        // Fetch unread complaints count from Supabase
+        // Fetch pending complaints count from Supabase
         const { count: unreadComplaints } = await supabase
             .from('complaint')
             .select('*', { count: 'exact', head: true })
-            .eq('is_read', false);
+            .eq('status', 'pending');
 
         return {
             userEmail: locals.user.email,

@@ -20,14 +20,15 @@ export const load: PageServerLoad = async ({ locals }) => {
                 check_in,
                 check_out,
                 logged_status,
-                is_vip,
+                vip_access,
+                guest_id,
                 campus,
+                campus_gate,
                 registration_id,
                 vehicle_information:vehicle_information_id(
                     type
                 ),
                 registration:registration_id(
-                    campus,
                     role,
                     vehicle_information:vehicle_information_id(
                         type
@@ -48,13 +49,13 @@ export const load: PageServerLoad = async ({ locals }) => {
         const countedPaseo = new Set<string | number>();
 
         (activeInsideLogs || []).forEach((log: any) => {
-            // If vehicle has exit (check_out is set or logged_status is exit/out/denied/exited), currently in is 0
+            // If vehicle has exit (check_out is set or logged_status is exit/out/denied/exited/exited_campus), currently in is 0
             if (log.check_out) return;
             const st = (log.logged_status || '').toLowerCase();
-            if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited') return;
+            if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited' || st === 'exited_campus') return;
 
-            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || st === 'guest' || st === 'vip' || Boolean(log.is_vip);
-            const vehicleKey = isGuestOrVip ? log.vehicle_log_id : log.registration_id;
+            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || Boolean(log.guest_id) || Boolean(log.vip_access) || st === 'guest' || st === 'vip';
+            const vehicleKey = isGuestOrVip ? `log_${log.vehicle_log_id}` : `reg_${log.registration_id}`;
 
             const vType = (
                 log.vehicle_information?.type || 
@@ -63,7 +64,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             ).toLowerCase();
             const is2W = vType.includes('2') || vType.includes('motorcycle') || vType.includes('bike') || vType.includes('scooter');
 
-            const c = (log.campus || log.registration?.campus || '').toLowerCase();
+            const c = (log.campus || log.campus_gate || '').toLowerCase();
             if (c.includes('rnp')) {
                 if (!countedRnp.has(vehicleKey)) {
                     countedRnp.add(vehicleKey);
@@ -106,8 +107,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 registration:registration_id(
                     first_name,
                     last_name,
-                    role,
-                    campus
+                    role
                 )
             `)
             .gte('check_in', today)
@@ -136,8 +136,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     registration:registration_id(
                         first_name,
                         last_name,
-                        role,
-                        campus
+                        role
                     )
                 `)
                 .gte('created_at', today)
@@ -165,8 +164,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         registration:registration_id(
                             first_name,
                             last_name,
-                            role,
-                            campus
+                            role
                         )
                     `)
                     .order('created_at', { ascending: false })
@@ -194,7 +192,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
             // Role breakdown
             const role = (log.registration?.role || 'visitor').toLowerCase();
-            const logCampus = (log.campus || log.registration?.campus || 'Main Campus');
+            const logCampus = (log.campus || log.campus_gate || 'Main Campus');
             
             // Normalize campus name to match our keys
             let mappedCampus = 'Main Campus';
@@ -228,8 +226,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 registration:registration_id(
                     first_name,
                     last_name,
-                    role,
-                    campus
+                    role
                 )
             `)
             .or('reason.not.is.null,logged_status.neq.Inside,logged_status.neq.OK')
@@ -249,7 +246,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 plate: r.vehicle_information?.plate_number || 'No Plate',
                 name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || 'Guest / Unregistered',
                 role: r.registration?.role ? (r.registration.role.charAt(0).toUpperCase() + r.registration.role.slice(1)) : 'Visitor',
-                campus: r.campus || r.registration?.campus || 'Main Campus',
+                campus: r.campus || 'Main Campus',
                 status: r.logged_status || 'Flagged'
             }));
 
@@ -260,8 +257,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             { count: vehicleCount }
         ] = await Promise.all([
             supabase.from('complaint').select('*', { count: 'exact', head: true }),
-            supabase.from('complaint').select('*', { count: 'exact', head: true }).eq('is_read', false),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'completed'])
+            supabase.from('complaint').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'distributed', 'completed', 'security_checked'])
         ]);
 
         // Get active events for campuses
@@ -269,25 +266,26 @@ export const load: PageServerLoad = async ({ locals }) => {
         let rnpEvent = null;
         let paseoEvent = null;
         
-        let mainCapacity = { capacity: 0, occupied: 0, available: 0 };
-        let rnpCapacity = { capacity: 0, occupied: 0, available: 0 };
-        let paseoCapacity = { capacity: 0, occupied: 0, available: 0 };
+        let mainCapacity = { capacity: 0, occupied: 0, available: 0, unoccupied: 0 };
+        let rnpCapacity = { capacity: 0, occupied: 0, available: 0, unoccupied: 0 };
+        let paseoCapacity = { capacity: 0, occupied: 0, available: 0, unoccupied: 0 };
 
         try {
             const campusesList = ['Main Campus', 'RNP', 'PASEO'];
             const campusResults = await Promise.all(campusesList.map(async (name) => {
+                const gate = name === 'RNP' ? 'rnp' : (name === 'PASEO' ? 'paseo' : 'main');
                 const [paRes, evRes] = await Promise.all([
                     supabase
                         .from('parking_availability')
                         .select('*')
-                        .eq('campus', name)
+                        .or(`campus.eq.${name},campus_gate.eq.${gate}`)
                         .order('date_time', { ascending: false })
                         .limit(1)
                         .maybeSingle(),
                     supabase
-                        .from('campus_events')
+                        .from('campus_event')
                         .select('*')
-                        .eq('campus', name)
+                        .eq('campus_gate', gate)
                         .eq('is_active', true)
                         .order('created_at', { ascending: false })
                         .limit(1)
@@ -298,13 +296,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
             for (const { name, paData, evData } of campusResults) {
                 const presence = name === 'RNP' ? rnpCampusPresence : (name === 'PASEO' ? paseoCampusPresence : mainCampusPresence);
-                const cap = paData?.parking_capacity ?? 200;
+                const cap = paData?.parking_capacity ?? paData?.capacity ?? 200;
                 const occ = presence;
                 const avail = Math.max(0, cap - occ);
 
-                if (name === 'Main Campus') mainCapacity = { capacity: cap, occupied: occ, available: avail };
-                if (name === 'RNP') rnpCapacity = { capacity: cap, occupied: occ, available: avail };
-                if (name === 'PASEO') paseoCapacity = { capacity: cap, occupied: occ, available: avail };
+                if (name === 'Main Campus') mainCapacity = { capacity: cap, occupied: occ, available: avail, unoccupied: avail };
+                if (name === 'RNP') rnpCapacity = { capacity: cap, occupied: occ, available: avail, unoccupied: avail };
+                if (name === 'PASEO') paseoCapacity = { capacity: cap, occupied: occ, available: avail, unoccupied: avail };
 
                 if (evData?.event_name) {
                     const evt = { name: evData.event_name, start: evData.start_date, end: evData.end_date };

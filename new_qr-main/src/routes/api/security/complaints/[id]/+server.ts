@@ -34,7 +34,6 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
         if (status !== undefined) updateData.status = status;
         if (status === 'resolved') {
             updateData.resolved_at = new Date().toISOString();
-            if (resolved_by !== undefined) updateData.resolved_by = resolved_by;
         }
 
         if (Object.keys(updateData).length > 0) {

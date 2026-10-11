@@ -25,7 +25,7 @@
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_availability' }, () => {
             invalidateAll();
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_events' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_event' }, () => {
             invalidateAll();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
@@ -182,13 +182,18 @@
                 <span class="value">{campus.capacity}</span>
               </div>
               <div class="stat">
-                <span class="label">Currently IN</span>
+                <span class="label">Occupied</span>
                 <span class="value occupied">{campus.occupied}</span>
               </div>
               <div class="stat">
-                <span class="label">Available</span>
-                <span class="value available">{campus.available}</span>
+                <span class="label">Unoccupied</span>
+                <span class="value available">{campus.unoccupied ?? campus.available}</span>
               </div>
+            </div>
+            <div class="wheels-stats">
+              <span class="wheel-tag">2-Wheels: <strong>{campus.wheels2 ?? 0}</strong></span>
+              <span class="wheel-sep">•</span>
+              <span class="wheel-tag">4-Wheels: <strong>{campus.wheels4 ?? 0}</strong></span>
             </div>
             <button class="set-btn" onclick={() => startEdit(campus)}>Update Settings</button>
           {/if}
@@ -310,17 +315,20 @@
     align-items: center;
     gap: 0.35rem;
     flex: 1;
+    min-width: 0;
+    padding: 0 0.25rem;
   }
   .stat:not(:last-child) {
     border-right: 1px solid rgba(226, 232, 240, 0.8);
   }
 
   .label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     color: #718096;
     text-transform: uppercase;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
   }
 
   .value {
@@ -331,6 +339,27 @@
 
   .value.occupied { color: #e53e3e; }
   .value.available { color: #D4A62A; }
+
+  .wheels-stats {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding: 0.5rem 0.75rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: #4a5568;
+    border: 1px solid #edf2f7;
+  }
+  .wheel-tag strong {
+    color: #1a202c;
+    font-weight: 700;
+  }
+  .wheel-sep {
+    color: #cbd5e0;
+  }
 
   .event-display {
     text-align: center;

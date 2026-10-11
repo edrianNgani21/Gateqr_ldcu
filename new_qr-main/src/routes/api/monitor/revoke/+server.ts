@@ -25,17 +25,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .from('registration')
             .update({ 
                 status: 'revoked', 
-                revoked_at: new Date().toISOString() 
+                revoke_at: new Date().toISOString() 
             })
             .eq('registration_id', targetId);
 
         if (updateError) throw updateError;
 
         if (reg?.user_id) {
-            await supabase.from('notifications').insert({
+            const notifMsg = 'Your vehicle registration has been revoked by Safety & Security Admin.';
+            await supabase.from('notification').insert({
                 user_id: reg.user_id,
+                activity: notifMsg,
                 notification_type: 'revoked',
-                message: 'Your vehicle registration has been revoked by Safety & Security Admin.',
+                message: notifMsg,
                 actor_id: locals.user.user_id,
                 action_type: 'revoke',
                 target_entity_type: 'registration',
@@ -78,12 +80,12 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             .eq('registration_id', targetId)
             .single();
 
-        // Restore to distributed (fully approved) and clear the revoked timestamp
+        // Restore to approved (fully approved) and clear the revoked timestamp
         const { error: updateError } = await supabase
             .from('registration')
             .update({
-                status: 'distributed',
-                revoked_at: null
+                status: 'approved',
+                revoke_at: null
             })
             .eq('registration_id', targetId)
             .eq('status', 'revoked');
@@ -91,10 +93,12 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         if (updateError) throw updateError;
 
         if (reg?.user_id) {
-            await supabase.from('notifications').insert({
+            const notifMsg = 'Your vehicle registration has been restored to active status.';
+            await supabase.from('notification').insert({
                 user_id: reg.user_id,
+                activity: notifMsg,
                 notification_type: 'restored',
-                message: 'Your vehicle registration has been restored to active status.',
+                message: notifMsg,
                 actor_id: locals.user.user_id,
                 action_type: 'restore',
                 target_entity_type: 'registration',

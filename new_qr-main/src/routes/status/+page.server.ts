@@ -8,9 +8,9 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     try {
-        // First get the user_id from the user table
+        // First get the user_id from the users table
         const { data: users } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id')
             .eq('email', locals.user.email)
             .single();
@@ -32,14 +32,11 @@ export const load: PageServerLoad = async ({ locals }) => {
             .select(`
                 *,
                 department:department_id(
-                    department,
-                    email
+                    department_name
                 ),
                 vehicle_information:vehicle_information_id(
-                    or_document,
-                    cr_document,
-                    drivers_license,
-                    school_id,
+                    "or",
+                    cr,
                     authorization_letter,
                     plate_number,
                     brand,
@@ -56,7 +53,7 @@ export const load: PageServerLoad = async ({ locals }) => {
         const { count: scheduledCount } = await supabase
             .from('complaint')
             .select('*', { count: 'exact', head: true })
-            .eq('user_email', locals.user.email)
+            .eq('user_id', userId)
             .not('schedule', 'is', null)
             .neq('status', 'resolved');
 
@@ -64,16 +61,22 @@ export const load: PageServerLoad = async ({ locals }) => {
             ...applications,
             // Map Supabase column names to match frontend expectations
             id: applications.registration_id, // Map registration_id to id
-            department_name: applications.department?.department || '-',
-            department_email: applications.department?.email || '-',
+            department_name: applications.department?.department_name || applications.department?.department || '-',
             user: { email: locals.user.email },
-            // Map vehicle information fields to match frontend document expectations
-            doc_id: applications.vehicle_information?.school_id || null,
+            // Map vehicle information & registration fields to match frontend document expectations
+            doc_id: (applications as any).doc_id || 
+                    (applications.agreement_form && typeof applications.agreement_form === 'string' && applications.agreement_form.startsWith('http') ? applications.agreement_form : null) || 
+                    (applications.school_id && typeof applications.school_id === 'string' && applications.school_id.startsWith('http') ? applications.school_id : null) || null,
             doc_load: applications.enrollment_form || null,
-            doc_or: applications.vehicle_information?.or_document || null,
-            doc_cr: applications.vehicle_information?.cr_document || null,
-            doc_license: applications.vehicle_information?.drivers_license || null,
+            doc_or: applications.vehicle_information?.or || applications.vehicle_information?.or_document || null,
+            doc_cr: applications.vehicle_information?.cr || applications.vehicle_information?.cr_document || null,
+            doc_license: applications.drivers_license || applications.vehicle_information?.drivers_license || null,
             doc_letter: applications.vehicle_information?.authorization_letter || null,
+            invalid_reason: applications.rejection_reason || applications.revoke_reason || null,
+            schedule: typeof applications.schedule === 'string' ? applications.schedule : (applications.schedule?.toISOString?.() || (applications as any).dist_sched || null),
+            dist_sched: typeof applications.schedule === 'string' ? applications.schedule : (applications.schedule?.toISOString?.() || (applications as any).dist_sched || null),
+            security_check_at: typeof applications.security_check_at === 'string' ? applications.security_check_at : (applications.security_check_at?.toISOString?.() || (applications as any).security_checked_at || null),
+            security_checked_at: typeof applications.security_check_at === 'string' ? applications.security_check_at : (applications.security_check_at?.toISOString?.() || (applications as any).security_checked_at || null),
             // Map vehicle details
             vehicle_make: applications.vehicle_information?.brand || 'Unknown',
             vehicle_color: applications.vehicle_information?.color || '-',
@@ -83,10 +86,10 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         // Fetch most recent change vehicle request for this user
         const { data: changeRequest } = await supabase
-            .from('change_vehicle_requests')
-            .select('*, new_vehicle:new_vehicle_id(brand, plate_number)')
+            .from('change_vehicle_request')
+            .select('*')
             .eq('user_id', userId)
-            .order('requested_at', { ascending: false })
+            .order('request_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 

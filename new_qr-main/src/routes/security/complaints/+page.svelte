@@ -33,12 +33,11 @@
 
     import { startLiveSync } from '$lib/utils/liveSync';
 
-    // Dual-engine live sync for security complaints
+    // Pure realtime WebSocket sync for security complaints without background polling
     $effect(() => {
         return startLiveSync({
             channelName: 'security-complaints-realtime',
             tables: ['complaint'],
-            intervalMs: 5000,
             onSync: () => loadComplaints()
         });
     });

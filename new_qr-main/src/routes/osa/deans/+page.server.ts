@@ -9,11 +9,11 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     try {
-        // Fetch all deans
+        // Fetch all deans (identification = faculty or user_type = applicant/dean with department_id)
         const { data: deanRows } = await supabase
-            .from('user')
+            .from('users')
             .select('*')
-            .eq('user_type', 'dean')
+            .or('identification.eq.faculty,user_type.eq.dean')
             .order('created_at', { ascending: false });
 
         const deans = (deanRows || []).map(dean => ({
@@ -27,11 +27,12 @@ export const load: PageServerLoad = async ({ locals }) => {
         const { data: deptRows } = await supabase
             .from('department')
             .select('*')
-            .order('department', { ascending: true });
+            .order('department_name', { ascending: true });
 
         const departments = (deptRows || []).map(dept => ({
             department_id: dept.department_id,
-            department: dept.department,
+            department: dept.department_name,
+            department_name: dept.department_name,
             is_active: dept.is_active ?? true
         }));
 

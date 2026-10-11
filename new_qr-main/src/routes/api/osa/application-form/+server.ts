@@ -26,8 +26,8 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
             locals.user.email
         );
         return json({ success: true, ...updatedStatus });
-    } catch (error) {
+    } catch (error: any) {
         console.error('[ApplicationForm] PUT error:', error);
-        return json({ error: 'Failed to update. Make sure the application_form_settings table exists (add-app-settings.sql).' }, { status: 500 });
+        return json({ error: error?.message || 'Failed to update application form status.' }, { status: 500 });
     }
 };

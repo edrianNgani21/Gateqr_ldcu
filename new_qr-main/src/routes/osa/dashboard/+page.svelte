@@ -6,12 +6,11 @@
 
     let { data } = $props();
 
-    // Dual-engine live sync for automatic instant updates without page refresh
+    // Pure realtime WebSocket sync for automatic instant updates without background polling
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-dashboard-realtime',
-            tables: ['registration', 'department', 'change_vehicle_requests'],
-            intervalMs: 5000
+            tables: ['registration', 'department', 'change_vehicle_request']
         });
     });
 

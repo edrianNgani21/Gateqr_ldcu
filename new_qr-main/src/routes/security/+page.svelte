@@ -28,12 +28,11 @@
     vehicles = data.vehicles;
   });
 
-  // Dual-engine live sync for instant automatic updates without page refresh
+  // Pure realtime WebSocket sync for instant updates without background polling
   $effect(() => {
     return startLiveSync({
       channelName: "security-realtime",
       tables: ["registration", "vehicle_log", "parking_availability"],
-      intervalMs: 5000,
       onSync: () => {
         fetchLogs();
         fetchParkingStatus();
@@ -41,7 +40,32 @@
     });
   });
 
+  function getAppsForTab(t: string) {
+    if (t === "Document Review") {
+      return vehicles.filter(
+        (v: any) =>
+          ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
+      );
+    }
+    if (t === "Sticker Installation") {
+      return vehicles.filter(
+        (v: any) =>
+          (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
+      );
+    }
+    if (t === "Registered") {
+      return vehicles.filter(
+        (v: any) => (v.status || "").toLowerCase() === "approved"
+      );
+    }
+    if (t === "Revoked Registered") {
+      return vehicles.filter((v: any) => (v.status || "").toLowerCase() === "revoked");
+    }
+    return [];
+  }
+
   let searchQuery = $state("");
+  let roleFilter = $state("all"); // 'all', 'student', 'faculty', 'staff'
   let vehicleTypeFilter = $state("all"); // 'all', '2-Wheeler / Motorcycle', '4-Wheeler / Car'
 
   // Capacity editing
@@ -97,13 +121,6 @@
     }
   }
 
-  // Poll for real-time updates every 30 seconds
-  $effect(() => {
-    const statusInterval = setInterval(fetchParkingStatus, 30000);
-    return () => {
-      clearInterval(statusInterval);
-    };
-  });
 
   // ── Photo modal ──────────────────────────────────────────────────────────
   let showModal = $state(false);
@@ -219,53 +236,81 @@
     let filtered = [...vehicles];
 
     if (tab === "Document Review") {
-      // Show applications that have been checked by OSA (osa_dist_at) but not yet checked by Security
       filtered = filtered.filter(
         (v: any) =>
-          v.status === "distributed" && v.osa_dist_at && !v.security_checked_at,
+          ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
       );
     } else if (tab === "Sticker Installation") {
-      // Show applications that have been released by OSA (sticker_released_at) but not yet installed
       filtered = filtered.filter(
         (v: any) =>
-          v.status === "completed" &&
-          v.sticker_released_at &&
-          !v.sticker_installed_at,
+          (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
       );
     } else if (tab === "Registered") {
-      // Show fully registered applications (sticker installed)
       filtered = filtered.filter(
-        (v: any) => v.status === "completed" && v.sticker_installed_at,
+        (v: any) => (v.status || "").toLowerCase() === "approved"
       );
     } else if (tab === "Revoked Registered") {
-      // Show revoked applications
-      filtered = filtered.filter((v: any) => v.status === "revoked");
+      filtered = filtered.filter((v: any) => (v.status || "").toLowerCase() === "revoked");
+    }
+
+    if (roleFilter !== "all") {
+      filtered = filtered.filter((v: any) => {
+        const r = (v.role || "").toLowerCase().trim();
+        if (roleFilter === "student") return r === "student";
+        if (roleFilter === "faculty") return r === "faculty";
+        if (roleFilter === "staff") return r === "staff" || r === "employee";
+        return r === roleFilter.toLowerCase();
+      });
     }
 
     if (vehicleTypeFilter !== "all") {
-      filtered = filtered.filter(
-        (v: any) => v.vehicle_type === vehicleTypeFilter,
-      );
-    }
-
-    if (selectedRoles.length > 0 && selectedRoles.length < allRoles.length) {
-      filtered = filtered.filter(
-        (v: any) => v.role && selectedRoles.includes(v.role.toLowerCase()),
-      );
+      filtered = filtered.filter((v: any) => {
+        const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase();
+        if (vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
+          return rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike");
+        }
+        if (vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") {
+          return rawType.includes("4") || rawType.includes("car");
+        }
+        return rawType === vehicleTypeFilter.toLowerCase();
+      });
     }
 
     if (selectedCampus !== "all") {
-      filtered = filtered.filter((v: any) => v.campus === selectedCampus);
+      filtered = filtered.filter((v: any) => {
+        const c = (v.campus || "").toLowerCase().trim();
+        return c === selectedCampus.toLowerCase().trim();
+      });
     }
 
-    if (searchQuery) {
+    if (searchQuery && searchQuery.trim()) {
       const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
       filtered = filtered.filter((v: any) => {
-        const fullString = Object.values(v)
-          .filter((val) => val !== null && val !== undefined)
-          .map((val) => String(val).toLowerCase())
-          .join(" ");
-        return terms.every((term) => fullString.includes(term));
+        const searchTarget = [
+          v.first_name,
+          v.last_name,
+          `${v.first_name || ""} ${v.last_name || ""}`,
+          v.student_id,
+          v.id_no,
+          v.user_email,
+          v.mobile,
+          v.department_name,
+          v.campus,
+          v.role,
+          v.vehicle_plate,
+          v.vehicle_make,
+          v.vehicle_color,
+          v.vehicle_type,
+          v.vehicle_information?.plate_number,
+          v.vehicle_information?.brand,
+          v.vehicle_information?.color,
+          v.vehicle_information?.type,
+          v.qr_unique_code,
+          v.registration_id,
+          v.id
+        ].filter(Boolean).map(String).join(" ").toLowerCase();
+
+        return terms.every((term) => searchTarget.includes(term));
       });
     }
 
@@ -671,7 +716,7 @@
 
   <TabBar {tabs} active={tab} onchange={(t) => (tab = t)} />
 
-  {#if tab === "Document Review" || tab === "Registered" || tab === "Revoked Registered"}
+  {#if tab === "Document Review" || tab === "Sticker Installation" || tab === "Registered" || tab === "Revoked Registered"}
     <!-- Monitoring Tab - Registered Vehicles -->
     <div class="controls-row">
       <div class="search-wrap">
@@ -703,6 +748,12 @@
       </div>
 
       <div class="filters">
+        <select bind:value={roleFilter} class="filter-select">
+          <option value="all">All Roles</option>
+          <option value="student">Student</option>
+          <option value="faculty">Faculty</option>
+          <option value="staff">Staff</option>
+        </select>
         <select bind:value={vehicleTypeFilter} class="filter-select">
           <option value="all">All Vehicles</option>
           <option value="2-Wheeler / Motorcycle">2-Wheelers</option>
@@ -883,6 +934,10 @@
               >Print</button
             >
           {/if}
+          <div class="table-total-badge" title="Total logs">
+            <span class="total-badge-label">Total Logs:</span>
+            <span class="total-badge-count">{totalLogs}</span>
+          </div>
         </div>
       </div>
 
@@ -1599,6 +1654,39 @@
     gap: 0.75rem;
     flex-wrap: wrap;
     background: var(--background);
+  }
+
+  .table-total-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.85rem;
+    background: #ffffff;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: auto;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .total-badge-label {
+    font-weight: 600;
+  }
+
+  .total-badge-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.4rem;
+    height: 1.4rem;
+    padding: 0 0.45rem;
+    background: var(--maroon);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.78rem;
+    border-radius: 999px;
   }
 
   @media (max-width: 640px) {

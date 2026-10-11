@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { uploadToStorage } from '$lib/server/storage';
+import { generateStyledQRBuffer } from '$lib/server/qr';
 import { sendEmail } from '$lib/server/email';
 import { isApplicationFormOpen } from '$lib/server/applicationForm';
 
@@ -62,19 +63,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // Extract vehicle brand from vehicle_make (use vehicle_color from form)
         const vehicle_brand = vehicle_make;
 
-        // 1. Ensure user exists in user table
+        // 1. Ensure user exists in users table
         let { data: users, error: userError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id')
             .eq('email', locals.user.email)
-            .single();
+            .maybeSingle();
 
         let user_id = users?.user_id;
 
         if (!user_id || userError) {
+            let identRole: 'admin' | 'staff' | 'faculty' | 'student' = 'student';
+            if (role === 'faculty') identRole = 'faculty';
+            else if (role === 'staff' || role === 'employee') identRole = 'staff';
+
             const { data: newUser, error: createError } = await supabase
-                .from('user')
-                .insert({ email: locals.user.email })
+                .from('users')
+                .insert({ 
+                    email: locals.user.email,
+                    user_type: 'applicant',
+                    identification: identRole
+                })
                 .select('user_id')
                 .single();
 
@@ -92,12 +101,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // 2. Resolve department_id (only active departments)
         let department_id = null;
-        let dean_email = null;
-        if (role !== 'visitor' && role !== 'concessionaire' && department_name) {
+        if (department_name) {
             const { data: depts, error: deptError } = await supabase
                 .from('department')
-                .select('department_id, email')
-                .eq('department', department_name)
+                .select('department_id')
+                .ilike('department_name', department_name.trim())
                 .eq('is_active', true)
                 .maybeSingle();
 
@@ -106,84 +114,104 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
 
             department_id = depts.department_id;
-            dean_email = depts.email;
-        } else if (role === 'visitor' || role === 'concessionaire') {
-            // For visitors and concessionaires, use a default department or handle accordingly
-            // Since the database requires department_id, we'll need to handle this
-            // For now, let's try to get the first active department as a fallback
+        } else {
+            // Fallback to first department
             const { data: defaultDept } = await supabase
                 .from('department')
                 .select('department_id')
                 .eq('is_active', true)
                 .limit(1)
-                .single();
+                .maybeSingle();
             
             if (defaultDept) {
                 department_id = defaultDept.department_id;
             }
         }
 
-        // 3. Check if department is inactive (additional validation)
-        if (department_id) {
-            const { data: deptStatus } = await supabase
-                .from('department')
-                .select('is_active')
-                .eq('department_id', department_id)
-                .single();
-            
-            if (deptStatus && !deptStatus.is_active) {
-                return json({ error: 'This department is currently inactive. Please contact OSA.' }, { status: 400 });
-            }
-        }
+        // 3. Format vehicle type enum ('2_wheels' | '4_wheels')
+        const vType: '2_wheels' | '4_wheels' = 
+            (vehicle_type || '').toLowerCase().includes('2') || (vehicle_type || '').toLowerCase().includes('motor') 
+                ? '2_wheels' 
+                : '4_wheels';
 
-        // 4. Determine Initial Status based on Workflow
-        // Changed: All applications now start with 'dept_val' so both dean and OSA can see them
-        const status = 'dept_val';
-
-        // 5. Insert into vehicle_information table first
+        // 4. Insert into vehicle_information table
         const { data: vehicleData, error: vehicleError } = await supabase
             .from('vehicle_information')
             .insert({
-                or_document: doc_or || null,
-                cr_document: doc_cr || null,
-                plate_number: vehicle_plate,
-                color: vehicle_color,
-                brand: vehicle_brand,
-                type: vehicle_type as any,
-                qr_code: doc_qr || null,
-                drivers_license: doc_license || null,
-                school_id: doc_id || null,
-                authorization_letter: doc_letter || '' // Use empty string instead of null to satisfy NOT NULL constraint
+                or: doc_or || 'pending_or',
+                cr: doc_cr || 'pending_cr',
+                plate_number: vehicle_plate.trim(),
+                color: vehicle_color.trim(),
+                brand: vehicle_brand.trim(),
+                type: vType,
+                authorization_letter: doc_letter || 'n/a'
             })
             .select('vehicle_information_id')
             .single();
 
-        if (vehicleError) throw vehicleError;
+        if (vehicleError) {
+            console.error('Error inserting vehicle information:', vehicleError);
+            throw vehicleError;
+        }
 
         const vehicle_information_id = vehicleData.vehicle_information_id;
 
-        // 6. Insert into registration table
-        const { error: insertError } = await supabase
-            .from('registration')
-            .insert({
-                vehicle_information_id,
-                status,
-                user_id,
-                department_id: department_id || 1, // Default to department_id 1 if not set
-                agreement_form: null,
-                first_name,
-                last_name,
-                mobile: contact_number,
-                role,
-                campus,
-                year_level,
-                facebook: facebook || null,
-                student_id: id_no || null,
-                enrollment_form: doc_load || null,
-                is_owner: is_owner === 'yes'
-            });
+        // 5. Format role enum ('student' | 'staff' | 'faculty')
+        let regRole: 'student' | 'staff' | 'faculty' = 'student';
+        const cleanRole = (role || '').toLowerCase();
+        if (cleanRole === 'faculty') regRole = 'faculty';
+        else if (cleanRole === 'staff' || cleanRole === 'employee') regRole = 'staff';
+        else regRole = 'student';
 
-        if (insertError) throw insertError;
+        // 6. Generate QR code image
+        const uniqueCode = `QR-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        let qrUrl = `/api/qr?code=${encodeURIComponent(uniqueCode)}&role=${encodeURIComponent(regRole)}`;
+        try {
+            const qrBuffer = await generateStyledQRBuffer(uniqueCode, regRole);
+            const qrFilename = `qr-codes/qr-${Date.now()}-${uniqueCode}.png`;
+            qrUrl = await uploadToStorage(qrFilename, qrBuffer, 'image/png');
+        } catch (qrErr) {
+            console.warn('[Apply] Note: Generating dynamic QR endpoint URL:', qrErr);
+        }
+
+        // 7. Insert into registration table
+        const regPayload: any = {
+            vehicle_information_id,
+            status: 'pending',
+            user_id,
+            department_id: department_id || 1,
+            agreement_form: doc_id || 'agreed',
+            first_name: first_name.trim(),
+            last_name: last_name.trim(),
+            mobile: contact_number.trim(),
+            school_id: (id_no || 'N/A').trim(),
+            drivers_license: doc_license || 'pending_license',
+            enrollment_form: doc_load || 'pending_enrollment',
+            role: regRole,
+            qr_code: qrUrl,
+            qr_unique_code: uniqueCode
+        };
+
+        if (doc_id) {
+            regPayload.doc_id = doc_id;
+        }
+
+        let { error: insertError } = await supabase
+            .from('registration')
+            .insert(regPayload);
+
+        if (insertError && insertError.message?.includes('doc_id')) {
+            delete regPayload.doc_id;
+            const fallbackRes = await supabase
+                .from('registration')
+                .insert(regPayload);
+            insertError = fallbackRes.error;
+        }
+
+        if (insertError) {
+            console.error('Error inserting registration:', insertError);
+            throw insertError;
+        }
         
         console.log('Application submitted successfully with department_id:', department_id);
 
@@ -195,27 +223,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             '<p>Your vehicle sticker application has been successfully submitted and is now under review.</p>'
         );
 
-        // Send notification to dean if needed
-        if (dean_email) {
-            await sendEmail(
-                dean_email,
-                'New Application Received - Liceo GateQR',
-                `You received a new vehicle sticker application from ${first_name} ${last_name}. Please log in to the portal to review it.`,
-                `<p>You received a new vehicle sticker application from <strong>${first_name} ${last_name}</strong>.</p><p>Please log in to the portal to review it.</p>`
-            );
-        }
-
-        // Send notification to OSA about new application
-        await sendEmail(
-            'osa@liceo.edu.ph',
-            'New Application Submitted - Liceo GateQR',
-            `A new vehicle sticker application has been submitted by ${first_name} ${last_name}. Please log in to the portal to review it.`,
-            `<p>A new vehicle sticker application has been submitted by <strong>${first_name} ${last_name}</strong>.</p><p>Please log in to the portal to review it.</p>`
-        );
-
-        return json({ message: 'Application submitted successfully', status });
-    } catch (error) {
+        return json({ message: 'Application submitted successfully', status: 'pending' });
+    } catch (error: any) {
         console.error('Failed to submit application:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
     }
 };

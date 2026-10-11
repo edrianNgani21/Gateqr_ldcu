@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ request }) => {
         // Get vehicle_information_id from registration
         const { data: regData } = await supabase
             .from('registration')
-            .select('vehicle_information_id, campus')
+            .select('vehicle_information_id')
             .eq('registration_id', registration_id)
             .single();
 
@@ -34,10 +34,10 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Deactivate QR if there is an approved change request pending sticker release
         const { data: activeChange } = await supabase
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .select('status')
             .eq('registration_id', registration_id)
-            .in('status', ['Approved', 'approved'])
+            .eq('status', 'approved')
             .maybeSingle();
 
         if (activeChange) {
@@ -61,26 +61,26 @@ export const POST: RequestHandler = async ({ request }) => {
         // Find the most recent open entrylog for this registration
         const { data: rows, error: queryError } = await supabase
             .from('vehicle_log')
-            .select('vehicle_log_id, campus')
+            .select('vehicle_log_id, campus_gate')
             .eq('registration_id', registration_id)
             .is('check_out', null)
             .order('check_in', { ascending: false })
             .limit(1)
             .single();
 
-        const rawExitCampus = rows?.campus || campus || regData.campus || 'Main Campus';
-        let exitCampus = 'Main Campus';
-        if (rawExitCampus.toLowerCase().includes('rnp')) exitCampus = 'RNP';
-        else if (rawExitCampus.toLowerCase().includes('paseo')) exitCampus = 'PASEO';
+        const rawExitCampus = (rows?.campus_gate || campus || 'main').toString().toLowerCase();
+        let gateVal: 'main' | 'rnp' | 'paseo' = 'main';
+        if (rawExitCampus.includes('rnp')) gateVal = 'rnp';
+        else if (rawExitCampus.includes('paseo')) gateVal = 'paseo';
+        const exitCampus = gateVal === 'rnp' ? 'RNP' : (gateVal === 'paseo' ? 'PASEO' : 'Main Campus');
 
         if (rows && !queryError) {
-            // Update existing open entry log with OUT time, photo, and OUT-time status
+            // Update existing open entry log with OUT time and status
             const { error: updateError } = await supabase
                 .from('vehicle_log')
                 .update({
                     check_out: new Date().toISOString(),
-                    pic_out: picUrl,
-                    logged_status_out: logged_status || null
+                    logged_status: 'exited_campus'
                 })
                 .eq('vehicle_log_id', rows.vehicle_log_id);
 

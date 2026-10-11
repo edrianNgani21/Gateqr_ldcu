@@ -11,10 +11,9 @@ export const POST: RequestHandler = async ({ locals }) => {
         const userId = locals.user.user_id;
 
         let updateQuery = supabase
-            .from('notifications')
+            .from('notification')
             .update({
-                is_read: true,
-                read_at: new Date().toISOString()
+                is_read: true
             })
             .eq('is_read', false);
 

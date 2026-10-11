@@ -9,8 +9,21 @@
 
   const ltoFull = $derived(!(role === 'visitor' && owner === 'yes'));
 
+  function isValidDoc(url: string | null | undefined): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const t = url.trim().toLowerCase();
+    if (['pending_or', 'pending_cr', 'pending_license', 'pending_enrollment', 'n/a', 'pending', 'null', 'undefined', 'not specified', '-', ''].includes(t)) {
+      return false;
+    }
+    // Prevent treating raw student/employee ID numbers (e.g. 2021-00123) as URLs
+    if (/^\d{4}-\d+$/.test(t) || /^\d+$/.test(t)) {
+      return false;
+    }
+    return t.startsWith('http://') || t.startsWith('https://') || t.startsWith('data:') || t.startsWith('/');
+  }
+
   function open(url: string | null | undefined) {
-    if (url && onopen) onopen(url);
+    if (url && isValidDoc(url) && onopen) onopen(url);
   }
 </script>
 
@@ -18,18 +31,18 @@
   <!-- Liceo documents for non-visitors/concessionaires (always shown for student/employee) -->
   {#if role !== 'visitor' && role !== 'concessionaire'}
     <div class="doc-grid" style="--cols: {owner === 'no' ? 3 : 2}">
-      <button class="doc-tile" class:has-doc={!!documents.id} disabled={!clickable || !documents.id} onclick={() => open(documents.id)}>
+      <button class="doc-tile" class:has-doc={isValidDoc(documents.id)} disabled={!clickable || !isValidDoc(documents.id)} onclick={() => open(documents.id)} title={isValidDoc(documents.id) ? 'View ID Document' : 'ID Document Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
-        (Liceo) {role === 'student' ? 'Student ID' : 'Employee ID'}
+        <span>(Liceo) {role === 'student' ? 'Student ID' : 'Employee ID'}</span>
       </button>
-      <button class="doc-tile" class:has-doc={!!documents.enrollment} disabled={!clickable || !documents.enrollment} onclick={() => open(documents.enrollment)}>
+      <button class="doc-tile" class:has-doc={isValidDoc(documents.enrollment)} disabled={!clickable || !isValidDoc(documents.enrollment)} onclick={() => open(documents.enrollment)} title={isValidDoc(documents.enrollment) ? 'View Enrollment Form' : 'Enrollment Form Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        (Liceo) {role === 'student' ? 'Enrollment Form' : 'Load Sheet / DTR'}
+        <span>(Liceo) {role === 'student' ? 'Enrollment Form' : 'Load Sheet / DTR'}</span>
       </button>
       {#if owner === 'yes'}
-        <button class="doc-tile" class:has-doc={!!documents.letter} disabled={!clickable || !documents.letter} onclick={() => open(documents.letter)}>
+        <button class="doc-tile" class:has-doc={isValidDoc(documents.letter)} disabled={!clickable || !isValidDoc(documents.letter)} onclick={() => open(documents.letter)} title={isValidDoc(documents.letter) ? 'View Signed Letter' : 'Authorization Letter Not Uploaded'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
-          Signed Letter / DOAS
+          <span>Signed Letter / DOAS</span>
         </button>
       {/if}
     </div>
@@ -38,13 +51,13 @@
   <!-- Visitor + registered under someone else -->
   {#if role === 'visitor' && owner === 'yes'}
     <div class="doc-grid" style="--cols: 2">
-      <button class="doc-tile" class:has-doc={!!documents.license} disabled={!clickable || !documents.license} onclick={() => open(documents.license)}>
+      <button class="doc-tile" class:has-doc={isValidDoc(documents.license)} disabled={!clickable || !isValidDoc(documents.license)} onclick={() => open(documents.license)} title={isValidDoc(documents.license) ? 'View Driver License' : 'Driver License Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-        (LTO) Driver's License
+        <span>(LTO) Driver's License</span>
       </button>
-      <button class="doc-tile" class:has-doc={!!documents.letter} disabled={!clickable || !documents.letter} onclick={() => open(documents.letter)}>
+      <button class="doc-tile" class:has-doc={isValidDoc(documents.letter)} disabled={!clickable || !isValidDoc(documents.letter)} onclick={() => open(documents.letter)} title={isValidDoc(documents.letter) ? 'View Signed Letter' : 'Authorization Letter Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
-        Signed Letter / DOAS
+        <span>Signed Letter / DOAS</span>
       </button>
     </div>
   {/if}
@@ -52,18 +65,18 @@
   <!-- LTO documents (always shown) -->
   <div class="doc-grid" style="--cols: {ltoFull ? 3 : 2}">
     {#if ltoFull}
-      <button class="doc-tile" class:has-doc={!!documents.license} disabled={!clickable || !documents.license} onclick={() => open(documents.license)}>
+      <button class="doc-tile" class:has-doc={isValidDoc(documents.license)} disabled={!clickable || !isValidDoc(documents.license)} onclick={() => open(documents.license)} title={isValidDoc(documents.license) ? 'View Driver License' : 'Driver License Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-        (LTO) Driver's License
+        <span>(LTO) Driver's License</span>
       </button>
     {/if}
-    <button class="doc-tile" class:has-doc={!!documents.or} disabled={!clickable || !documents.or} onclick={() => open(documents.or)}>
+    <button class="doc-tile" class:has-doc={isValidDoc(documents.or)} disabled={!clickable || !isValidDoc(documents.or)} onclick={() => open(documents.or)} title={isValidDoc(documents.or) ? 'View Vehicle OR' : 'Vehicle OR Not Uploaded'}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      (LTO) Vehicle OR
+      <span>(LTO) Vehicle OR</span>
     </button>
-    <button class="doc-tile" class:has-doc={!!documents.cr} disabled={!clickable || !documents.cr} onclick={() => open(documents.cr)}>
+    <button class="doc-tile" class:has-doc={isValidDoc(documents.cr)} disabled={!clickable || !isValidDoc(documents.cr)} onclick={() => open(documents.cr)} title={isValidDoc(documents.cr) ? 'View Vehicle CR' : 'Vehicle CR Not Uploaded'}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      (LTO) Vehicle CR
+      <span>(LTO) Vehicle CR</span>
     </button>
   </div>
 </div>

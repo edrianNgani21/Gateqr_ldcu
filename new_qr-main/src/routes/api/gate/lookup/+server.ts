@@ -93,7 +93,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     reg = {
                         ...rows,
                         user_email: rows.user?.email,
-                        department_name: rows.department?.department
+                        department_name: rows.department?.department_name || (rows.department as any)?.department
                     };
                 }
             }
@@ -105,10 +105,10 @@ export const GET: RequestHandler = async ({ request, url }) => {
 
         // Check if there is an approved change vehicle request (which means QR should be deactivated until sticker release)
         const { data: activeChange } = await supabase
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .select('status')
             .eq('registration_id', reg.registration_id)
-            .in('status', ['Approved', 'approved'])
+            .eq('status', 'approved')
             .maybeSingle();
 
         if (activeChange) {

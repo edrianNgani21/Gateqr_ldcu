@@ -4,7 +4,19 @@
   import { supabaseClient } from '$lib/supabaseClient';
   import AdminSettingsModal from '$lib/components/AdminSettingsModal.svelte';
 
-  let { title = 'GateQR', userEmail = '', children, showSidebar = false, userRole = 'osa' } = $props();
+  let {
+    title = 'GateQR',
+    userEmail = '',
+    children,
+    showSidebar = false,
+    userRole = 'osa'
+  }: {
+    title?: string;
+    userEmail?: string;
+    children?: any;
+    showSidebar?: boolean;
+    userRole?: string;
+  } = $props();
 
   let settingsModalOpen = $state(false);
 
@@ -176,23 +188,16 @@
     };
   }
 
-  // Fetch notifications on mount, periodic heartbeat & realtime
+  // Fetch notifications on mount, tab focus & pure realtime WebSocket
   $effect(() => {
     fetchNotifications();
 
     const channel = supabaseClient
       .channel('appshell-notifications-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notification' }, () => {
         fetchNotifications();
       })
       .subscribe();
-
-    // Background timer to sync notifications every 8 seconds
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        fetchNotifications();
-      }
-    }, 8000);
 
     const handleFocus = () => {
       fetchNotifications();
@@ -204,7 +209,6 @@
     }
 
     return () => {
-      clearInterval(timer);
       if (typeof window !== 'undefined') {
         window.removeEventListener('focus', handleFocus);
         document.removeEventListener('visibilitychange', handleFocus);
@@ -249,10 +253,11 @@
   const manageAppSubLinks = [
     { label: 'Accept & Schedule Application', tab: 'validation', href: '/osa?tab=validation' },
     { label: 'Application Schedules for Hardcopy Compliance', tab: 'distribution', href: '/osa?tab=distribution' },
-    { label: 'Overdue Application Schedules', tab: 'overdue', href: '/osa?tab=overdue' },
     { label: 'Sticker Release', tab: 'release', href: '/osa?tab=release' },
     { label: 'Registered Vehicle', tab: 'registered', href: '/osa?tab=registered' },
+    { label: 'Rejected Applications', tab: 'rejected', href: '/osa?tab=rejected' },
     { label: 'Revoked Application', tab: 'revoked', href: '/osa?tab=revoked' },
+    { label: 'Overdue Application Schedules', tab: 'overdue', href: '/osa?tab=overdue' },
     { label: 'Application Request', path: '/osa/change-requests', href: '/osa/change-requests' }
   ];
 
@@ -811,6 +816,31 @@
     display: block;
     white-space: normal;
     line-height: 1.35;
+    flex: 1;
+  }
+
+  .submenu-badge {
+    margin-left: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: #b91c1c;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+  }
+
+  .submenu-link.active .submenu-badge {
+    background: #6b1a2a;
+    color: #ffffff;
   }
 
   /* Bottom Logout Pill */

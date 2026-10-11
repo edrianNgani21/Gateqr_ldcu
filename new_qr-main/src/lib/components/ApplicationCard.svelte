@@ -80,6 +80,29 @@
   let roleColor = $derived(roleColors[role] ?? "#6b7280");
 
   const excludedKeys = ["documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle"];
+
+  function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
+    if (qr && typeof qr === 'string') {
+      const trimmed = qr.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+        return trimmed;
+      }
+      return `/api/qr?code=${encodeURIComponent(trimmed)}&role=${encodeURIComponent(role)}`;
+    }
+    if (uniqueCode && typeof uniqueCode === 'string') {
+      const trimmed = uniqueCode.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+        return trimmed;
+      }
+      return `/api/qr?code=${encodeURIComponent(trimmed)}&role=${encodeURIComponent(role)}`;
+    }
+    return `/api/qr?code=PENDING&role=${encodeURIComponent(role)}`;
+  }
+
+  function isPdf(url: string | null | undefined): boolean {
+    if (!url || typeof url !== 'string') return false;
+    return url.toLowerCase().includes('.pdf');
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -247,26 +270,21 @@
 
         <!-- QR Code -->
         {#if showQR}
+          {@const qrImgUrl = getQRImageUrl(data.qr_code, data.qr_unique_code)}
           <div class="detail-section" class:no-border={tab.toLowerCase() === 'revoked'}>
             <span class="section-label">QR Code</span>
             <div class="qr-body">
-              {#if data.qr_code}
-                <button
-                  type="button"
-                  class="qr-preview-trigger"
-                  onclick={() => (showDocPopup = data.qr_code)}
-                  title="Click to view full size QR code"
-                >
-                  <img src={data.qr_code} alt="Vehicle QR Code" width="96" height="96" class="qr-img" />
-                </button>
-              {:else}
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=PENDING" alt="QR Pending" width="96" height="96" class="qr-img" />
-              {/if}
+              <button
+                type="button"
+                class="qr-preview-trigger"
+                onclick={() => (showDocPopup = qrImgUrl)}
+                title="Click to view full size QR code"
+              >
+                <img src={qrImgUrl} alt="Vehicle QR Code" width="96" height="96" class="qr-img" />
+              </button>
               <div class="qr-meta">
-                <span class="qr-code-text">Code: {data.qr_unique_code || 'PENDING'}</span>
-                {#if data.qr_code}
-                  <a href={data.qr_code} download={`gateqr-${data.qr_unique_code || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
-                {/if}
+                <span class="qr-code-text">Code: {data.qr_unique_code || (data.qr_code && !data.qr_code.startsWith('http') ? data.qr_code : 'PENDING')}</span>
+                <a href={qrImgUrl} download={`gateqr-${data.qr_unique_code || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
               </div>
             </div>
           </div>
@@ -295,14 +313,21 @@
           ><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
       <div class="doc-image-wrap">
-        {#if showDocPopup.toLowerCase().includes('.pdf')}
+        {#if isPdf(showDocPopup)}
           <iframe src={showDocPopup} title="Document Preview" class="doc-preview-frame"></iframe>
+          <div class="doc-pdf-fallback" style="padding-top: 0.5rem; text-align: center;">
+            <a href={showDocPopup} target="_blank" rel="noopener noreferrer" class="doc-open-link">
+              Open original PDF in new tab ↗
+            </a>
+          </div>
         {:else}
-          <img src={showDocPopup} alt="Document Preview" class="doc-preview-img" />
+          <img src={showDocPopup} alt="Document Preview" class="doc-preview-img" onerror={(e) => {
+            (e.currentTarget as HTMLImageElement).src = '/liceo-logo.png';
+          }} />
+          <a href={showDocPopup} target="_blank" rel="noopener noreferrer" class="doc-open-link">
+            Open original document in new tab ↗
+          </a>
         {/if}
-        <a href={showDocPopup} target="_blank" rel="noopener noreferrer" class="doc-open-link">
-          Open original document in new tab ↗
-        </a>
       </div>
     </div>
   </div>

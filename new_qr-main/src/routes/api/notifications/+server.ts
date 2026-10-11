@@ -13,7 +13,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         console.log('Fetching notifications for user_id:', userId);
 
         let query = supabase
-            .from('notifications')
+            .from('notification')
             .select(`
                 *,
                 user:user_id(email)
@@ -38,7 +38,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             const actorIds = [...new Set(notifications.map(n => n.actor_id).filter(Boolean))];
             if (actorIds.length > 0) {
                 const { data: actors } = await supabase
-                    .from('user')
+                    .from('users')
                     .select('user_id, email')
                     .in('user_id', actorIds);
                 

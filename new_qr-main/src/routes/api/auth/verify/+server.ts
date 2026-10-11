@@ -25,7 +25,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         // 2. Fetch or create applicant in the database
         const { data: userList, error: queryError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, user_type, identification, department_id, is_active')
             .ilike('email', email)
             .limit(1);
@@ -44,11 +44,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         } else {
             // Create new applicant account
             const { data: newUser, error: createError } = await supabase
-                .from('user')
+                .from('users')
                 .insert({
                     email,
-                    user_type: 'Applicants',
-                    identification: 'Visitor',
+                    user_type: 'applicant',
+                    identification: 'student',
                     is_active: true
                 })
                 .select('user_id, email, user_type, identification, department_id, is_active')

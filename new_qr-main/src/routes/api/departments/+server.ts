@@ -25,12 +25,13 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
         const { data: rows } = await query;
 
-        // Map the department to name for backward compatibility
+        // Map department_name for display
         const departments = rows?.map(dept => ({
             ...dept,
-            name: dept.department,
+            name: dept.department_name,
+            department: dept.department_name,
             auto_id: dept.department_id,
-            is_active: dept.is_active ?? true // Default to true if null
+            is_active: dept.is_active ?? true
         })) || [];
 
         return json({ departments });
@@ -50,10 +51,11 @@ async function createNotification(
     targetEntityId?: number
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
             notification_type: notificationType,
             message: message,
+            activity: message,
             actor_id: actorId || null,
             action_type: actionType || null,
             target_entity_type: targetEntityType || null,
@@ -73,30 +75,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     try {
         const { name } = await request.json();
 
-        if (!name) {
+        if (!name || !name.trim()) {
             return json({ error: 'Department name is required' }, { status: 400 });
         }
 
-        // Create department without any dean account
+        // Insert new department using department_name
         const { data: newDept, error } = await supabase
             .from('department')
             .insert({ 
-                department: name,
-                email: null, // No dean assigned yet
-                user_id: null,
+                department_name: name.trim(),
                 is_active: true
             })
-            .select('department_id, department')
+            .select('department_id, department_name')
             .single();
 
-        if (error) throw error;
+        if (error) {
+            console.error('Error creating department:', error);
+            return json({ error: error.message || 'Failed to create department' }, { status: 500 });
+        }
 
         // Notify OSA admin
         if (locals.user?.user_id) {
             await createNotification(
                 locals.user.user_id,
                 'department_added',
-                'Department added successfully.',
+                `Department '${name.trim()}' added successfully.`,
                 locals.user.user_id,
                 'create_department',
                 'department',
@@ -104,10 +107,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             );
         }
 
-        return json({ message: 'Department created successfully' }, { status: 201 });
-    } catch (error) {
+        return json({ message: 'Department created successfully', department: newDept }, { status: 201 });
+    } catch (error: any) {
         console.error('Failed to create department:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
     }
 };
 
@@ -119,14 +122,13 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     try {
         const { auto_id, name } = await request.json();
 
-        if (!auto_id || !name) {
+        if (!auto_id || !name || !name.trim()) {
             return json({ error: 'ID and Name are required' }, { status: 400 });
         }
 
-        // Only update department name, no dean account logic
         const { error } = await supabase
             .from('department')
-            .update({ department: name })
+            .update({ department_name: name.trim() })
             .eq('department_id', auto_id);
 
         if (error) throw error;

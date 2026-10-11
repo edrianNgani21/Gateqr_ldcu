@@ -10,7 +10,7 @@
   $effect(() => {
     const channel = supabaseClient
       .channel('osa-change-requests-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_requests' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_request' }, () => {
         invalidateAll();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {

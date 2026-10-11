@@ -29,19 +29,18 @@ export const GET: RequestHandler = async ({ locals }) => {
                 complaints = await Promise.all(rows.map(async (complaint) => {
                     const { data: regData } = await supabase
                         .from('registration')
-                        .select('first_name, last_name, mobile, role, campus')
+                        .select('first_name, last_name, mobile, role')
                         .eq('user_id', complaint.user_id)
                         .order('created_at', { ascending: false })
                         .limit(1)
-                        .single();
+                        .maybeSingle();
 
                     return {
                         ...complaint,
                         sender_email: complaint.user?.email,
                         sender_name: regData ? `${regData.first_name} ${regData.last_name}` : null,
                         sender_phone: regData?.mobile,
-                        sender_role: regData?.role,
-                        sender_campus: regData?.campus
+                        sender_role: regData?.role
                     };
                 }));
             }
@@ -49,7 +48,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             // Standard users see only their complaints
             // Get user_id from email
             const { data: userData, error: userError } = await supabase
-                .from('user')
+                .from('users')
                 .select('user_id')
                 .eq('email', locals.user.email)
                 .single();
@@ -88,7 +87,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Get user_id from email
         const { data: userData, error: userError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id')
             .eq('email', locals.user.email)
             .single();

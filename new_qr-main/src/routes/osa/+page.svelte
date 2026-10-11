@@ -13,25 +13,36 @@
     let { data } = $props();
     let apps = $derived((data.applications as any[]) || []);
 
-    // Dual-engine live sync for instant automatic updates without manual refresh
+    // Pure realtime WebSocket sync for instant updates without background polling
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-applications-realtime',
-            tables: ['registration', 'change_vehicle_requests', 'department'],
-            intervalMs: 5000
+            tables: ['registration', 'change_vehicle_request', 'department']
         });
     });
 
     let tab = $state('validation');
-    const tabs = ['validation', 'distribution', 'overdue', 'release', 'registered', 'revoked'];
+    const tabs = ['validation', 'distribution', 'release', 'registered', 'rejected', 'revoked', 'overdue'];
     const tabLabels: Record<string, string> = {
         'validation':   'Accept & Schedule Application',
         'distribution': 'Application Schedules for Hardcopy Compliance',
-        'overdue':      'Overdue Application Schedules',
         'release':      'Sticker Release',
         'registered':   'Registered Vehicle',
-        'revoked':      'Revoked Application'
+        'rejected':     'Rejected Applications',
+        'revoked':      'Revoked Application',
+        'overdue':      'Overdue Application Schedules'
     };
+
+    function getAppsForTab(t: string) {
+        if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
+        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && (!a.schedule && !a.dist_sched || new Date(a.schedule || a.dist_sched) >= new Date() || a.invalid_reason === 'OVERDUE' || a.rejection_reason === 'OVERDUE'));
+        if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && (a.schedule || a.dist_sched) && new Date(a.schedule || a.dist_sched) < new Date() && a.invalid_reason !== 'OVERDUE' && a.rejection_reason !== 'OVERDUE');
+        if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || (a.status || '').toLowerCase() === 'security_checked');
+        if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
+        if (t === 'rejected') return apps.filter(a => (a.status || '').toLowerCase() === 'rejected');
+        if (t === 'revoked') return apps.filter(a => (a.status || '').toLowerCase() === 'revoked');
+        return [];
+    }
 
     $effect(() => {
         const urlTab = $page.url.searchParams.get('tab');
@@ -49,11 +60,8 @@
     ];
 
     let searchQuery = $state('');
-
-    const allRoles = ['student', 'employee', 'visitor', 'concessionaire', 'guest'];
-    let selectedRoles = $state([...allRoles]);
-    let roleDropdownOpen = $state(false);
-
+    let roleFilter = $state('all'); // 'all', 'student', 'faculty', 'staff'
+    let vehicleTypeFilter = $state('all'); // 'all', '2-Wheeler / Motorcycle', '4-Wheeler / Car'
     let selectedCampus = $state('all');
 
     // Schedule filter state for distribution tab
@@ -72,20 +80,6 @@
 
 
 
-    function toggleRole(role: string) {
-        if (selectedRoles.includes(role)) {
-            selectedRoles = selectedRoles.filter(r => r !== role);
-        } else {
-            selectedRoles = [...selectedRoles, role];
-        }
-    }
-    
-    function getRoleDropdownLabel() {
-        if (selectedRoles.length === allRoles.length) return 'All Roles';
-        if (selectedRoles.length === 0) return 'No Roles';
-        if (selectedRoles.length === 1) return selectedRoles[0].charAt(0).toUpperCase() + selectedRoles[0].slice(1);
-        return `${selectedRoles.length} Roles`;
-    }
 
     // Bulk selection functions
     function toggleSelection(id: number, selected: boolean) {
@@ -193,31 +187,47 @@
 
 
     let displayedApps = $derived.by(() => {
-        let filtered = apps;
-
-        if (tab === 'validation') filtered = filtered.filter(a => ['pending', 'dept_val', 'osa_val'].includes((a.status || '').toLowerCase()));
-        else if (tab === 'distribution') filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'distributed' && !a.osa_dist_at && (!a.dist_sched || new Date(a.dist_sched) >= new Date() || a.invalid_reason === 'OVERDUE'));
-        else if (tab === 'overdue') filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'distributed' && !a.osa_dist_at && a.dist_sched && new Date(a.dist_sched) < new Date() && a.invalid_reason !== 'OVERDUE');
-        else if (tab === 'release') filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'distributed' && a.security_checked_at && !a.sticker_released_at);
-        else if (tab === 'registered') filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'completed' && a.sticker_installed_at);
-        else if (tab === 'revoked') filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'revoked');
+        let filtered = getAppsForTab(tab);
 
         console.log('Filtered apps for tab', tab, ':', filtered.length, 'out of', apps.length);
         console.log('All apps before filtering:', apps.map(a => ({ id: a.id, status: a.status, role: a.role, campus: a.campus })));
 
-        if (selectedRoles.length !== allRoles.length) {
-            filtered = filtered.filter(a => a.role && selectedRoles.includes(a.role.toLowerCase()));
+        if (roleFilter !== 'all') {
+            filtered = filtered.filter(a => {
+                const r = (a.role || '').toLowerCase().trim();
+                if (roleFilter === 'student') return r === 'student';
+                if (roleFilter === 'faculty') return r === 'faculty';
+                if (roleFilter === 'staff') return r === 'staff' || r === 'employee';
+                return r === roleFilter.toLowerCase();
+            });
+        }
+
+        if (vehicleTypeFilter !== 'all') {
+            filtered = filtered.filter(a => {
+                const rawType = (a.vehicle_type || a.vehicle_information?.type || '').toLowerCase();
+                if (vehicleTypeFilter === '2-Wheeler / Motorcycle' || vehicleTypeFilter === '2-wheeler') {
+                    return rawType.includes('2') || rawType.includes('motor') || rawType.includes('bike');
+                }
+                if (vehicleTypeFilter === '4-Wheeler / Car' || vehicleTypeFilter === '4-wheeler') {
+                    return rawType.includes('4') || rawType.includes('car');
+                }
+                return rawType === vehicleTypeFilter.toLowerCase();
+            });
         }
 
         if (selectedCampus !== 'all') {
-            filtered = filtered.filter(a => a.campus && a.campus.toLowerCase() === selectedCampus.toLowerCase());
+            filtered = filtered.filter(a => {
+                const c = (a.campus || '').toLowerCase().trim();
+                return c === selectedCampus.toLowerCase().trim();
+            });
         }
 
         if (tab === 'distribution' || tab === 'overdue') {
             if (selectedScheduleDate) {
                 filtered = filtered.filter(a => {
-                    if (!a.dist_sched) return false;
-                    const appDate = new Date(a.dist_sched).toDateString();
+                    const sched = a.schedule || a.dist_sched;
+                    if (!sched) return false;
+                    const appDate = new Date(sched).toDateString();
                     const selectedDate = new Date(selectedScheduleDate as string).toDateString();
                     return appDate === selectedDate;
                 });
@@ -226,14 +236,35 @@
             }
         }
 
-        if (searchQuery) {
+        if (searchQuery && searchQuery.trim()) {
             const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
             filtered = filtered.filter(a => {
-                const fullString = Object.values(a)
-                    .filter(val => val !== null && val !== undefined)
-                    .map(val => String(val).toLowerCase())
-                    .join(' ');
-                return terms.every(term => fullString.includes(term));
+                const searchTarget = [
+                    a.first_name,
+                    a.last_name,
+                    `${a.first_name || ''} ${a.last_name || ''}`,
+                    a.student_id,
+                    a.id_no,
+                    a.user_email,
+                    a.mobile,
+                    a.contact_number,
+                    a.department_name,
+                    a.campus,
+                    a.role,
+                    a.vehicle_plate,
+                    a.vehicle_make,
+                    a.vehicle_color,
+                    a.vehicle_type,
+                    a.vehicle_information?.plate_number,
+                    a.vehicle_information?.brand,
+                    a.vehicle_information?.color,
+                    a.vehicle_information?.type,
+                    a.qr_unique_code,
+                    a.registration_id,
+                    a.id
+                ].filter(Boolean).map(String).join(' ').toLowerCase();
+
+                return terms.every(term => searchTarget.includes(term));
             });
         }
 
@@ -243,15 +274,12 @@
     // Get unique scheduled dates for distribution / overdue tab
     let scheduledDates = $derived.by(() => {
         if (tab !== 'distribution' && tab !== 'overdue') return [];
-        const distributionApps = apps.filter(a => 
-            (a.status || '').toLowerCase() === 'distributed' && 
-            !a.osa_dist_at && 
-            a.dist_sched
-        );
+        const distributionApps = getAppsForTab(tab);
         const uniqueDates = new Set<string>();
         distributionApps.forEach(app => {
-            if (app.dist_sched) {
-                const date = new Date(app.dist_sched).toDateString();
+            const sched = app.schedule || app.dist_sched;
+            if (sched) {
+                const date = new Date(sched).toDateString();
                 uniqueDates.add(date);
             }
         });
@@ -260,15 +288,14 @@
 
     // Number of applications inside each tab (display only)
     let tabCounts = $derived.by(() => {
-        const now = new Date();
-        const st = (a: any) => (a.status || '').toLowerCase();
         return {
-            validation: apps.filter(a => ['pending', 'dept_val', 'osa_val'].includes(st(a))).length,
-            distribution: apps.filter(a => st(a) === 'distributed' && !a.osa_dist_at && (!a.dist_sched || new Date(a.dist_sched) >= now || a.invalid_reason === 'OVERDUE')).length,
-            overdue: apps.filter(a => st(a) === 'distributed' && !a.osa_dist_at && a.dist_sched && new Date(a.dist_sched) < now && a.invalid_reason !== 'OVERDUE').length,
-            release: apps.filter(a => st(a) === 'distributed' && a.security_checked_at && !a.sticker_released_at).length,
-            registered: apps.filter(a => st(a) === 'completed' && a.sticker_installed_at).length,
-            revoked: apps.filter(a => st(a) === 'revoked').length
+            validation: getAppsForTab('validation').length,
+            distribution: getAppsForTab('distribution').length,
+            overdue: getAppsForTab('overdue').length,
+            release: getAppsForTab('release').length,
+            registered: getAppsForTab('registered').length,
+            rejected: getAppsForTab('rejected').length,
+            revoked: getAppsForTab('revoked').length
         } as Record<string, number>;
     });
 
@@ -278,6 +305,13 @@
     let confirmLoading = $state(false);
 
     let singleSchedule = $state('');
+
+    // Reject / Revoke Reason Modal State
+    let reasonModalOpen = $state(false);
+    let reasonAction = $state<{ id: number; action: string; applicantName?: string; resolve: () => void } | null>(null);
+    let reasonText = $state('');
+    let reasonError = $state('');
+    let reasonLoading = $state(false);
 
     async function handleAction(registration_id: number, action: string) {
         if (action === 'accept' || action === 'reschedule') {
@@ -289,17 +323,57 @@
             });
         }
 
-        let reason: string | null = '';
         if (action === 'reject' || action === 'revoke') {
-            reason = prompt(`Please provide a reason to ${action}:`);
-            if (reason === null) return;
-        } else if (action === 'proceed_overdue') {
+            const app = apps.find(a => (a.registration_id || a.id) === registration_id);
+            const applicantName = app ? `${app.first_name || ''} ${app.last_name || ''}`.trim() : '';
+            return new Promise<void>((resolve) => {
+                reasonAction = { id: registration_id, action, applicantName, resolve };
+                reasonText = '';
+                reasonError = '';
+                reasonModalOpen = true;
+            });
+        }
+
+        let reason: string = '';
+        if (action === 'proceed_overdue') {
             if (!confirm(`Are you sure you want to proceed this application directly to Hardcopies Compliance?`)) return;
         } else if (action === 'delete' || action === 'unrevoke') {
             if (!confirm(`Are you sure you want to ${action} this application?`)) return;
         }
 
         await submitAction(registration_id, action, reason);
+    }
+
+    async function submitReasonAction() {
+        if (!reasonText.trim()) {
+            reasonError = `Please provide a reason to ${reasonAction?.action || 'proceed'}.`;
+            return;
+        }
+        if (!reasonAction) return;
+
+        reasonLoading = true;
+        try {
+            await submitAction(reasonAction.id, reasonAction.action, reasonText.trim());
+            const act = reasonAction;
+            reasonModalOpen = false;
+            reasonAction = null;
+            reasonText = '';
+            reasonError = '';
+            act.resolve();
+        } catch (e) {
+            reasonError = 'Action failed. Please try again.';
+        } finally {
+            reasonLoading = false;
+        }
+    }
+
+    function cancelReasonAction() {
+        if (reasonLoading) return;
+        reasonModalOpen = false;
+        reasonAction?.resolve();
+        reasonAction = null;
+        reasonText = '';
+        reasonError = '';
     }
 
     async function submitSchedule() {
@@ -345,6 +419,7 @@
             });
 
             if (res.ok) {
+                selectedDistributionApp = null;
                 await invalidateAll();
             } else {
                 const err = await res.json();
@@ -396,27 +471,18 @@
       </div>
 
       <div class="filter-group">
-        <div class="dropdown-wrap" use:clickOutside={() => roleDropdownOpen = false}>
-          <button class="filter-btn dropdown-btn" onclick={() => roleDropdownOpen = !roleDropdownOpen}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-            </svg>
-            {getRoleDropdownLabel()}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
-          {#if roleDropdownOpen}
-            <div class="dropdown-menu">
-              {#each allRoles as role}
-                <label class="dropdown-item">
-                  <input type="checkbox" checked={selectedRoles.includes(role)} onchange={() => toggleRole(role)} />
-                  {role.charAt(0).toUpperCase() + role.slice(1)}
-                </label>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <select bind:value={roleFilter} class="filter-btn">
+          <option value="all">All Roles</option>
+          <option value="student">Student</option>
+          <option value="faculty">Faculty</option>
+          <option value="staff">Staff</option>
+        </select>
+
+        <select bind:value={vehicleTypeFilter} class="filter-btn">
+          <option value="all">All Vehicles</option>
+          <option value="2-Wheeler / Motorcycle">2-Wheelers</option>
+          <option value="4-Wheeler / Car">4-Wheelers</option>
+        </select>
 
         <select bind:value={selectedCampus} class="filter-btn">
           <option value="all">All Campuses</option>
@@ -492,8 +558,8 @@
         </div>
       {:else}
         {#if tab === 'distribution' || tab === 'overdue'}
-          {@const tabApps = apps.filter(a => (a.status || '').toLowerCase() === 'distributed' && !a.osa_dist_at && a.dist_sched && (tab === 'overdue' ? (new Date(a.dist_sched) < new Date() && a.invalid_reason !== 'OVERDUE') : (new Date(a.dist_sched) >= new Date() || a.invalid_reason === 'OVERDUE')))}
-          {@const calDates = tab === 'overdue' ? [...new Set(tabApps.map(a => new Date(a.dist_sched).toDateString()))].sort((a, b) => new Date(a).getTime() - new Date(b).getTime()) : scheduledDates}
+          {@const tabApps = getAppsForTab(tab)}
+          {@const calDates = scheduledDates}
           <div class="schedule-calendar-panel left-panel">
             <div class="table-header">
               <span class="table-title">📅 {tab === 'overdue' ? 'Missed Schedule Dates' : 'Scheduled Dates'}</span>
@@ -528,7 +594,7 @@
                       </div>
                     </div>
                     <span class="date-count-badge">
-                      {tabApps.filter(a => new Date(a.dist_sched).toDateString() === date).length} app(s)
+                      {tabApps.filter(a => (a.schedule || a.dist_sched) && new Date(a.schedule || a.dist_sched).toDateString() === date).length} app(s)
                     </span>
                   </div>
                 {/each}
@@ -684,7 +750,8 @@
                 <p>There are no applications matching your current filters.</p>
                 <button class="clear-filters-btn" onclick={() => { 
                   searchQuery = ''; 
-                  selectedRoles = [...allRoles]; 
+                  roleFilter = 'all';
+                  vehicleTypeFilter = 'all';
                   selectedCampus = 'all'; 
                   selectedScheduleDate = null; 
                 }}>
@@ -807,6 +874,121 @@
               Accept All
             {:else}
               Reject All
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if reasonModalOpen && reasonAction}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="modal-overlay"
+      onclick={() => { if (!reasonLoading) cancelReasonAction(); }}
+      onkeydown={(e) => { if (e.key === 'Escape' && !reasonLoading) cancelReasonAction(); }}
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+    >
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="modal-content reason-modal-card" onclick={(e) => e.stopPropagation()}>
+        <div class="reason-modal-header">
+          <div class="reason-badge-icon" class:is-revoke={reasonAction.action === 'revoke'}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              {#if reasonAction.action === 'revoke'}
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              {:else}
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+              {/if}
+            </svg>
+          </div>
+          <div class="reason-header-text">
+            <h3 class="reason-title">
+              {reasonAction.action === 'revoke' ? 'Revoke Application / Sticker' : 'Reject Application'}
+            </h3>
+            {#if reasonAction.applicantName}
+              <span class="reason-applicant-badge">{reasonAction.applicantName}</span>
+            {/if}
+          </div>
+          <button
+            type="button"
+            class="reason-close-btn"
+            onclick={cancelReasonAction}
+            disabled={reasonLoading}
+            aria-label="Close"
+          >✕</button>
+        </div>
+
+        <p class="reason-subtitle">
+          {reasonAction.action === 'revoke'
+            ? 'Provide an official explanation for revoking this registered vehicle. This reason will be logged and visible in application records.'
+            : 'Specify why this application is being rejected. This explanation will be displayed directly to the applicant on their status dashboard.'}
+        </p>
+
+        <!-- Quick Reason Presets -->
+        <div class="reason-presets-section">
+          <span class="presets-label">QUICK TEMPLATES</span>
+          <div class="presets-chips">
+            {#if reasonAction.action === 'revoke'}
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Expired Registration / Semester Renewal Required'}>Expired Registration</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Unauthorized Vehicle / Transfer Violation'}>Transfer Violation</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Campus Traffic & Safety Regulation Violation'}>Traffic Violation</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Revoked by Office of Student Affairs / Administration'}>OSA Order</button>
+            {:else}
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Incomplete or unreadable documents uploaded'}>Incomplete Docs</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Expired Official Receipt (OR) or Certificate of Registration (CR)'}>Expired OR/CR</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Vehicle information does not match supporting credentials'}>Unmatched Info</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Discrepancy with official university enrollment / employee records'}>Enrollment Mismatch</button>
+            {/if}
+          </div>
+        </div>
+
+        <div class="reason-input-group">
+          <label class="reason-input-label" for="reason-textarea">
+            Reason / Evaluation Remarks <span class="req">*</span>
+          </label>
+          <textarea
+            id="reason-textarea"
+            class="reason-textarea"
+            bind:value={reasonText}
+            placeholder={reasonAction.action === 'revoke' ? 'State the specific reason for revoking this sticker...' : 'State the specific reason for rejecting this application...'}
+            disabled={reasonLoading}
+            rows="3"
+            oninput={() => { if (reasonError) reasonError = ''; }}
+          ></textarea>
+        </div>
+
+        {#if reasonError}
+          <div class="reason-error-alert">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>{reasonError}</span>
+          </div>
+        {/if}
+
+        <div class="modal-actions reason-modal-actions">
+          <button type="button" class="btn-cancel" onclick={cancelReasonAction} disabled={reasonLoading}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn-confirm-reason"
+            class:is-revoke={reasonAction.action === 'revoke'}
+            onclick={submitReasonAction}
+            disabled={reasonLoading}
+          >
+            {#if reasonLoading}
+              <svg class="modal-spinner" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2.5" stroke-dasharray="35 15" stroke-linecap="round"/>
+              </svg>
+              <span>Submitting…</span>
+            {:else}
+              <span>{reasonAction.action === 'revoke' ? 'Confirm Revocation' : 'Confirm Rejection'}</span>
             {/if}
           </button>
         </div>
@@ -1620,5 +1802,253 @@
     .applications-list.right-panel {
       max-width: 100%;
     }
+  }
+
+  /* ── Reason Modal (Reject / Revoke) ────────────────────────────────────────── */
+  .reason-modal-card {
+    background: #ffffff;
+    max-width: 500px;
+    width: 92%;
+    border-radius: 18px;
+    padding: 1.75rem;
+    box-shadow:
+      0 20px 50px -10px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+    position: relative;
+    box-sizing: border-box;
+    animation: modal-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modal-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.95) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .reason-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    position: relative;
+  }
+
+  .reason-badge-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #fee2e2;
+    color: #dc2626;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid #fecaca;
+  }
+
+  .reason-badge-icon.is-revoke {
+    background: #fef3c7;
+    color: #b45309;
+    border-color: #fde68a;
+  }
+
+  .reason-header-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .reason-title {
+    margin: 0 !important;
+    font-size: 1.15rem !important;
+    font-weight: 800 !important;
+    color: #0f172a !important;
+    letter-spacing: -0.01em;
+  }
+
+  .reason-applicant-badge {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #8b1a2a;
+    background: rgba(139, 26, 42, 0.08);
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    display: inline-block;
+    align-self: flex-start;
+  }
+
+  .reason-close-btn {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #f1f5f9;
+    border: none;
+    color: #64748b;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.18s;
+  }
+
+  .reason-close-btn:hover:not(:disabled) {
+    background: #e2e8f0;
+    color: #0f172a;
+  }
+
+  .reason-subtitle {
+    margin: 0 !important;
+    font-size: 0.85rem !important;
+    color: #475569 !important;
+    line-height: 1.5;
+  }
+
+  .reason-presets-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .presets-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    text-transform: uppercase;
+  }
+
+  .presets-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .preset-chip {
+    padding: 0.35rem 0.65rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.18s;
+    font-family: inherit;
+  }
+
+  .preset-chip:hover {
+    background: #fff1f2;
+    border-color: #fecdd3;
+    color: #9f1239;
+    transform: translateY(-1px);
+  }
+
+  .reason-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .reason-input-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #334155;
+  }
+
+  .reason-input-label .req {
+    color: #dc2626;
+  }
+
+  .reason-textarea {
+    width: 100%;
+    padding: 0.75rem 0.9rem;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: #0f172a;
+    background: #ffffff;
+    resize: vertical;
+    min-height: 90px;
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .reason-textarea:focus {
+    outline: none;
+    border-color: #8b1a2a;
+    box-shadow: 0 0 0 3px rgba(139, 26, 42, 0.12);
+  }
+
+  .reason-error-alert {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.85rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #b91c1c;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .reason-modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    margin-top: 0.35rem;
+  }
+
+  .btn-confirm-reason {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1.35rem;
+    border-radius: 10px;
+    border: none;
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    color: #ffffff;
+    font-size: 0.88rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.3);
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+
+  .btn-confirm-reason:hover:not(:disabled) {
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(220, 38, 38, 0.4);
+  }
+
+  .btn-confirm-reason.is-revoke {
+    background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+    box-shadow: 0 4px 14px rgba(217, 119, 6, 0.3);
+  }
+
+  .btn-confirm-reason.is-revoke:hover:not(:disabled) {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    box-shadow: 0 6px 18px rgba(217, 119, 6, 0.4);
+  }
+
+  .btn-confirm-reason:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
   }
 </style>

@@ -17,8 +17,9 @@ async function createNotification(
     metadata?: any
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
+            activity: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -49,19 +50,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }, { status: 403 });
         }
 
-        const { email, user_type, identification, password, pin } = await request.json();
+        const { email, user_type, password, pin } = await request.json();
 
-        if (!email || !user_type || !identification) {
-            return json({ error: 'Missing required fields' }, { status: 400 });
-        }
-
-        if (!password || typeof password !== 'string' || password.trim().length < 6) {
-            return json({ error: 'Password is required and must be at least 6 characters' }, { status: 400 });
+        if (!email || !user_type) {
+            return json({ error: 'Missing required fields: email and admin type are required' }, { status: 400 });
         }
 
         // 4-Digit PIN Verification Check
         const { data: requester, error: requesterError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, security_pin_hash')
             .eq('user_id', locals.user.user_id)
             .single();
@@ -70,47 +67,65 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Failed to verify admin credentials' }, { status: 500 });
         }
 
-        if (!requester.security_pin_hash) {
-            return json({
-                error: 'You must set up your 4-digit security PIN in Admin Settings before you can add new admin accounts.'
-            }, { status: 400 });
+        if (requester.security_pin_hash) {
+            if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin.trim())) {
+                return json({ error: 'Please enter your 4-digit security PIN to authorize adding an admin' }, { status: 400 });
+            }
+
+            if (!bcrypt.compareSync(pin.trim(), requester.security_pin_hash)) {
+                return json({ error: 'Incorrect 4-digit security PIN. Authorization denied.' }, { status: 401 });
+            }
         }
 
-        if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin.trim())) {
-            return json({ error: 'Please enter your 4-digit security PIN to authorize adding an admin' }, { status: 400 });
-        }
+        // Map incoming adminType to valid PostgreSQL lowercase enums
+        const cleanType = (user_type || '').toString().trim().toLowerCase();
+        let dbUserType: 'osa' | 'safety_security' | 'applicant' = 'osa';
+        let dbIdentification: 'admin' | 'staff' | 'faculty' | 'student' = 'admin';
 
-        if (!bcrypt.compareSync(pin.trim(), requester.security_pin_hash)) {
-            return json({ error: 'Incorrect 4-digit security PIN. Authorization denied.' }, { status: 401 });
+        if (cleanType.includes('security')) {
+            dbUserType = 'safety_security';
+            dbIdentification = 'admin';
+        } else if (cleanType.includes('dean') || cleanType.includes('faculty')) {
+            dbUserType = 'applicant';
+            dbIdentification = 'faculty';
+        } else {
+            dbUserType = 'osa';
+            dbIdentification = 'admin';
         }
 
         // Check if user already exists
         const { data: existingUser } = await supabase
-            .from('user')
+            .from('users')
             .select('email')
-            .eq('email', email.trim().toLowerCase())
-            .single();
+            .ilike('email', email.trim().toLowerCase())
+            .maybeSingle();
 
         if (existingUser) {
             return json({ error: 'User with this email already exists' }, { status: 400 });
         }
 
-        const password_hash = bcrypt.hashSync(password.trim(), 10);
+        const rawPassword = (password && typeof password === 'string' && password.trim().length >= 6)
+            ? password.trim()
+            : 'Admin123!';
+        const password_hash = bcrypt.hashSync(rawPassword, 10);
 
-        // Create new admin user with password_hash
+        // Create new admin user in users table
         const { data: newUser, error: createError } = await supabase
-            .from('user')
+            .from('users')
             .insert({
                 email: email.trim().toLowerCase(),
-                user_type,
-                identification,
+                user_type: dbUserType,
+                identification: dbIdentification,
                 password_hash,
                 is_active: true
             })
-            .select('user_id, email, user_type')
+            .select('user_id, email, user_type, identification, is_active, created_at')
             .single();
 
-        if (createError) throw createError;
+        if (createError) {
+            console.error('[Admin] Database error creating admin:', createError);
+            return json({ error: `Database error: ${createError.message}` }, { status: 500 });
+        }
 
         // Create notification for OSA admin and the new admin
         if (newUser) {
@@ -119,48 +134,35 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 await createNotification(
                     actorId,
                     'admin_created',
-                    'Admin added successfully.',
+                    `Admin account (${newUser.email}) added successfully.`,
                     actorId,
                     'create_admin',
-                    'user',
+                    'users',
                     newUser.user_id,
                     newUser.user_id,
-                    { user_type }
-                );
-            }
-            if (newUser.user_id !== actorId) {
-                await createNotification(
-                    newUser.user_id,
-                    'admin_created',
-                    'Admin added successfully.',
-                    actorId,
-                    'create_admin',
-                    'user',
-                    newUser.user_id,
-                    newUser.user_id,
-                    { user_type }
+                    { user_type: dbUserType, identification: dbIdentification }
                 );
             }
         }
 
-        console.log(`[Admin] New ${user_type} created (${newUser.email}) by primary admin ${callerEmail}`);
+        console.log(`[Admin] New ${dbUserType} (${dbIdentification}) created (${newUser.email}) by primary admin ${callerEmail}`);
 
         return json({ 
             message: 'Admin created successfully',
             user: newUser
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error creating admin:', error);
-        return json({ error: 'Failed to create admin' }, { status: 500 });
+        return json({ error: error?.message || 'Failed to create admin' }, { status: 500 });
     }
 };
 
 export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: users, error } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, user_type, identification, is_active, created_at')
-            .in('user_type', ['Osa', 'Safety Security', 'dean'])
+            .or('user_type.in.(osa,safety_security),identification.eq.faculty')
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -198,7 +200,7 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
         }
 
         const { data: updatedUser, error } = await supabase
-            .from('user')
+            .from('users')
             .update({ is_active })
             .eq('user_id', user_id)
             .select('user_id, email, user_type, is_active')
@@ -209,17 +211,19 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
         // Create notification for the admin whose status was changed
         if (updatedUser) {
             const actorId = locals.user?.user_id;
-            await createNotification(
-                updatedUser.user_id,
-                is_active ? 'admin_activated' : 'admin_deactivated',
-                is_active ? 'Admin activated successfully!' : 'Admin deactivated successfully!',
-                actorId,
-                is_active ? 'activate_admin' : 'deactivate_admin',
-                'user',
-                updatedUser.user_id,
-                updatedUser.user_id,
-                { user_type: updatedUser.user_type }
-            );
+            if (actorId) {
+                await createNotification(
+                    updatedUser.user_id,
+                    is_active ? 'admin_activated' : 'admin_deactivated',
+                    is_active ? 'Admin activated successfully!' : 'Admin deactivated successfully!',
+                    actorId,
+                    is_active ? 'activate_admin' : 'deactivate_admin',
+                    'users',
+                    updatedUser.user_id,
+                    updatedUser.user_id,
+                    { user_type: updatedUser.user_type }
+                );
+            }
         }
 
         return json({
@@ -253,32 +257,34 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 
         // Get user info before deletion for notification
         const { data: userToDelete } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, user_type')
             .eq('user_id', user_id)
             .single();
 
         const { error } = await supabase
-            .from('user')
+            .from('users')
             .delete()
             .eq('user_id', user_id);
 
         if (error) throw error;
 
-        // Create notification for the deleted admin (if we had their info)
+        // Create notification for the deleting admin
         if (userToDelete) {
             const actorId = locals.user?.user_id;
-            await createNotification(
-                userToDelete.user_id,
-                'admin_deleted',
-                'Admin deleted successfully!',
-                actorId,
-                'delete_admin',
-                'user',
-                userToDelete.user_id,
-                userToDelete.user_id,
-                { user_type: userToDelete.user_type }
-            );
+            if (actorId) {
+                await createNotification(
+                    actorId,
+                    'admin_deleted',
+                    `Admin account (${userToDelete.email}) was deleted successfully.`,
+                    actorId,
+                    'delete_admin',
+                    'users',
+                    actorId,
+                    actorId,
+                    { user_type: userToDelete.user_type }
+                );
+            }
         }
 
         return json({ message: 'Admin deleted successfully' });

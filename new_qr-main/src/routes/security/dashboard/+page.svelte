@@ -7,12 +7,11 @@
   let { data } = $props();
   let userRole = $derived(data.userRole || 'security');
 
-  // Dual-engine live sync for instant automatic updates without page refresh
+  // Pure realtime WebSocket sync for instant automatic updates without background polling
   $effect(() => {
     return startLiveSync({
       channelName: 'security-dashboard-realtime',
-      tables: ['vehicle_log', 'complaint', 'parking_availability', 'registration'],
-      intervalMs: 5000
+      tables: ['vehicle_log', 'complaint', 'parking_availability', 'registration']
     });
   });
 
@@ -77,6 +76,76 @@
   ]);
 
   const maxChartValue = $derived(Math.max(...hourlyChart, 1));
+
+  // ── Live Camera Feed Controls (Multi-Campus) ─────────────────────────────
+  type CampusKey = 'Main' | 'Rnp' | 'Paseo';
+  let selectedFeedCampus = $state<CampusKey>('Main');
+  let selectedGateView = $state<'in' | 'out' | 'active'>('active');
+  let isCamSettingsOpen = $state(false);
+  let camStreamKey = $state(0);
+  let camError = $state<Record<CampusKey, boolean>>({ Main: false, Rnp: false, Paseo: false });
+  let isCamFullscreen = $state(false);
+
+  // Default Raspberry Pi addresses per campus (auto-saved in localStorage)
+  let campusHosts = $state<Record<CampusKey, string>>({
+    Main: 'http://localhost:5000',
+    Rnp: 'http://localhost:5001',
+    Paseo: 'http://localhost:5002'
+  });
+
+  $effect(() => {
+    if (typeof window !== 'undefined') {
+      const savedMain = localStorage.getItem('cam_host_main');
+      const savedRnp = localStorage.getItem('cam_host_rnp');
+      const savedPaseo = localStorage.getItem('cam_host_paseo');
+      if (savedMain) campusHosts.Main = savedMain;
+      if (savedRnp) campusHosts.Rnp = savedRnp;
+      if (savedPaseo) campusHosts.Paseo = savedPaseo;
+    }
+  });
+
+  function saveHostConfig() {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cam_host_main', campusHosts.Main);
+      localStorage.setItem('cam_host_rnp', campusHosts.Rnp);
+      localStorage.setItem('cam_host_paseo', campusHosts.Paseo);
+    }
+    isCamSettingsOpen = false;
+    camError[selectedFeedCampus] = false;
+    camStreamKey++;
+  }
+
+  function retryCamFeed() {
+    camError[selectedFeedCampus] = false;
+    camStreamKey++;
+  }
+
+  let activeStreamUrl = $derived.by(() => {
+    const baseHost = (campusHosts[selectedFeedCampus] || 'http://localhost:5000').replace(/\/$/, '');
+    const path = selectedGateView === 'in' ? '/video_feed/in' : (selectedGateView === 'out' ? '/video_feed/out' : '/video_feed');
+    return `${baseHost}${path}?t=${camStreamKey}`;
+  });
+
+  function captureSnapshot() {
+    if (typeof window === 'undefined') return;
+    const baseHost = (campusHosts[selectedFeedCampus] || 'http://localhost:5000').replace(/\/$/, '');
+    const a = document.createElement('a');
+    a.href = `${baseHost}/snapshot?t=${Date.now()}`;
+    a.download = `cctv-${selectedFeedCampus.toLowerCase()}-${Date.now()}.jpg`;
+    a.target = '_blank';
+    a.click();
+  }
+
+  function toggleCamFullscreen() {
+    if (typeof document === 'undefined') return;
+    const el = document.getElementById('cctv-camera-container');
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().then(() => { isCamFullscreen = true; }).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => { isCamFullscreen = false; }).catch(() => {});
+    }
+  }
 </script>
 
 <svelte:head>
@@ -124,9 +193,9 @@
             <div class="stat-label">{card.label}</div>
             <div class="stat-desc" style="font-size: 0.75rem; color: #a0aec0; margin-top: 4px;">{card.desc}</div>
             <div class="capacity-stats">
-                <div class="cap-item"><span>Cap:</span> {card.capacity?.capacity ?? 0}</div>
-                <div class="cap-item"><span>Currently IN:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
-                <div class="cap-item"><span>Avail:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? 0}</strong></div>
+                <div class="cap-item"><span>Capacity:</span> {card.capacity?.capacity ?? 0}</div>
+                <div class="cap-item"><span>Occupied:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
+                <div class="cap-item"><span>Unoccupied:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? card.capacity?.unoccupied ?? 0}</strong></div>
             </div>
           </div>
           <div class="role-breakdown-toggle" onclick={() => toggleRoleBreakdown(card.label)} onkeydown={(e) => e.key === 'Enter' && toggleRoleBreakdown(card.label)} role="button" tabindex="0" aria-label="Toggle role breakdown">
@@ -155,6 +224,190 @@
       {/each}
     </div>
 
+    <!-- Live Campus Camera Feeds Section -->
+    <div class="card camera-feed-card" id="cctv-camera-container">
+      <div class="camera-card-header">
+        <div class="cam-header-left">
+          <div class="live-indicator">
+            <span class="live-dot"></span>
+            <span class="live-text">LIVE CCTV</span>
+          </div>
+          <div>
+            <h2 class="cam-title">Campus Real-Time Gate Camera Feeds</h2>
+            <p class="cam-subtitle">Monitor live Raspberry Pi camera video feeds across all university campuses on local network</p>
+          </div>
+        </div>
+
+        <div class="cam-header-controls">
+          <!-- Gate Selector Toggle -->
+          <div class="gate-toggle-group">
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'active'}
+              onclick={() => { selectedGateView = 'active'; retryCamFeed(); }}>
+              Dual / Active View
+            </button>
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'in'}
+              onclick={() => { selectedGateView = 'in'; retryCamFeed(); }}>
+              Entrance Cam
+            </button>
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'out'}
+              onclick={() => { selectedGateView = 'out'; retryCamFeed(); }}>
+              Exit Cam
+            </button>
+          </div>
+
+          <!-- IP Settings & Fullscreen -->
+          <button class="cam-action-btn" class:active-btn={isCamSettingsOpen} onclick={() => isCamSettingsOpen = !isCamSettingsOpen} title="Configure Pi IP Addresses">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            Pi Network
+          </button>
+          <button class="cam-action-btn" onclick={toggleCamFullscreen} title="Fullscreen View">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Campus Switcher Tabs Bar -->
+      <div class="campus-tabs-bar">
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Main'}
+          style="--tab-color: #8B1A3C;"
+          onclick={() => { selectedFeedCampus = 'Main'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 1</span>
+          MAIN CAMPUS FEED
+        </button>
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Rnp'}
+          style="--tab-color: #D4A62A;"
+          onclick={() => { selectedFeedCampus = 'Rnp'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 2</span>
+          RNP CAMPUS FEED
+        </button>
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Paseo'}
+          style="--tab-color: #A21C46;"
+          onclick={() => { selectedFeedCampus = 'Paseo'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 3</span>
+          PASEO CAMPUS FEED
+        </button>
+      </div>
+
+      <!-- Settings Dropdown Panel for configuring Raspberry Pi Host/IP -->
+      {#if isCamSettingsOpen}
+        <div class="cam-settings-panel">
+          <div class="settings-title-row">
+            <h4>Configure Raspberry Pi Stream Addresses</h4>
+            <span class="settings-hint">Both your computer and the Raspberry Pi must be connected to the same Wi-Fi / LAN network.</span>
+          </div>
+          <div class="settings-inputs-grid">
+            <div class="setting-field">
+              <label for="host-main">Main Campus Pi Address / Port:</label>
+              <input id="host-main" type="text" bind:value={campusHosts.Main} placeholder="http://192.168.1.50:5000" />
+            </div>
+            <div class="setting-field">
+              <label for="host-rnp">RNP Campus Pi Address / Port:</label>
+              <input id="host-rnp" type="text" bind:value={campusHosts.Rnp} placeholder="http://192.168.1.51:5001" />
+            </div>
+            <div class="setting-field">
+              <label for="host-paseo">Paseo Campus Pi Address / Port:</label>
+              <input id="host-paseo" type="text" bind:value={campusHosts.Paseo} placeholder="http://192.168.1.52:5002" />
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn-save-settings" onclick={saveHostConfig}>Save &amp; Connect</button>
+            <button class="btn-close-settings" onclick={() => isCamSettingsOpen = false}>Cancel</button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Main Video Feed Viewer Container -->
+      <div class="cctv-viewer">
+        <!-- OSD Overlay: Top Bar -->
+        <div class="cctv-osd-top">
+          <div class="osd-cam-label">
+            <span class="osd-rec-dot"></span>
+            <strong>{selectedFeedCampus.toUpperCase()} CAMPUS</strong>
+            <span class="osd-divider">•</span>
+            <span>{selectedGateView === 'in' ? 'ENTRANCE CAMERA' : (selectedGateView === 'out' ? 'EXIT CAMERA' : 'ACTIVE VIEW')}</span>
+          </div>
+          <div class="osd-meta">
+            <span class="osd-res">720P • 25 FPS</span>
+            <span class="osd-ip">{campusHosts[selectedFeedCampus]}</span>
+          </div>
+        </div>
+
+        <!-- Video Player Image or Offline Placeholder -->
+        <div class="video-display-area">
+          {#if !camError[selectedFeedCampus]}
+            <img 
+              src={activeStreamUrl} 
+              alt="{selectedFeedCampus} Campus Live Feed"
+              class="live-stream-img"
+              onerror={() => { camError[selectedFeedCampus] = true; }}
+            />
+          {/if}
+
+          {#if camError[selectedFeedCampus]}
+            <div class="cam-offline-standby">
+              <div class="offline-icon-pulse">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e53e3e" stroke-width="1.75">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </div>
+              <h3>Camera Feed Standby / Connecting...</h3>
+              <p>Waiting for connection from <strong>{selectedFeedCampus} Campus</strong> Raspberry Pi stream:</p>
+              <code>{activeStreamUrl}</code>
+              <div class="offline-help-text">
+                Ensure <code>main.py</code> is running on the Raspberry Pi and both devices are connected to the same Wi-Fi.
+              </div>
+              <div class="offline-btn-row">
+                <button class="btn-retry-feed" onclick={retryCamFeed}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  Retry Stream
+                </button>
+                <button class="btn-config-ip" onclick={() => isCamSettingsOpen = true}>
+                  Configure IP Address
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- OSD Overlay: Bottom Bar -->
+        <div class="cctv-osd-bottom">
+          <div class="osd-time">
+            MONITORING ACTIVE • {selectedFeedCampus.toUpperCase()} GATE
+          </div>
+          <div class="osd-actions">
+            <button class="osd-btn" onclick={captureSnapshot} title="Capture Snapshot">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+              </svg>
+              Snapshot
+            </button>
+            <button class="osd-btn" onclick={retryCamFeed} title="Refresh Stream">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              Reconnect
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Analytics Grid: Hourly Traffic Chart + Role Breakdown -->
     <div class="analytics-row">
@@ -798,5 +1051,484 @@
       flex-wrap: wrap;
       gap: 0.5rem;
     }
+  }
+
+  /* Camera Feed Card Styles */
+  .camera-feed-card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .camera-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .cam-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(229, 62, 62, 0.1);
+    border: 1px solid rgba(229, 62, 62, 0.3);
+    padding: 6px 12px;
+    border-radius: 20px;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    background: #e53e3e;
+    border-radius: 50%;
+    animation: live-pulse 1.5s infinite;
+  }
+
+  @keyframes live-pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.7); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(229, 62, 62, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 62, 62, 0); }
+  }
+
+  .live-text {
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #e53e3e;
+  }
+
+  .cam-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #1a202c;
+    margin: 0;
+  }
+
+  .cam-subtitle {
+    font-size: 0.82rem;
+    color: #718096;
+    margin: 2px 0 0 0;
+  }
+
+  .cam-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .gate-toggle-group {
+    display: flex;
+    background: #edf2f7;
+    padding: 3px;
+    border-radius: 12px;
+  }
+
+  .gate-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4a5568;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .gate-btn.active {
+    background: #ffffff;
+    color: #7A1734;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  }
+
+  .cam-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    padding: 7px 12px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4a5568;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .cam-action-btn:hover {
+    background: #edf2f7;
+    color: #1a202c;
+  }
+
+  .cam-action-btn.active-btn {
+    background: #7A1734;
+    color: #ffffff;
+    border-color: #7A1734;
+  }
+
+  /* Campus Switcher Tabs */
+  .campus-tabs-bar {
+    display: flex;
+    gap: 0.75rem;
+    border-bottom: 2px solid #edf2f7;
+    padding-bottom: 0.5rem;
+    overflow-x: auto;
+  }
+
+  .campus-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #718096;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  .tab-badge {
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: #e2e8f0;
+    color: #4a5568;
+  }
+
+  .campus-tab-btn:hover {
+    color: #2d3748;
+    background: #f7fafc;
+  }
+
+  .campus-tab-btn.active {
+    color: var(--tab-color);
+    background: rgba(122, 23, 52, 0.06);
+  }
+
+  .campus-tab-btn.active .tab-badge {
+    background: var(--tab-color);
+    color: #ffffff;
+  }
+
+  .campus-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -0.6rem;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--tab-color);
+    border-radius: 3px;
+  }
+
+  /* Pi Network Settings Panel */
+  .cam-settings-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .settings-title-row h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #1a202c;
+    font-weight: 700;
+  }
+
+  .settings-hint {
+    font-size: 0.78rem;
+    color: #718096;
+  }
+
+  .settings-inputs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+
+  .setting-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .setting-field label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #4a5568;
+  }
+
+  .setting-field input {
+    border: 1px solid #cbd5e0;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 0.85rem;
+    background: #ffffff;
+    font-family: monospace;
+  }
+
+  .settings-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
+  .btn-save-settings {
+    background: #7A1734;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-save-settings:hover {
+    background: #5c1126;
+  }
+
+  .btn-close-settings {
+    background: #edf2f7;
+    color: #4a5568;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* CCTV Viewer Screen */
+  .cctv-viewer {
+    background: #0f172a;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 2px solid #1e293b;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+    position: relative;
+  }
+
+  .cctv-osd-top {
+    background: rgba(15, 23, 42, 0.95);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    font-family: 'Courier New', monospace;
+    font-size: 0.82rem;
+    z-index: 2;
+  }
+
+  .osd-cam-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .osd-rec-dot {
+    width: 9px;
+    height: 9px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: live-pulse 1.2s infinite;
+  }
+
+  .osd-divider {
+    color: #64748b;
+  }
+
+  .osd-meta {
+    display: flex;
+    gap: 12px;
+    color: #94a3b8;
+    font-size: 0.78rem;
+  }
+
+  .osd-res {
+    color: #38bdf8;
+    font-weight: 700;
+  }
+
+  .video-display-area {
+    min-height: 440px;
+    max-height: 580px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #090d16;
+    position: relative;
+  }
+
+  .live-stream-img {
+    width: 100%;
+    height: auto;
+    max-height: 580px;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* Standby / Offline UI */
+  .cam-offline-standby {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    color: #f8fafc;
+    gap: 0.75rem;
+  }
+
+  .offline-icon-pulse {
+    background: rgba(239, 68, 68, 0.12);
+    border: 2px solid rgba(239, 68, 68, 0.3);
+    padding: 1rem;
+    border-radius: 50%;
+    margin-bottom: 0.5rem;
+  }
+
+  .cam-offline-standby h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  .cam-offline-standby p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+  }
+
+  .cam-offline-standby code {
+    background: #1e293b;
+    color: #38bdf8;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: monospace;
+  }
+
+  .offline-help-text {
+    font-size: 0.78rem;
+    color: #64748b;
+    max-width: 480px;
+    margin-top: 4px;
+  }
+
+  .offline-btn-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .btn-retry-feed {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #3b82f6;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-retry-feed:hover {
+    background: #2563eb;
+  }
+
+  .btn-config-ip {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-config-ip:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* CCTV Bottom OSD */
+  .cctv-osd-bottom {
+    background: rgba(15, 23, 42, 0.95);
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    z-index: 2;
+  }
+
+  .osd-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .osd-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .osd-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
   }
 </style>

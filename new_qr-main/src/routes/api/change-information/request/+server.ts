@@ -13,8 +13,8 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Check if user has a registration
         const { data: userData, error: userError } = await supabaseAdmin
-            .from('user')
-            .select('User_ID')
+            .from('users')
+            .select('user_id')
             .eq('email', locals.user.email)
             .single();
 
@@ -26,7 +26,7 @@ export async function POST({ request, locals }: RequestEvent) {
         const { data: registrations, error: regError } = await supabaseAdmin
             .from('registration')
             .select('*')
-            .eq('User_ID', userData.User_ID)
+            .eq('user_id', userData.user_id)
             .order('created_at', { ascending: false })
             .limit(1)
             .single();
@@ -40,14 +40,15 @@ export async function POST({ request, locals }: RequestEvent) {
         // For now, we'll send an email to OSA as the change information request
         // This avoids the need for a new table and ensures the request is received
         const userEmail = locals.user.email;
-        const userName = `${registration.First_Name} ${registration.Last_Name}`;
+        const userName = `${registration.first_name || ''} ${registration.last_name || ''}`.trim() || 'Applicant';
+        const regId = registration.registration_id;
 
         // Send email to OSA about the change information request
         await sendEmail(
             'osa@liceo.edu.ph',
             'Change Information Request - ' + userName,
-            'User ' + userEmail + ' (' + userName + ') has requested to change their registration information.\n\nReason: ' + (message || 'No specific reason provided') + '\n\nRegistration ID: ' + registration.Registration_ID,
-            '<h3>Change Information Request</h3><p><strong>User:</strong> ' + userEmail + ' (' + userName + ')</p><p><strong>Registration ID:</strong> ' + registration.Registration_ID + '</p><p><strong>Reason:</strong> ' + (message || 'No specific reason provided') + '</p><p>Please review this request and contact the user directly to process the changes.</p>'
+            'User ' + userEmail + ' (' + userName + ') has requested to change their registration information.\n\nReason: ' + (message || 'No specific reason provided') + '\n\nRegistration ID: ' + regId,
+            '<h3>Change Information Request</h3><p><strong>User:</strong> ' + userEmail + ' (' + userName + ')</p><p><strong>Registration ID:</strong> ' + regId + '</p><p><strong>Reason:</strong> ' + (message || 'No specific reason provided') + '</p><p>Please review this request and contact the user directly to process the changes.</p>'
         );
 
         // Also send confirmation to the user

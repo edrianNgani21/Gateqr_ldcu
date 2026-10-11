@@ -3,17 +3,19 @@
     tabs,
     active,
     counts = [],
+    labels = {},
     onchange
   }: {
     tabs: string[];
     active: string;
     counts?: number[];
+    labels?: Record<string, string>;
     onchange: (tab: string) => void;
   } = $props();
 </script>
 
 <div class="tab-bar" role="tablist">
-  {#each tabs as tab, i}
+  {#each tabs as tab}
     <button
       role="tab"
       aria-selected={active === tab}
@@ -21,33 +23,12 @@
       class:tab-active={active === tab}
       onclick={() => onchange(tab)}
     >
-      {tab}
-      {#if counts[i] > 0}
-        <span class="tab-count">{counts[i]}</span>
-      {/if}
+      <span class="tab-label">{labels[tab] || tab}</span>
     </button>
   {/each}
 </div>
 
 <style>
-  .tab-count {
-    display: inline-block;
-    min-width: 1.25rem;
-    margin-left: 0.35rem;
-    padding: 0.05rem 0.4rem;
-    border-radius: 999px;
-    background: var(--maroon);
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: 700;
-    line-height: 1.3;
-    text-align: center;
-  }
-
-  .tab-active .tab-count {
-    background: #fff;
-    color: var(--maroon);
-  }
   .tab-bar {
     display: flex;
     gap: 0.375rem;

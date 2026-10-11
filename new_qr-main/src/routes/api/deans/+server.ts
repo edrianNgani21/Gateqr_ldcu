@@ -13,10 +13,11 @@ async function createNotification(
     targetEntityId?: number
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
             notification_type: notificationType,
             message: message,
+            activity: message,
             actor_id: actorId || null,
             action_type: actionType || null,
             target_entity_type: targetEntityType || null,
@@ -36,9 +37,9 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     try {
         const { data: rows } = await supabase
-            .from('user')
+            .from('users')
             .select('*')
-            .eq('user_type', 'dean')
+            .or('identification.eq.faculty,user_type.eq.dean')
             .order('created_at', { ascending: false });
 
         const deans = rows?.map(dean => ({
@@ -74,26 +75,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const password_hash = bcrypt.hashSync(password.trim(), 10);
 
         // Check if user already exists
-        const { data: existingUser, error: userCheckError } = await supabase
-            .from('user')
-            .select('user_id, user_type, department_id')
-            .eq('email', email.toLowerCase())
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('user_id, user_type, identification, department_id')
+            .ilike('email', email.trim().toLowerCase())
             .maybeSingle();
 
         let userId;
 
         if (existingUser) {
-            // User exists - check if they're already a dean for another department
-            if (existingUser.user_type === 'dean' && existingUser.department_id && existingUser.department_id !== department_id) {
-                return json({ error: 'This email is already assigned as a dean for another department' }, { status: 400 });
-            }
-            
-            // Update existing user to be a dean with password
+            // Update existing user to dean with department linkage
             const { error: updateUserError } = await supabase
-                .from('user')
+                .from('users')
                 .update({ 
                     user_type: 'dean',
-                    identification: 'Faculty',
+                    identification: 'faculty',
                     department_id: department_id || null,
                     password_hash,
                     is_active: true
@@ -105,11 +101,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         } else {
             // Create new user as dean with password
             const { data: newUser, error: createUserError } = await supabase
-                .from('user')
+                .from('users')
                 .insert({
-                    email: email.toLowerCase(),
+                    email: email.trim().toLowerCase(),
                     user_type: 'dean',
-                    identification: 'Faculty',
+                    identification: 'faculty',
                     department_id: department_id || null,
                     password_hash,
                     is_active: true
@@ -121,19 +117,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             userId = newUser.user_id;
         }
 
-        // If department_id is provided, update the department's email and user_id
-        if (department_id) {
-            const { error: updateDeptError } = await supabase
-                .from('department')
-                .update({ 
-                    email: email.toLowerCase(),
-                    user_id: userId
-                })
-                .eq('department_id', department_id);
-
-            if (updateDeptError) throw updateDeptError;
-        }
-
         // Notify OSA admin
         if (locals.user?.user_id) {
             await createNotification(
@@ -142,15 +125,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 `Dean account assigned successfully for ${email.toLowerCase()}.`,
                 locals.user.user_id,
                 'create_dean',
-                'user',
+                'users',
                 userId
             );
         }
 
         return json({ message: 'Dean account created successfully' }, { status: 201 });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Failed to create dean:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
     }
 };
 
@@ -168,20 +151,23 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 
         // Get current dean info
         const { data: currentDean, error: fetchError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, department_id')
             .eq('user_id', user_id)
             .single();
 
         if (fetchError) throw fetchError;
 
-        const updates: any = {};
+        const updates: any = {
+            user_type: 'dean',
+            identification: 'faculty'
+        };
         
         if (email && email !== currentDean.email) {
-            updates.email = email.toLowerCase();
+            updates.email = email.trim().toLowerCase();
         }
         
-        if (department_id !== undefined && department_id !== currentDean.department_id) {
+        if (department_id !== undefined) {
             updates.department_id = department_id || null;
         }
 
@@ -189,44 +175,18 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
             updates.password_hash = bcrypt.hashSync(password.trim(), 10);
         }
 
-        if (Object.keys(updates).length === 0) {
-            return json({ error: 'No changes to update' }, { status: 400 });
-        }
-
-        // Update user
+        // Update user in users table
         const { error: updateUserError } = await supabase
-            .from('user')
+            .from('users')
             .update(updates)
             .eq('user_id', user_id);
 
         if (updateUserError) throw updateUserError;
 
-        // If department changed, update department records
-        if (department_id !== undefined && department_id !== currentDean.department_id) {
-            // Remove from old department
-            if (currentDean.department_id) {
-                await supabase
-                    .from('department')
-                    .update({ email: null, user_id: null })
-                    .eq('department_id', currentDean.department_id);
-            }
-
-            // Add to new department
-            if (department_id) {
-                await supabase
-                    .from('department')
-                    .update({ 
-                        email: email || currentDean.email,
-                        user_id: user_id
-                    })
-                    .eq('department_id', department_id);
-            }
-        }
-
         return json({ message: 'Dean updated successfully' });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Failed to update dean:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
     }
 };
 
@@ -242,32 +202,17 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User ID is required' }, { status: 400 });
         }
 
-        // Get dean's department before deletion
-        const { data: dean } = await supabase
-            .from('user')
-            .select('department_id')
-            .eq('user_id', user_id)
-            .single();
-
-        // Remove dean from department
-        if (dean?.department_id) {
-            await supabase
-                .from('department')
-                .update({ email: null, user_id: null })
-                .eq('department_id', dean.department_id);
-        }
-
-        // Delete or revert the user account
+        // Delete from users table
         const { error: deleteUserError } = await supabase
-            .from('user')
+            .from('users')
             .delete()
             .eq('user_id', user_id);
 
         if (deleteUserError) throw deleteUserError;
 
         return json({ message: 'Dean account deleted successfully' });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Failed to delete dean:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
     }
 };

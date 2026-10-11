@@ -36,12 +36,14 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             .select(`
                 vehicle_log_id,
                 vehicle_information:vehicle_information_id(plate_number),
-                registration:registration_id(first_name, last_name, role, campus),
-                guest_log:guest_log(plate_number, id_number, purpose),
+                registration:registration_id(first_name, last_name, role),
+                guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
+                guest_id,
                 check_in,
                 check_out,
                 logged_status,
-                is_vip,
+                vip_access,
+                reason,
                 campus,
                 created_at
             `)
@@ -55,12 +57,14 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                 .select(`
                     vehicle_log_id,
                     vehicle_information:vehicle_information_id(plate_number),
-                    registration:registration_id(first_name, last_name, role, campus),
-                    guest_log:guest_log(plate_number, id_number, purpose),
+                    registration:registration_id(first_name, last_name, role),
+                    guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
+                    guest_id,
                     check_in,
                     check_out,
                     logged_status,
-                    is_vip,
+                    vip_access,
+                    reason,
                     campus,
                     created_at
                 `)
@@ -80,12 +84,12 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         regRows.forEach(row => {
             const inDate = new Date(row.check_in || row.created_at || Date.now());
             const hasCheckout = row.check_out !== null && String(row.check_out).trim() !== '' && String(row.check_out).trim() !== 'null';
-            const isInside = !hasCheckout && String(row.logged_status || '').toLowerCase() !== 'exited' && String(row.logged_status || '').toLowerCase() !== 'out';
+            const isInside = !hasCheckout && String(row.logged_status || '').toLowerCase() !== 'exited' && String(row.logged_status || '').toLowerCase() !== 'out' && String(row.logged_status || '').toLowerCase() !== 'exited_campus';
             const statusDisplay = isInside ? 'INSIDE CAMPUS' : 'EXITED';
 
             const st = String(row.logged_status || '').toLowerCase();
-            const guestRecord = Array.isArray(row.guest_log) ? row.guest_log[0] : row.guest_log;
-            const isVip = Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
+            const guestRecord = Array.isArray(row.guest) ? row.guest[0] : row.guest;
+            const isVip = Boolean(row.vip_access) || Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
             const isGuest = Boolean(guestRecord) || st === 'guest' || st.includes('guest');
 
             let role = row.registration?.role ? (row.registration.role.charAt(0).toUpperCase() + row.registration.role.slice(1)) : 'Driver';
@@ -138,6 +142,19 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                     role: role,
                     is_vip: isVip,
                     is_guest: isGuest,
+                    guest_details: guestRecord ? {
+                        guest_id: guestRecord.guest_id,
+                        plate_number: guestRecord.plate_number,
+                        id_number: guestRecord.id_number,
+                        purpose: guestRecord.purpose,
+                        timestamp: guestRecord.timestamp
+                    } : (isGuest ? {
+                        guest_id: row.guest_id || null,
+                        plate_number: plate,
+                        id_number: 'N/A',
+                        purpose: row.reason || 'Visitor',
+                        timestamp: row.check_in || row.created_at
+                    } : null),
                     campus: displayCampus || 'Main Campus',
                     bound: isInside ? 'in' : 'out',
                     check_in: row.check_in,

@@ -15,8 +15,7 @@
     let adminEmail = $state('');
     let adminPassword = $state('');
     let adminPin = $state('');
-    let adminType = $state('Osa');
-    let adminIdentification = $state('Faculty');
+    let adminType = $state('OSA');
     let loading = $state(false);
     let error = $state('');
     let success = $state('');
@@ -27,8 +26,16 @@
 
     const isPrimaryAdmin = $derived((data?.userEmail || '').trim().toLowerCase() === 'aluban98304@liceo.edu.ph');
 
-    const adminTypes = ['Osa', 'Safety Security', 'dean'];
-    const identificationTypes = ['Admin', 'Staff', 'Faculty', 'Student', 'Visitor', 'Guard'];
+    const adminTypes = ['OSA', 'Safety Security', 'Dean'];
+
+    function formatRole(admin: any) {
+        const ut = (admin?.user_type || '').toLowerCase();
+        const id = (admin?.identification || '').toLowerCase();
+        if (ut === 'osa') return 'OSA Admin';
+        if (ut === 'safety_security' || ut.includes('security')) return 'Safety Security';
+        if (ut === 'dean' || id === 'faculty') return 'Dean';
+        return admin?.user_type || 'Admin';
+    }
 
     async function checkPinStatus() {
         checkingPin = true;
@@ -66,7 +73,7 @@
         checkPinStatus();
         const channel = supabaseClient
             .channel('osa-admins-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'user' }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
                 loadAdmins();
             })
             .subscribe();
@@ -82,22 +89,17 @@
             return;
         }
 
-        if (!adminEmail || !adminType || !adminIdentification || !adminPassword) {
-            error = 'Please fill in all fields including email, password, and identification';
+        if (!adminEmail || !adminType) {
+            error = 'Please enter an email and select an Admin Type';
             return;
         }
 
-        if (adminPassword.length < 6) {
+        if (adminPassword && adminPassword.length < 6) {
             error = 'Password must be at least 6 characters long';
             return;
         }
 
-        if (!hasPin) {
-            error = 'You must set up your 4-digit security PIN in Admin Settings (top-right gear icon) first before adding an admin.';
-            return;
-        }
-
-        if (!adminPin || !/^\d{4}$/.test(adminPin.trim())) {
+        if (hasPin && (!adminPin || !/^\d{4}$/.test(adminPin.trim()))) {
             error = 'Please enter your 4-digit security PIN to authorize adding this admin account';
             return;
         }
@@ -111,20 +113,18 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    email: adminEmail,
-                    password: adminPassword,
+                    email: adminEmail.trim(),
                     user_type: adminType,
-                    identification: adminIdentification,
+                    password: adminPassword.trim() || 'Admin123!',
                     pin: adminPin.trim()
                 })
             });
 
             if (res.ok) {
-                success = 'Admin added successfully with secure password and PIN authorization!';
+                success = 'Admin added successfully!';
                 adminEmail = '';
                 adminPassword = '';
                 adminPin = '';
-                adminIdentification = 'Faculty';
                 showForm = false;
                 loadAdmins(); // Reload admin list
             } else {
@@ -143,7 +143,6 @@
         adminEmail = '';
         adminPassword = '';
         adminPin = '';
-        adminIdentification = 'Faculty';
         error = '';
         success = '';
     }
@@ -318,32 +317,9 @@
                     </div>
 
                     <div class="form-group full-width">
-                        <label for="adminIdentification">
-                            <span class="label-text">Identification Type</span>
-                            <span class="label-required">*</span>
-                        </label>
-                        <div class="input-wrapper">
-                            <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                                <circle cx="12" cy="7" r="4"/>
-                            </svg>
-                            <select 
-                                id="adminIdentification" 
-                                bind:value={adminIdentification} 
-                                disabled={loading}
-                                class="form-input"
-                            >
-                                {#each identificationTypes as type}
-                                    <option value={type}>{type}</option>
-                                {/each}
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group full-width">
                         <label for="adminPassword">
                             <span class="label-text">Account Password</span>
-                            <span class="label-required">*</span>
+                            <span class="label-optional">(optional - default: Admin123!)</span>
                         </label>
                         <div class="input-wrapper">
                             <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -354,13 +330,14 @@
                                 id="adminPassword" 
                                 type="password" 
                                 bind:value={adminPassword} 
-                                placeholder="Enter password for this admin/dean (min. 6 characters)"
+                                placeholder="Default: Admin123! (or set custom password)"
                                 disabled={loading}
                                 class="form-input"
                             />
                         </div>
                     </div>
 
+                    {#if hasPin}
                     <div class="form-group full-width">
                         <label for="adminPin">
                             <span class="label-text">Authorize with Your 4-Digit Security PIN</span>
@@ -384,15 +361,16 @@
                                 class="form-input pin-input"
                             />
                         </div>
-                        <span class="field-hint">Enter the 4-digit security PIN set on your account to authorize creating this admin.</span>
+                        <span class="field-hint">Enter your 4-digit security PIN set on your account to authorize creating this admin.</span>
                     </div>
+                    {/if}
                 </div>
 
                 <div class="form-actions">
                     <button class="btn-secondary" onclick={cancelForm} disabled={loading}>
                         Cancel
                     </button>
-                    <button class="btn-primary" onclick={handleSubmit} disabled={loading || !hasPin || adminPin.length < 4}>
+                    <button class="btn-primary" onclick={handleSubmit} disabled={loading || !adminEmail || (hasPin && adminPin.length < 4)}>
                         {#if loading}
                             <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
@@ -452,7 +430,7 @@
                                 <div class="admin-info">
                                     <h3>{admin.email}</h3>
                                     <div class="badges">
-                                        <span class="admin-type-badge">{admin.user_type}</span>
+                                        <span class="admin-type-badge">{formatRole(admin)}</span>
                                         <span class="status-badge" class:active={admin.is_active} class:inactive={!admin.is_active}>
                                             {admin.is_active ? 'Active' : 'Inactive'}
                                         </span>
@@ -461,8 +439,8 @@
                             </div>
                             <div class="admin-details">
                                 <div class="detail-item">
-                                    <span class="detail-label">Type:</span>
-                                    <span class="detail-value">{admin.identification}</span>
+                                    <span class="detail-label">Role:</span>
+                                    <span class="detail-value">{formatRole(admin)}</span>
                                 </div>
                                 <div class="detail-item">
                                     <span class="detail-label">Created:</span>
@@ -677,6 +655,13 @@
     .label-required {
         color: #dc2626;
         margin-left: 0.25rem;
+    }
+
+    .label-optional {
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 400;
+        margin-left: 0.4rem;
     }
 
     .input-wrapper {

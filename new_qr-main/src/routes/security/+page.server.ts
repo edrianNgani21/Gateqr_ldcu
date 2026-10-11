@@ -37,31 +37,27 @@ export const load: PageServerLoad = async ({ locals }) => {
                 .select(`
                     *,
                     department:department_id(
-                        department,
-                        email
+                        department_name
                     ),
                     user:user_id(
                         email
                     ),
                     vehicle_information:vehicle_information_id(
-                        or_document,
-                        cr_document,
-                        drivers_license,
-                        school_id,
+                        "or",
+                        cr,
                         authorization_letter,
                         plate_number,
                         brand,
                         color,
-                        type,
-                        qr_code
+                        type
                     )
                 `)
-                .in('status', ['distributed', 'completed', 'revoked'])
+                .in('status', ['approved', 'distributed', 'completed', 'security_checked', 'revoked', 'osa_validated'])
                 .order('created_at', { ascending: false }),
             supabase
-                .from('change_vehicle_requests')
+                .from('change_vehicle_request')
                 .select('*')
-                .in('status', ['pending', 'approved', 'Pending', 'Approved']),
+                .in('status', ['pending', 'approved']),
             supabase
                 .from('vehicle_log')
                 .select('*')
@@ -70,11 +66,11 @@ export const load: PageServerLoad = async ({ locals }) => {
             supabase
                 .from('registration')
                 .select('*', { count: 'exact', head: true })
-                .in('status', ['distributed', 'completed']),
+                .in('status', ['approved', 'distributed', 'completed', 'security_checked']),
             supabase
                 .from('complaint')
                 .select('*', { count: 'exact', head: true })
-                .eq('status', 'Pending'),
+                .eq('status', 'pending'),
             supabase
                 .from('parking_availability')
                 .select('parking_capacity, slot_occupied, slot_unoccupied, date_time')
@@ -90,22 +86,46 @@ export const load: PageServerLoad = async ({ locals }) => {
             }
         });
 
-        const vehicles = (rows || []).map(v => ({
-            ...v,
-            department_name: v.department?.department,
-            department_email: v.department?.email,
-            user_email: v.user?.email,
-            vehicle_information: v.vehicle_information,
-            doc_id: v.vehicle_information?.school_id || v.student_id || null,
-            doc_load: v.enrollment_form || null,
-            doc_or: v.vehicle_information?.or_document || null,
-            doc_cr: v.vehicle_information?.cr_document || null,
-            doc_license: v.vehicle_information?.drivers_license || null,
-            doc_letter: v.vehicle_information?.authorization_letter || null,
-            is_change_vehicle: changeReqMap.has(v.registration_id),
-            qr_code: v.qr_code || v.vehicle_information?.qr_code || null,
-            qr_unique_code: v.qr_unique_code || v.vehicle_information?.qr_unique_code || null
-        }));
+        const vehicles = (rows || []).map(v => {
+            const changeReq = changeReqMap.get(v.registration_id);
+            const isChangeInProgress = !!changeReq && ['approved', 'pending'].includes(changeReq.status) && v.status !== 'approved';
+            const changeReqTime = changeReq ? new Date(changeReq.request_at || changeReq.requested_at || 0).getTime() : 0;
+
+            const rawOsaDist = typeof v.osa_dist_at === 'string' ? v.osa_dist_at : v.osa_dist_at?.toISOString?.();
+            const rawSecCheck = typeof v.security_check_at === 'string' ? v.security_check_at : (v.security_check_at?.toISOString?.() || v.security_checked_at);
+            const rawStickerRel = typeof v.sticker_released_at === 'string' ? v.sticker_released_at : v.sticker_released_at?.toISOString?.();
+
+            const osa_dist_at = isChangeInProgress && rawOsaDist && new Date(rawOsaDist).getTime() < changeReqTime ? null : rawOsaDist;
+            const security_check_at = isChangeInProgress && rawSecCheck && new Date(rawSecCheck).getTime() < changeReqTime ? null : rawSecCheck;
+            const sticker_released_at = isChangeInProgress && rawStickerRel && new Date(rawStickerRel).getTime() < changeReqTime ? null : rawStickerRel;
+
+            return {
+                ...v,
+                osa_dist_at,
+                security_check_at,
+                security_checked_at: security_check_at,
+                sticker_released_at,
+                department_name: v.department?.department_name || (v.department as any)?.department || 'Unknown Department',
+                department_email: '-',
+                user_email: v.user?.email,
+                vehicle_information: v.vehicle_information,
+                vehicle_make: v.vehicle_information?.brand || '',
+                vehicle_color: v.vehicle_information?.color || '',
+                vehicle_plate: v.vehicle_information?.plate_number || '',
+                vehicle_type: v.vehicle_information?.type || '',
+                doc_id: (v as any).doc_id || 
+                        (v.agreement_form && typeof v.agreement_form === 'string' && v.agreement_form.startsWith('http') ? v.agreement_form : null) || 
+                        (v.school_id && typeof v.school_id === 'string' && v.school_id.startsWith('http') ? v.school_id : null) || null,
+                doc_load: v.enrollment_form || null,
+                doc_or: v.vehicle_information?.or || (v.vehicle_information as any)?.or_document || null,
+                doc_cr: v.vehicle_information?.cr || (v.vehicle_information as any)?.cr_document || null,
+                doc_license: v.drivers_license || (v.vehicle_information as any)?.drivers_license || null,
+                doc_letter: v.vehicle_information?.authorization_letter || null,
+                is_change_vehicle: changeReqMap.has(v.registration_id),
+                qr_code: v.qr_code || v.vehicle_information?.qr_code || null,
+                qr_unique_code: v.qr_unique_code || v.vehicle_information?.qr_unique_code || null
+            };
+        });
 
         const max_capacity = parkingData?.parking_capacity ?? 500;
 

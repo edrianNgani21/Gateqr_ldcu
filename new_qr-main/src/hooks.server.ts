@@ -61,3 +61,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	return await resolve(event);
 };
+
+export const handleError = ({ error, event }: any) => {
+	console.error('[SERVER ERROR at ' + event.url.pathname + ']:', error);
+	return {
+		message: error?.message || 'Internal Error',
+		stack: error?.stack
+	};
+};

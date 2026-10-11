@@ -9,13 +9,13 @@ export interface LiveSyncOptions {
 }
 
 /**
- * Universal dual-engine live sync utility:
- * 1. Supabase Realtime WebSocket push
- * 2. Silent background heartbeat auto-refresh (default 5s)
- * 3. Instant tab visibility / focus sync
+ * Pure Realtime live sync utility:
+ * 1. Supabase Realtime WebSocket push on database changes (INSERT/UPDATE/DELETE)
+ * 2. Instant tab visibility / focus sync (refreshes when returning to the tab)
+ * 3. Optional polling heartbeat (disabled by default, only runs if intervalMs > 0 is provided)
  */
 export function startLiveSync(options: LiveSyncOptions) {
-    const { channelName, tables, intervalMs = 5000, onSync } = options;
+    const { channelName, tables, intervalMs, onSync } = options;
 
     let isDestroyed = false;
 
@@ -40,12 +40,15 @@ export function startLiveSync(options: LiveSyncOptions) {
     }
     channel.subscribe();
 
-    // 2. Background polling heartbeat timer (only runs when tab is active to preserve resources)
-    const timer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-            triggerSync();
-        }
-    }, intervalMs);
+    // 2. Background polling heartbeat timer (only runs if intervalMs > 0 is explicitly specified)
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (intervalMs && intervalMs > 0) {
+        timer = setInterval(() => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                triggerSync();
+            }
+        }, intervalMs);
+    }
 
     // 3. Instant sync when user tabs back or focuses window
     const handleVisibility = () => {
@@ -66,7 +69,9 @@ export function startLiveSync(options: LiveSyncOptions) {
     // Return cleanup function for Svelte $effect teardown
     return () => {
         isDestroyed = true;
-        clearInterval(timer);
+        if (timer) {
+            clearInterval(timer);
+        }
         if (typeof window !== 'undefined') {
             window.removeEventListener('focus', handleFocus);
             document.removeEventListener('visibilitychange', handleVisibility);

@@ -24,17 +24,17 @@ export const load: PageServerLoad = async ({ locals }) => {
             statusBreakdownResult,
             recentApplicationsResult
         ] = await Promise.all([
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'osa_val']),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'distributed').is('security_checked_at', null),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'distributed').not('security_checked_at', 'is', null).is('sticker_released_at', null),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'security_checked']).is('security_check_at', null),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'security_checked']).not('security_check_at', 'is', null).is('revoke_at', null),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
             supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
             supabase.from('department').select('*', { count: 'exact', head: true }),
             supabase.from('registration').select('status').order('created_at', { ascending: false }),
             supabase.from('registration').select(`
                 *,
                 user:user_id(email),
-                department:department_id(department)
+                department:department_id(department_name)
             `).order('created_at', { ascending: false }).limit(5)
         ]);
 
@@ -51,7 +51,11 @@ export const load: PageServerLoad = async ({ locals }) => {
         const statusCounts: Record<string, number> = {
             pending: 0,
             dept_val: 0,
+            dept_validated: 0,
             osa_val: 0,
+            osa_validated: 0,
+            security_checked: 0,
+            approved: 0,
             distributed: 0,
             completed: 0,
             rejected: 0,

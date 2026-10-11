@@ -17,10 +17,11 @@ export const load: PageServerLoad = async ({ locals }) => {
         return {
             departments: (rows || []).map(row => ({
                 auto_id: row.department_id,
-                email: row.email,
-                name: row.department,
+                department_id: row.department_id,
+                name: row.department_name,
+                department: row.department_name,
                 created_at: row.created_at,
-                is_active: row.is_active ?? true // Default to true if null
+                is_active: row.is_active ?? true
             })),
             userEmail: locals.user.email
         };

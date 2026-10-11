@@ -25,14 +25,14 @@ export const load: PageServerLoad = async ({ locals }) => {
         // Fetch only active departments for the select dropdown from Supabase
         const { data: rows } = await supabase
             .from('department')
-            .select('department')
+            .select('department_name')
             .eq('is_active', true)
-            .order('department', { ascending: true });
+            .order('department_name', { ascending: true });
         
         return {
             userEmail,
             applicationOpen,
-            departments: (rows || []).map(r => r.department)
+            departments: (rows || []).map(r => r.department_name)
         };
     } catch (e) {
         return { userEmail, applicationOpen, departments: [] };

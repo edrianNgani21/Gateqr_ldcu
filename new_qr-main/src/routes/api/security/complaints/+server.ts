@@ -24,7 +24,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         if (locals.user.role !== 'security') {
             // Get user_id from email for regular users
             const { data: userData, error: userError } = await supabase
-                .from('user')
+                .from('users')
                 .select('user_id')
                 .eq('email', locals.user.email)
                 .single();
@@ -67,7 +67,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Get user_id from email
         const { data: userData, error: userError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id')
             .eq('email', locals.user.email)
             .single();
@@ -89,8 +89,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Notify complainant (applicant)
         try {
-            await supabase.from('notifications').insert({
+            await supabase.from('notification').insert({
                 user_id: userData.user_id,
+                activity: 'Your complaint has been submitted successfully to Safety & Security.',
                 notification_type: 'complaint_submitted',
                 message: 'Your complaint has been submitted successfully to Safety & Security.',
                 actor_id: userData.user_id,
@@ -106,14 +107,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // Notify Security staff
         try {
             const { data: secUsers } = await supabase
-                .from('user')
+                .from('users')
                 .select('user_id')
-                .eq('user_type', 'Safety Security');
+                .eq('user_type', 'safety_security');
 
             if (secUsers && secUsers.length > 0) {
                 const complaintSnippet = message.trim().slice(0, 70) + (message.trim().length > 70 ? '...' : '');
                 const secNotifs = secUsers.map(u => ({
                     user_id: u.user_id,
+                    activity: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
                     notification_type: 'new_complaint',
                     message: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
                     actor_id: userData.user_id,
@@ -122,7 +124,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     target_entity_id: newComplaint?.complaint_id,
                     is_read: false
                 }));
-                await supabase.from('notifications').insert(secNotifs);
+                await supabase.from('notification').insert(secNotifs);
             }
         } catch (secNotifErr) {
             console.error('Failed to notify security staff:', secNotifErr);

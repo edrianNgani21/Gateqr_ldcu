@@ -7,12 +7,11 @@
 
     let { data }: { data: PageData } = $props();
 
-    // Dual-engine live sync for applicant status updates without page refresh
+    // Pure realtime WebSocket sync for applicant status updates without background polling
     $effect(() => {
         return startLiveSync({
             channelName: 'applicant-status-realtime',
-            tables: ['registration', 'change_vehicle_requests'],
-            intervalMs: 5000
+            tables: ['registration', 'change_vehicle_request']
         });
     });
 
@@ -116,48 +115,44 @@
     // Helpers to determine step states
     function stepStatus(app: any, stepNum: number) {
         if (!app) return 'pending';
-        const s = app.status;
+        const s = (app.status || '').toLowerCase();
         
         if (s === 'rejected' || s === 'revoked') return 'rejected';
         
         if (stepNum === 1) { // College Head Approval
             if (['visitor', 'concessionaire'].includes(app.role)) return 'done';
-            if (['osa_val', 'distributed', 'completed', 'expired'].includes(s)) return 'done';
-            if (s === 'dept_val') return 'active';
+            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
+            if (s === 'dept_val' || s === 'pending') return 'active';
             return 'pending';
         }
 
         if (stepNum === 2) { // OSA Review and Schedule
-            if (['distributed', 'completed', 'expired'].includes(s)) return 'done';
-            if (s === 'osa_val') return 'active';
+            if (['osa_validated', 'security_checked', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
+            if (s === 'dept_validated' || s === 'osa_val' || (['visitor', 'concessionaire'].includes(app.role) && s === 'pending')) return 'active';
             return 'pending';
         }
 
         if (stepNum === 3) { // OSA Checked Hardcopies
-            if (app.osa_dist_at) return 'done'; 
-            if (s === 'distributed' && !app.osa_dist_at) return 'active'; 
-            if (s === 'completed' || s === 'expired') return 'done';
+            if (app.osa_dist_at || ['distributed', 'security_checked', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
+            if (['osa_validated'].includes(s)) return 'active'; 
             return 'pending';
         }
 
         if (stepNum === 4) { // Security Check Hardcopies
-            if (app.security_checked_at) return 'done'; 
-            if (s === 'distributed' && app.osa_dist_at && !app.security_checked_at) return 'active';
-            if (s === 'completed' || s === 'expired') return 'done';
+            if (app.security_check_at || app.security_checked_at || ['security_checked', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
+            if (s === 'distributed' || app.osa_dist_at) return 'active';
             return 'pending';
         }
 
         if (stepNum === 5) { // OSA Release Sticker
-            if (app.sticker_released_at) return 'done';
-            if (app.security_checked_at) return 'active';
-            if (s === 'completed' && !app.sticker_released_at) return 'active';
+            if (app.sticker_released_at || ['completed', 'approved'].includes(s)) return 'done';
+            if (s === 'security_checked' || app.security_check_at || app.security_checked_at) return 'active';
             return 'pending';
         }
 
         if (stepNum === 6) { // Security Installed Sticker
-            if (app.sticker_installed_at) return 'done';
-            if (app.sticker_released_at) return 'active';
-            if (s === 'completed' && !app.sticker_installed_at) return 'active';
+            if (app.sticker_installed_at || ['approved'].includes(s)) return 'done';
+            if (s === 'completed' || app.sticker_released_at) return 'active';
             return 'pending';
         }
 
@@ -242,10 +237,10 @@
           <div class="ps-info">
             <span class="ps-label">Step {skipDean ? 1 : 2} — OSA Application Review</span>
             <span class="ps-desc">Wait for the Office of Student Affairs (OSA) to review your application details and schedule your office visit.</span>
-            {#if app.dist_sched}
-              <div class="sched-pill" class:sched-overdue={!app.osa_dist_at && new Date(app.dist_sched) < new Date()}>
-                Schedule: {new Date(app.dist_sched).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}
-                {#if !app.osa_dist_at && new Date(app.dist_sched) < new Date()}
+            {#if app.dist_sched || app.schedule}
+              <div class="sched-pill" class:sched-overdue={!app.osa_dist_at && new Date(app.dist_sched || app.schedule) < new Date()}>
+                Schedule: {new Date(app.dist_sched || app.schedule).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}
+                {#if !app.osa_dist_at && new Date(app.dist_sched || app.schedule) < new Date()}
                   <span style="color: #dc2626; font-weight: bold; margin-left: 0.5rem;">(OVERDUE)</span>
                 {/if}
               </div>
@@ -393,10 +388,14 @@
               </svg>
             </div>
             <div class="crs-content">
-              <strong>Request to Change Registration Details Accepted!</strong>
-              <p>Your registration change request was accepted by OSA. Your application has moved to the verification and compliance flow.</p>
-              {#if app.dist_sched}
-                <div class="crs-sched">Scheduled Visit: <strong>{new Date(app.dist_sched).toLocaleString()}</strong></div>
+              <strong>Request to Change Vehicle Accepted!</strong>
+              {#if app.status === 'approved' && app.sticker_released_at}
+                <p>Your request to change vehicle has been finalized and your new vehicle is now officially registered.</p>
+              {:else if app.dist_sched || app.schedule}
+                <p>Your request has been accepted! Please visit the OSA Office on <strong>{new Date(app.dist_sched || app.schedule).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}</strong> to comply with your hard copy requirements for your new vehicle.</p>
+                <div class="crs-sched">Scheduled Visit for Hardcopy Compliance: <strong>{new Date(app.dist_sched || app.schedule).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}</strong></div>
+              {:else}
+                <p>Your request has been accepted! Please visit the OSA Office at your scheduled date and time to comply with your hard copy requirements for your new vehicle.</p>
               {/if}
             </div>
           </div>

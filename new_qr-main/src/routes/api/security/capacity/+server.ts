@@ -14,19 +14,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Invalid input data' }, { status: 400 });
         }
 
-        // If removing an event, just deactivate it in campus_events
+        const gate = campus === 'RNP' ? 'rnp' : (campus === 'PASEO' ? 'paseo' : 'main');
+
+        // If removing an event, just deactivate it in campus_event
         if (remove_event) {
             await supabase
-                .from('campus_events')
+                .from('campus_event')
                 .update({ is_active: false })
-                .eq('campus', campus)
+                .eq('campus_gate', gate)
                 .eq('is_active', true);
 
             // Also clear it from parking_availability just to be safe
             const { data: latestPa } = await supabase
                 .from('parking_availability')
                 .select('parking_availability_id')
-                .eq('campus', campus)
+                .or(`campus.eq.${campus},campus_gate.eq.${gate}`)
                 .order('date_time', { ascending: false })
                 .limit(1)
                 .maybeSingle();
@@ -45,16 +47,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // Deactivate old active events for this campus if we're setting a new one
         if (event_name && start_date && end_date) {
             await supabase
-                .from('campus_events')
+                .from('campus_event')
                 .update({ is_active: false })
-                .eq('campus', campus)
+                .eq('campus_gate', gate)
                 .eq('is_active', true);
             
             // Insert the new event
             await supabase
-                .from('campus_events')
+                .from('campus_event')
                 .insert([{
-                    campus,
+                    user_id: locals.user.user_id,
+                    campus_gate: gate,
                     event_name,
                     start_date,
                     end_date,
@@ -67,23 +70,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const { data: lastData } = await supabase
             .from('parking_availability')
             .select('*')
-            .eq('campus', campus)
+            .or(`campus.eq.${campus},campus_gate.eq.${gate}`)
             .order('date_time', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        const occupied = lastData?.slot_occupied ?? 0;
+        const occupied = lastData?.slot_occupied ?? lastData?.occupied ?? 0;
         const available = Math.max(0, parking_capacity - occupied);
+        const nowIso = new Date().toISOString();
 
         if (lastData) {
-            // Update the existing latest record to avoid creating a new row and dealing with vehicle_log_id foreign key constraint
+            // Update the existing latest record to avoid creating duplicate rows and foreign key constraint issues
             const { error } = await supabase
                 .from('parking_availability')
                 .update({
                     parking_capacity,
+                    capacity: parking_capacity,
+                    slot_occupied: occupied,
+                    occupied: occupied,
                     slot_unoccupied: available,
+                    available: available,
+                    campus: campus,
+                    campus_gate: gate,
                     event_name: event_name || null,
-                    date_time: new Date().toISOString() // Refresh the time
+                    date_time: nowIso,
+                    recorded_at: nowIso
                 })
                 .eq('parking_availability_id', lastData.parking_availability_id);
                 
@@ -123,10 +134,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .insert([{
                     vehicle_log_id,
                     campus,
+                    campus_gate: gate,
                     parking_capacity,
+                    capacity: parking_capacity,
                     slot_occupied: occupied,
+                    occupied: occupied,
                     slot_unoccupied: available,
-                    event_name: event_name || null
+                    available: available,
+                    event_name: event_name || null,
+                    date_time: nowIso,
+                    recorded_at: nowIso
                 }]);
                 
             if (error) {

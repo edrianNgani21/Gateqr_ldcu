@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     try {
         const { data: rows, error } = await supabase
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .select(`
                 *,
                 user:user_id(
@@ -22,74 +22,54 @@ export const load: PageServerLoad = async ({ locals }) => {
                     last_name,
                     mobile,
                     role,
-                    campus,
-                    year_level,
                     status,
-                    dist_sched,
+                    schedule,
                     department:department_id(
-                        department,
-                        email
+                        department_name
+                    ),
+                    vehicle_information:vehicle_information_id(
+                        vehicle_information_id,
+                        brand,
+                        color,
+                        plate_number,
+                        type,
+                        "or",
+                        cr,
+                        authorization_letter
                     )
-                ),
-                original_vehicle:original_vehicle_id(
-                    vehicle_information_id,
-                    brand,
-                    color,
-                    plate_number,
-                    type,
-                    or_document,
-                    cr_document,
-                    drivers_license,
-                    authorization_letter
                 )
             `)
-            .order('requested_at', { ascending: false });
+            .order('request_at', { ascending: false });
 
         if (error) {
             console.error('Error fetching change vehicle requests:', error);
         }
 
-        // Fetch new vehicles if new_vehicle_id is present
-        const newVehicleIds = (rows || [])
-            .map((r: any) => r.new_vehicle_id)
-            .filter(Boolean);
-
-        let newVehiclesMap = new Map<number, any>();
-        if (newVehicleIds.length > 0) {
-            const { data: newVehicles } = await supabase
-                .from('vehicle_information')
-                .select('*')
-                .in('vehicle_information_id', newVehicleIds);
-
-            (newVehicles || []).forEach((v: any) => {
-                newVehiclesMap.set(v.vehicle_information_id, v);
-            });
-        }
-
         const requests = (rows || []).map((req: any) => {
             const reg = req.registration || {};
-            const orig = req.original_vehicle || {};
-            const newVeh = req.new_vehicle_id ? newVehiclesMap.get(req.new_vehicle_id) : null;
+            const orig = reg.vehicle_information || {};
+            const proposed = req.proposed_changes || {};
 
             return {
-                request_id: req.request_id,
+                request_id: req.change_vehicle_request_id,
+                change_vehicle_request_id: req.change_vehicle_request_id,
                 user_id: req.user_id,
                 registration_id: req.registration_id,
                 reason: req.reason || 'No reason provided',
-                status: req.status || 'Pending',
-                requested_at: req.requested_at,
-                processed_at: req.processed_at,
+                status: req.status || 'pending',
+                requested_at: req.request_at,
+                processed_at: req.process_at,
                 applicant: {
                     name: `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || 'Unknown Applicant',
                     email: req.user?.email || '-',
                     mobile: reg.mobile || '-',
                     role: reg.role || 'student',
-                    campus: reg.campus || '-',
-                    department: reg.department?.department || '-',
-                    department_email: reg.department?.email || '-',
-                    year_level: reg.year_level || null,
+                    campus: 'Main Campus',
+                    department: reg.department?.department_name || '-',
+                    department_email: '-',
+                    year_level: null,
                     registration_status: reg.status || '-',
-                    dist_sched: reg.dist_sched || null
+                    dist_sched: reg.schedule || null
                 },
                 current_vehicle: {
                     brand: orig.brand || 'Unknown',
@@ -98,15 +78,15 @@ export const load: PageServerLoad = async ({ locals }) => {
                     type: orig.type || '-'
                 },
                 new_vehicle: {
-                    brand: newVeh?.brand || 'Unknown',
-                    color: newVeh?.color || 'Not Specified',
-                    plate_number: newVeh?.plate_number || 'Not Specified',
-                    type: newVeh?.type || '-',
+                    brand: proposed.vehicle_make || proposed.brand || 'Unknown',
+                    color: proposed.vehicle_color || proposed.color || 'Not Specified',
+                    plate_number: proposed.vehicle_plate || proposed.plate_number || 'Not Specified',
+                    type: proposed.vehicle_type || proposed.type || '-',
                     is_owner: true,
-                    doc_or: newVeh?.or_document || null,
-                    doc_cr: newVeh?.cr_document || null,
-                    doc_license: newVeh?.drivers_license || null,
-                    doc_letter: newVeh?.authorization_letter || null
+                    doc_or: proposed.doc_or || proposed.or || null,
+                    doc_cr: proposed.doc_cr || proposed.cr || null,
+                    doc_license: proposed.doc_license || null,
+                    doc_letter: proposed.doc_letter || proposed.authorization_letter || null
                 }
             };
         });

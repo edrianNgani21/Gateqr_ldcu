@@ -16,8 +16,9 @@ async function createNotification(
     metadata?: any
 ) {
     try {
-        await supabaseAdmin.from('notifications').insert({
+        await supabaseAdmin.from('notification').insert({
             user_id: userId,
+            activity: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -99,9 +100,9 @@ export async function POST({ request, locals }: RequestEvent) {
             return json({ error: 'New vehicle make/brand and plate number are required.' }, { status: 400 });
         }
 
-        // Get user_id from user table
+        // Get user_id from users table
         const { data: userData, error: userError } = await supabaseAdmin
-            .from('user')
+            .from('users')
             .select('user_id, email')
             .eq('email', locals.user.email)
             .single();
@@ -131,10 +132,10 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Check if there is already a pending change request
         const { data: existingRequests, error: checkError } = await supabaseAdmin
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .select('*')
             .eq('registration_id', registration.registration_id)
-            .in('status', ['pending', 'Pending']);
+            .eq('status', 'pending');
 
         if (checkError) throw checkError;
 
@@ -142,42 +143,37 @@ export async function POST({ request, locals }: RequestEvent) {
             return json({ error: 'You already have a pending change vehicle request for this registration.' }, { status: 400 });
         }
 
-        // 1. Insert new vehicle info into vehicle_information table
-        const { data: newVehicleData, error: newVehicleError } = await supabaseAdmin
-            .from('vehicle_information')
-            .insert({
-                plate_number: vehicle_plate,
-                brand: vehicle_make,
-                color: vehicle_color || 'Not Specified',
-                type: vehicle_type as any,
-                or_document: doc_or || null,
-                cr_document: doc_cr || null,
-                drivers_license: doc_license || registration.vehicle_information?.drivers_license || null,
-                authorization_letter: doc_letter || registration.vehicle_information?.authorization_letter || '',
-                school_id: registration.vehicle_information?.school_id || null
-            })
-            .select('vehicle_information_id')
-            .single();
+        // Find OSA admin user_id
+        const { data: osaAdmin } = await supabaseAdmin
+            .from('users')
+            .select('user_id')
+            .eq('user_type', 'osa')
+            .limit(1)
+            .maybeSingle();
 
-        let newVehicleId: number | null = null;
-        if (!newVehicleError && newVehicleData) {
-            newVehicleId = newVehicleData.vehicle_information_id;
-        } else {
-            console.warn('Could not insert new vehicle_information, continuing with request record:', newVehicleError);
-        }
+        const recipientId = osaAdmin?.user_id || 1;
 
-        // 2. Insert into change_vehicle_requests
+        // 2. Insert into change_vehicle_request
         const insertPayload: any = {
             user_id: userData.user_id,
             registration_id: registration.registration_id,
-            original_vehicle_id: registration.vehicle_information_id,
+            recipient_id: recipientId,
             reason: reason,
-            status: 'Pending',
-            new_vehicle_id: newVehicleId
+            status: 'pending',
+            proposed_changes: {
+                vehicle_make,
+                vehicle_plate,
+                vehicle_color: vehicle_color || 'Not Specified',
+                vehicle_type,
+                doc_or: doc_or || null,
+                doc_cr: doc_cr || null,
+                doc_license: doc_license || null,
+                doc_letter: doc_letter || null
+            }
         };
 
         const { data: insertedRequest, error: insertError } = await supabaseAdmin
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .insert([insertPayload])
             .select()
             .single();
@@ -207,7 +203,7 @@ export async function POST({ request, locals }: RequestEvent) {
             userData.user_id,
             'request_registration_change',
             'change_vehicle_request',
-            insertedRequest?.request_id,
+            insertedRequest?.change_vehicle_request_id,
             registration.registration_id,
             { reason, vehicle_make, vehicle_plate }
         );

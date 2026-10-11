@@ -15,7 +15,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 email
             ),
             department:department_id(
-                department
+                department_name
             )
         `)
         .order('created_at', { ascending: false });
@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     const vehicles = (rows || []).map(row => ({
         ...row,
         user_email: row.user?.email,
-        department_name: row.department?.department
+        department_name: row.department?.department_name || (row.department as any)?.department || '-'
     }));
 
     return {

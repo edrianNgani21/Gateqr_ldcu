@@ -15,12 +15,11 @@
 
   import { startLiveSync } from '$lib/utils/liveSync';
 
-  // Dual-engine live sync for vehicle logs without manual refresh
+  // Pure realtime WebSocket sync for vehicle logs without background polling
   $effect(() => {
     return startLiveSync({
       channelName: 'security-logs-realtime',
       tables: ['vehicle_log'],
-      intervalMs: 5000,
       onSync: () => fetchLogs()
     });
   });
@@ -36,6 +35,20 @@
   let printModeActive = $state(false);
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Guest Details Modal
+  let viewingGuestLog = $state<any>(null);
+  let showGuestModal = $state(false);
+
+  function openGuestDetails(log: any) {
+    viewingGuestLog = log;
+    showGuestModal = true;
+  }
+
+  function closeGuestDetails() {
+    showGuestModal = false;
+    viewingGuestLog = null;
+  }
 
   // Role filter functionality
   const allRoles = ['student', 'employee', 'visitor', 'concessionaire', 'guest', 'vip'];
@@ -354,6 +367,7 @@
                 <th>Check In</th>
                 <th>Check Out</th>
                 <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -375,7 +389,14 @@
                     {#if log.is_vip || log.role?.toLowerCase() === 'vip'}
                       <span class="plate-badge plate-vip">VIP</span>
                     {:else if log.is_guest || log.role?.toLowerCase() === 'guest'}
-                      <span class="plate-badge plate-guest">{log.vehicle_plate || log.plate || 'Guest Vehicle'}</span>
+                      <button
+                        type="button"
+                        class="plate-badge plate-guest plate-clickable"
+                        onclick={() => openGuestDetails(log)}
+                        title="Click to view guest details"
+                      >
+                        {log.vehicle_plate || log.plate || 'Guest Vehicle'}
+                      </button>
                     {:else}
                       <span class="plate-badge">{log.vehicle_plate || log.plate || 'No Plate'}</span>
                     {/if}
@@ -387,7 +408,14 @@
                         {#if log.is_vip || log.role?.toLowerCase() === 'vip'}
                           <span class="badge-role badge-vip">👑 VIP</span>
                         {:else if log.is_guest || log.role?.toLowerCase() === 'guest'}
-                          <span class="badge-role badge-guest">🏷️ Guest</span>
+                          <button
+                            type="button"
+                            class="badge-role badge-guest badge-clickable"
+                            onclick={() => openGuestDetails(log)}
+                            title="Click to view guest details"
+                          >
+                            🏷️ Guest
+                          </button>
                         {:else if log.role?.toLowerCase() === 'student'}
                           <span class="badge-role badge-student">Student</span>
                         {:else if log.role?.toLowerCase() === 'employee'}
@@ -415,10 +443,28 @@
                       <span class="status-pill status-exited-pill">EXITED</span>
                     {/if}
                   </td>
+                  <td class="td-action">
+                    {#if log.is_guest || log.guest_details || (log.role && log.role.toLowerCase() === 'guest')}
+                      <button
+                        type="button"
+                        class="btn-guest-details"
+                        onclick={() => openGuestDetails(log)}
+                        title="View Guest Log Details"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        <span>View Details</span>
+                      </button>
+                    {:else}
+                      <span class="action-dash">—</span>
+                    {/if}
+                  </td>
                 </tr>
               {:else}
                 <tr>
-                  <td colspan={printModeActive ? 7 : 6} class="empty-state-cell">
+                  <td colspan={printModeActive ? 8 : 7} class="empty-state-cell">
                     No vehicle logs found for this date or search filter.
                   </td>
                 </tr>
@@ -441,6 +487,103 @@
       {/if}
     </div>
   </div>
+
+  {#if showGuestModal && viewingGuestLog}
+    <div class="modal-backdrop" onclick={closeGuestDetails} role="presentation">
+      <div class="guest-modal-card" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="guest-modal-title">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <div class="modal-icon-badge">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </div>
+            <div>
+              <h3 id="guest-modal-title">Guest Log Details</h3>
+              <p class="modal-sub">Verified Guest Gate Record &bull; Log #{viewingGuestLog.vehicle_log_id}</p>
+            </div>
+          </div>
+          <button type="button" class="modal-close-btn" onclick={closeGuestDetails} aria-label="Close details">
+            &times;
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Status Banner -->
+          <div class="guest-status-banner" class:banner-inside={!viewingGuestLog.check_out && (viewingGuestLog.logged_status || '').toLowerCase() !== 'exited'} class:banner-exited={viewingGuestLog.check_out || (viewingGuestLog.logged_status || '').toLowerCase() === 'exited'}>
+            <div class="status-indicator-dot"></div>
+            <span class="status-banner-text">
+              {#if !viewingGuestLog.check_out && (viewingGuestLog.logged_status || '').toLowerCase() !== 'exited'}
+                CURRENTLY INSIDE CAMPUS
+              {:else}
+                EXITED CAMPUS
+              {/if}
+            </span>
+            <span class="status-banner-campus">{viewingGuestLog.campus || 'Main Campus'}</span>
+          </div>
+
+          <!-- Details Grid -->
+          <div class="guest-grid">
+            <div class="detail-box">
+              <span class="detail-label">Plate Number</span>
+              <div class="detail-plate">
+                {viewingGuestLog.guest_details?.plate_number || viewingGuestLog.vehicle_plate || viewingGuestLog.plate || 'Guest Vehicle'}
+              </div>
+            </div>
+
+            <div class="detail-box">
+              <span class="detail-label">Driver's License / ID Number</span>
+              <div class="detail-val-strong">
+                {viewingGuestLog.guest_details?.id_number || 'N/A'}
+              </div>
+            </div>
+
+            <div class="detail-box full-col">
+              <span class="detail-label">Purpose of Visit</span>
+              <div class="detail-val-purpose">
+                {viewingGuestLog.guest_details?.purpose || viewingGuestLog.reason || 'Visitor / Guest Access'}
+              </div>
+            </div>
+
+            <div class="detail-box">
+              <span class="detail-label">Check-In Time</span>
+              <div class="detail-val time-in">
+                {viewingGuestLog.check_in ? new Date(viewingGuestLog.check_in).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+              </div>
+            </div>
+
+            <div class="detail-box">
+              <span class="detail-label">Check-Out Time</span>
+              <div class="detail-val time-out">
+                {viewingGuestLog.check_out ? new Date(viewingGuestLog.check_out).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not Checked Out (Active)'}
+              </div>
+            </div>
+
+            <div class="detail-box">
+              <span class="detail-label">Campus &amp; Gate</span>
+              <div class="detail-val">
+                {viewingGuestLog.campus || 'Main Campus'}
+              </div>
+            </div>
+
+            <div class="detail-box">
+              <span class="detail-label">Guest ID Reference</span>
+              <div class="detail-val id-mono">
+                {viewingGuestLog.guest_details?.guest_id ? `GST-${viewingGuestLog.guest_details.guest_id}` : `LOG-${viewingGuestLog.vehicle_log_id}`}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-modal-close" onclick={closeGuestDetails}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </AppShell>
 
 <style>
@@ -1069,5 +1212,294 @@
       padding: 0.65rem 0.75rem;
       font-size: 0.8rem;
     }
+  }
+
+  /* Guest Details Button & Modal */
+  .td-action {
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .action-dash {
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+
+  .btn-guest-details {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    background: rgba(139, 26, 60, 0.08);
+    color: #8B1A3C;
+    border: 1px solid rgba(139, 26, 60, 0.25);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-guest-details:hover {
+    background: #8B1A3C;
+    color: #ffffff;
+    border-color: #8B1A3C;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(139, 26, 60, 0.2);
+  }
+
+  .plate-clickable,
+  .badge-clickable {
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .plate-clickable:hover,
+  .badge-clickable:hover {
+    transform: scale(1.04);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+  }
+
+  /* Modal Backdrop & Card */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .guest-modal-card {
+    background: #ffffff;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 540px;
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #fafaf9;
+  }
+
+  .modal-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+
+  .modal-icon-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(139, 26, 60, 0.1);
+    color: #8B1A3C;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #1e293b;
+  }
+
+  .modal-sub {
+    margin: 0.15rem 0 0 0;
+    font-size: 0.8rem;
+    color: #64748b;
+  }
+
+  .modal-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.6rem;
+    line-height: 1;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+  }
+
+  .modal-close-btn:hover {
+    color: #1e293b;
+    background: #f1f5f9;
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .guest-status-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem 1rem;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  .banner-inside {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+  }
+
+  .banner-inside .status-indicator-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+  }
+
+  .banner-exited {
+    background: #f8fafc;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+  }
+
+  .banner-exited .status-indicator-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #94a3b8;
+  }
+
+  .status-banner-campus {
+    margin-left: auto;
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+
+  .guest-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .detail-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .detail-box.full-col {
+    grid-column: span 2;
+  }
+
+  .detail-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+  }
+
+  .detail-plate {
+    font-family: monospace;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #8B1A3C;
+    background: #fff;
+    border: 1px dashed rgba(139, 26, 60, 0.3);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    display: inline-block;
+  }
+
+  .detail-val-strong {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1e293b;
+  }
+
+  .detail-val-purpose {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.4;
+  }
+
+  .detail-val {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #334155;
+  }
+
+  .detail-val.time-in {
+    color: #059669;
+  }
+
+  .detail-val.time-out {
+    color: #475569;
+  }
+
+  .id-mono {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: #64748b;
+  }
+
+  .modal-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid #f1f5f9;
+    background: #fafaf9;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .btn-modal-close {
+    padding: 0.55rem 1.25rem;
+    background: #1e293b;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .btn-modal-close:hover {
+    background: #0f172a;
   }
 </style>

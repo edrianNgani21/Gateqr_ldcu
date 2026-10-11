@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ request }) => {
         // Get vehicle_information_id from registration
         const { data: regData } = await supabase
             .from('registration')
-            .select('vehicle_information_id, campus')
+            .select('vehicle_information_id')
             .eq('registration_id', registration_id)
             .single();
 
@@ -34,10 +34,10 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Deactivate QR if there is an approved change request pending sticker release
         const { data: activeChange } = await supabase
-            .from('change_vehicle_requests')
+            .from('change_vehicle_request')
             .select('status')
             .eq('registration_id', registration_id)
-            .in('status', ['Approved', 'approved'])
+            .eq('status', 'approved')
             .maybeSingle();
 
         if (activeChange) {
@@ -60,10 +60,11 @@ export const POST: RequestHandler = async ({ request }) => {
             }
         }
 
-        const rawCampus = campus || regData.campus || 'Main Campus';
-        let entryCampus = 'Main Campus';
-        if (rawCampus.toLowerCase().includes('rnp')) entryCampus = 'RNP';
-        else if (rawCampus.toLowerCase().includes('paseo')) entryCampus = 'PASEO';
+        const rawCampus = (campus || 'main').toString().toLowerCase();
+        let gateVal: 'main' | 'rnp' | 'paseo' = 'main';
+        if (rawCampus.includes('rnp')) gateVal = 'rnp';
+        else if (rawCampus.includes('paseo')) gateVal = 'paseo';
+        const entryCampus = gateVal === 'rnp' ? 'RNP' : (gateVal === 'paseo' ? 'PASEO' : 'Main Campus');
 
         const { error: insertError, data: logData } = await supabase
             .from('vehicle_log')
@@ -71,10 +72,10 @@ export const POST: RequestHandler = async ({ request }) => {
                 registration_id,
                 vehicle_information_id,
                 check_in: new Date().toISOString(),
-                pic_in: picUrl,
-                logged_status: logged_status || 'Inside',
-                reason: reason || null,
-                campus: entryCampus
+                logged_status: 'inside_campus',
+                sticker_status: 'registered',
+                campus_gate: gateVal,
+                reason: reason || null
             })
             .select('vehicle_log_id')
             .single();

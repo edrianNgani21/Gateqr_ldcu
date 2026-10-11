@@ -12,7 +12,7 @@
     $effect(() => {
         const channel = supabaseClient
             .channel('osa-deans-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'user' }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
                 invalidateAll();
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'department' }, () => {
@@ -44,7 +44,7 @@
     function getDepartmentName(departmentId: number | null): string {
         if (!departmentId) return '';
         const dept = data.departments.find(d => d.department_id === departmentId);
-        return dept ? dept.department : '';
+        return dept ? (dept.department_name || dept.department || '') : '';
     }
 
     async function handleSave() {

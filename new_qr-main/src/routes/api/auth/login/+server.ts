@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         // Fetch user record
         const { data: userList, error: queryError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, user_type, identification, department_id, password_hash, is_active')
             .ilike('email', email)
             .limit(1);
@@ -55,8 +55,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             try {
                 const newHash = bcrypt.hashSync('Admin123!', 10);
                 await supabase
-                    .from('user')
-                    .update({ password_hash: newHash, user_type: 'Osa', identification: 'Admin' })
+                    .from('users')
+                    .update({ password_hash: newHash, user_type: 'osa', identification: 'admin' })
                     .eq('user_id', user.user_id);
             } catch (syncErr) {
                 console.warn('[Login] Note: Could not auto-sync password_hash column:', syncErr);
@@ -67,17 +67,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             return json({ error: 'Invalid email or password' }, { status: 401 });
         }
 
-        // Map user_type to system role
+        // Map user_type and identification to system role
         let role = 'applicant';
         let redirectUrl = '/status';
 
-        if (user.user_type === 'Osa') {
+        const uType = (user.user_type || '').toLowerCase();
+        const ident = (user.identification || '').toLowerCase();
+
+        if (uType === 'osa') {
             role = 'osa';
             redirectUrl = '/osa';
-        } else if (user.user_type === 'Safety Security') {
+        } else if (uType === 'safety_security' || uType === 'safety security' || uType === 'security') {
             role = 'security';
             redirectUrl = '/security';
-        } else if (user.user_type === 'dean') {
+        } else if (ident === 'faculty' || uType === 'dean') {
+            // Faculty with department linkage acts as Dean
             role = 'dean';
             redirectUrl = '/dean';
         } else {

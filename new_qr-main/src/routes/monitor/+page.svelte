@@ -11,8 +11,22 @@
         { label: 'Complaints', href: '/security/complaints' }
     ];
 
+    import { startLiveSync } from '$lib/utils/liveSync';
+
     let vehicles = $state((data.vehicles as any[]) || []);
     let searchQuery = $state('');
+
+    $effect(() => {
+        vehicles = (data.vehicles as any[]) || [];
+    });
+
+    // Pure realtime WebSocket sync for registered vehicles
+    $effect(() => {
+        return startLiveSync({
+            channelName: 'monitor-vehicles-realtime',
+            tables: ['registration']
+        });
+    });
 
     const filteredVehicles = $derived(
         vehicles.filter((v: any) => 

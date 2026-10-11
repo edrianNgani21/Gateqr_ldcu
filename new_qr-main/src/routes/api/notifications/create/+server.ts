@@ -18,9 +18,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Insert notification into database
         const { error } = await supabase
-            .from('notifications')
+            .from('notification')
             .insert({
                 user_id: notificationData.user_id,
+                activity: notificationData.activity || notificationData.message,
                 notification_type: notificationData.notification_type,
                 message: notificationData.message,
                 actor_id: notificationData.actor_id || null,

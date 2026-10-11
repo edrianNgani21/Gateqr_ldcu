@@ -10,7 +10,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     try {
         const { data: user, error } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, user_type, identification, created_at, is_active, security_pin_hash')
             .eq('user_id', locals.user.user_id)
             .single();
@@ -44,7 +44,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Fetch current user record
         const { data: user, error: fetchError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, email, security_pin_hash')
             .eq('user_id', locals.user.user_id)
             .single();
@@ -70,7 +70,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const pinHash = bcrypt.hashSync(pin, 10);
 
             const { error: updateError } = await supabase
-                .from('user')
+                .from('users')
                 .update({ security_pin_hash: pinHash })
                 .eq('user_id', user.user_id);
 
@@ -104,7 +104,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const newPasswordHash = bcrypt.hashSync(new_password.trim(), 10);
 
             const { error: updateError } = await supabase
-                .from('user')
+                .from('users')
                 .update({ password_hash: newPasswordHash })
                 .eq('user_id', user.user_id);
 

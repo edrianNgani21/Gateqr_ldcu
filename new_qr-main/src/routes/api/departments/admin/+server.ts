@@ -16,7 +16,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Check if the user exists
         const { data: userData, error: userError } = await supabase
-            .from('user')
+            .from('users')
             .select('user_id, user_type')
             .eq('email', email)
             .single();
@@ -25,10 +25,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User not found' }, { status: 404 });
         }
 
-        // Update the user to OSA role
+        // Update the user to OSA role and link department
         const { error: updateError } = await supabase
-            .from('user')
-            .update({ user_type: 'Osa' })
+            .from('users')
+            .update({ user_type: 'osa', department_id })
             .eq('user_id', userData.user_id);
 
         if (updateError) throw updateError;

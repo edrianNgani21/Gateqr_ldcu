@@ -47,8 +47,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 if (action === 'accept') {
                     // Bulk accept with schedule
                     const updateData: any = {
-                        status: 'distributed',
-                        dist_sched: schedule || null,
+                        status: 'osa_validated',
+                        schedule: schedule || null,
                         osa_val_at: new Date().toISOString()
                     };
 
@@ -73,10 +73,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     results.success++;
 
                     if (reg?.user_id) {
-                        await supabase.from('notifications').insert({
+                        const notifMsg = `Your vehicle registration application has been accepted by OSA!${schedule ? ' Scheduled visit: ' + new Date(schedule).toLocaleString() : ''}`;
+                        await supabase.from('notification').insert({
                             user_id: reg.user_id,
+                            activity: notifMsg,
                             notification_type: 'application_approved',
-                            message: `Your vehicle registration application has been accepted by OSA!${schedule ? ' Scheduled visit: ' + new Date(schedule).toLocaleString() : ''}`,
+                            message: notifMsg,
                             actor_id: locals.user.user_id,
                             action_type: 'approve_application',
                             target_entity_type: 'registration',
@@ -90,7 +92,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     // Bulk reject with reason
                     const updateData: any = {
                         status: 'rejected',
-                        invalid_reason: reason || 'Bulk rejection',
+                        rejection_reason: reason || 'Bulk rejection',
                         rejected_at: new Date().toISOString()
                     };
 
@@ -103,10 +105,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     results.success++;
 
                     if (reg?.user_id) {
-                        await supabase.from('notifications').insert({
+                        const notifMsg = `Your vehicle registration application was rejected by OSA. Reason: ${reason || 'Bulk rejection'}`;
+                        await supabase.from('notification').insert({
                             user_id: reg.user_id,
+                            activity: notifMsg,
                             notification_type: 'application_rejected',
-                            message: `Your vehicle registration application was rejected by OSA. Reason: ${reason || 'Bulk rejection'}`,
+                            message: notifMsg,
                             actor_id: locals.user.user_id,
                             action_type: 'reject_application',
                             target_entity_type: 'registration',

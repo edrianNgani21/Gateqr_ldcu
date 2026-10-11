@@ -15,8 +15,9 @@ async function createNotification(
     metadata?: any
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
+            activity: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -44,15 +45,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         let departmentIdForAuth = locals.user.department_id;
         
         if (!departmentIdForAuth) {
-            // Fallback: get department_id from department table by email
-            const { data: deptByEmail } = await supabase
-                .from('department')
+            // Fallback: get department_id from users table
+            const { data: userRow } = await supabase
+                .from('users')
                 .select('department_id')
                 .eq('email', locals.user.email)
                 .maybeSingle();
             
-            if (deptByEmail) {
-                departmentIdForAuth = deptByEmail.department_id;
+            if (userRow?.department_id) {
+                departmentIdForAuth = userRow.department_id;
             }
         }
 
@@ -76,10 +77,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         const reg = rows;
 
-        if (action === 'accept' && reg.status === 'dept_val') {
+        if (action === 'accept' && (reg.status === 'dept_val' || reg.status === 'pending')) {
             const { error: updateError } = await supabase
                 .from('registration')
-                .update({ status: 'osa_val', dept_val_at: new Date().toISOString() })
+                .update({ status: 'dept_validated', dept_val_at: new Date().toISOString() })
                 .eq('registration_id', registration_id);
 
             if (updateError) throw updateError;
@@ -106,7 +107,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         } 
-        else if (action === 'reject' && reg.status === 'dept_val') {
+        else if (action === 'reject' && (reg.status === 'dept_val' || reg.status === 'pending' || reg.status === 'dept_validated')) {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
@@ -114,7 +115,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .update({ 
                     status: 'rejected', 
                     rejected_at: new Date().toISOString(), 
-                    invalid_reason: reason 
+                    rejection_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -143,16 +144,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'revoke' && reg.status === 'osa_val') {
-            // Dean can revoke if OSA hasn't validated yet
+        else if (action === 'revoke' && (reg.status === 'osa_val' || reg.status === 'dept_validated' || reg.status === 'osa_validated')) {
+            // Dean can revoke if OSA hasn't completed yet
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
                     status: 'revoked', 
-                    revoked_at: new Date().toISOString(), 
-                    invalid_reason: reason 
+                    revoke_at: new Date().toISOString(), 
+                    revoke_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -181,14 +182,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'retract' && (reg.status === 'osa_val' || reg.status === 'rejected')) {
+        else if (action === 'retract' && (reg.status === 'osa_val' || reg.status === 'rejected' || reg.status === 'dept_validated')) {
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
-                    status: 'dept_val', 
+                    status: 'pending', 
                     dept_val_at: null, 
                     rejected_at: null, 
-                    invalid_reason: null 
+                    rejection_reason: null 
                 })
                 .eq('registration_id', registration_id);
 

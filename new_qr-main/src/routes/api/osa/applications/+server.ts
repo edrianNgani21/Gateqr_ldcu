@@ -20,10 +20,11 @@ async function createNotification(
     metadata?: any
 ) {
     try {
-        await supabase.from('notifications').insert({
+        await supabase.from('notification').insert({
             user_id: userId,
             notification_type: notificationType,
             message: message,
+            activity: message,
             actor_id: actorId || null,
             action_type: actionType || null,
             target_entity_type: targetEntityType || null,
@@ -57,8 +58,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             .select(`
                 *,
                 department:department_id(
-                    department,
-                    email
+                    department_name
                 ),
                 user:user_id(
                     email
@@ -68,8 +68,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 
         const applications = rows?.map(row => ({
             ...row,
-            department_name: row.department?.department,
-            department_email: row.department?.email,
+            department_name: row.department?.department_name || (row.department as any)?.department || 'Unknown Department',
+            department_email: '-',
             user_email: row.user?.email
         })) || [];
 
@@ -106,7 +106,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         const reg = rows;
 
-        if (action === 'accept' && (reg.status === 'osa_val' || reg.status === 'dept_val')) {
+        if (action === 'accept' && ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((reg.status || '').toLowerCase())) {
             if (!schedule) {
                 return json({ error: 'Schedule is required to accept application' }, { status: 400 });
             }
@@ -123,11 +123,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({
-                    status: 'distributed',
+                    status: 'osa_validated',
                     osa_val_at: new Date().toISOString(),
                     qr_code: qrUrl,
                     qr_unique_code: uniqueCode,
-                    dist_sched: new Date(schedule).toISOString(),
+                    schedule: new Date(schedule).toISOString(),
                     expires_at: expiresAt.toISOString()
                 })
                 .eq('registration_id', registration_id);
@@ -169,7 +169,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         } 
-        else if (action === 'reject' && reg.status === 'osa_val') {
+        else if (action === 'reject' && ['osa_val', 'osa_validated', 'dept_validated', 'dept_val', 'pending'].includes((reg.status || '').toLowerCase())) {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
@@ -177,7 +177,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .update({ 
                     status: 'rejected', 
                     rejected_at: new Date().toISOString(), 
-                    invalid_reason: reason 
+                    rejection_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -218,10 +218,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'check_hardcopy' && reg.status === 'distributed') {
+        else if (action === 'check_hardcopy' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
             const { error: updateError } = await supabase
                 .from('registration')
-                .update({ osa_dist_at: new Date().toISOString() })
+                .update({ 
+                    status: 'distributed',
+                    osa_dist_at: new Date().toISOString()
+                })
                 .eq('registration_id', registration_id);
 
             if (updateError) throw updateError;
@@ -260,14 +263,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'release_sticker' && reg.status === 'distributed') {
+        else if (action === 'release_sticker' && ['distributed', 'osa_validated', 'security_checked'].includes((reg.status || '').toLowerCase())) {
             // Check if this application was undergoing a Request to Change Registration Details
             const { data: changeReq } = await supabase
-                .from('change_vehicle_requests')
+                .from('change_vehicle_request')
                 .select('*')
                 .eq('registration_id', registration_id)
-                .in('status', ['approved', 'Approved', 'in_progress', 'scheduled'])
-                .order('requested_at', { ascending: false })
+                .in('status', ['approved', 'pending'])
+                .order('request_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
@@ -275,17 +278,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const nowIso = new Date().toISOString();
 
             const updateData: any = {
+                status: isChangeRequest ? 'approved' : 'completed',
                 sticker_released_at: nowIso,
-                status: 'completed'
+                ...(isChangeRequest ? { sticker_installed_at: nowIso } : {})
             };
-
-            // If it underwent Request to Change, it directly goes to Registered
-            if (isChangeRequest) {
-                updateData.sticker_installed_at = nowIso;
-                if (changeReq.new_vehicle_id) {
-                    updateData.vehicle_information_id = changeReq.new_vehicle_id;
-                }
-            }
 
             const { error: updateError } = await supabase
                 .from('registration')
@@ -294,26 +290,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (updateError) throw updateError;
 
-            // If change request, update the vehicle info and mark change request as completed
+            // If change request, update the vehicle info and mark change request as completed/approved
             if (isChangeRequest) {
-                if (!changeReq.new_vehicle_id && changeReq.new_vehicle_plate) {
-                    const currentVehId = reg.vehicle_information_id;
-                    if (currentVehId) {
-                        await supabase
-                            .from('vehicle_information')
-                            .update({
-                                plate_number: changeReq.new_vehicle_plate,
-                                brand: changeReq.new_vehicle_make || undefined,
-                                type: changeReq.new_vehicle_type || undefined
-                            })
-                            .eq('vehicle_information_id', currentVehId);
-                    }
+                const proposed = changeReq.proposed_changes || {};
+                const currentVehId = reg.vehicle_information_id;
+                if (currentVehId && (proposed.vehicle_plate || proposed.plate_number)) {
+                    await supabase
+                        .from('vehicle_information')
+                        .update({
+                            plate_number: proposed.vehicle_plate || proposed.plate_number,
+                            brand: proposed.vehicle_make || proposed.brand || undefined,
+                            type: proposed.vehicle_type || proposed.type || undefined
+                        })
+                        .eq('vehicle_information_id', currentVehId);
                 }
 
                 await supabase
-                    .from('change_vehicle_requests')
-                    .update({ status: 'completed' })
-                    .eq('request_id', changeReq.request_id);
+                    .from('change_vehicle_request')
+                    .update({ status: 'approved', process_at: nowIso })
+                    .eq('change_vehicle_request_id', changeReq.change_vehicle_request_id);
 
                 await sendEmail(
                     reg.user.email,
@@ -369,7 +364,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }
             }
         }
-        else if (action === 'reschedule' && reg.status === 'distributed') {
+        else if (action === 'reschedule' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
             if (!schedule) {
                 return json({ error: 'A new schedule date is required to reschedule' }, { status: 400 });
             }
@@ -377,8 +372,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
-                    dist_sched: new Date(schedule).toISOString(),
-                    invalid_reason: 'RESCHEDULED'
+                    schedule: new Date(schedule).toISOString()
                 })
                 .eq('registration_id', registration_id);
 
@@ -418,13 +412,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'proceed_overdue' && reg.status === 'distributed') {
+        else if (action === 'proceed_overdue' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
             const newSchedule = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
-                    dist_sched: newSchedule,
-                    invalid_reason: 'OVERDUE'
+                    schedule: newSchedule
                 })
                 .eq('registration_id', registration_id);
 
@@ -456,15 +449,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'revoke' && (reg.status === 'distributed' || reg.status === 'completed')) {
+        else if (action === 'revoke' && ['distributed', 'completed', 'approved', 'security_checked', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
                     status: 'revoked', 
-                    revoked_at: new Date().toISOString(), 
-                    invalid_reason: reason 
+                    revoke_at: new Date().toISOString(), 
+                    revoke_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -509,14 +502,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
-                    status: 'osa_val', 
-                    osa_val_at: null, 
-                    osa_dist_at: null, 
-                    revoked_at: null, 
+                    status: 'osa_validated', 
+                    security_check_at: null, 
+                    revoke_at: null, 
                     rejected_at: null, 
-                    invalid_reason: null, 
-                    qr_code: null,
-                    qr_unique_code: null
+                    rejection_reason: null, 
+                    revoke_reason: null
                 })
                 .eq('registration_id', registration_id);
 
@@ -561,13 +552,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 return json({ error: 'Cannot unrevoke an expired registration' }, { status: 400 });
             }
             
-            const restoredStatus = reg.sticker_released_at ? 'completed' : 'distributed';
+            const restoredStatus = reg.security_check_at ? 'approved' : 'osa_validated';
             const { error: updateError } = await supabase
                 .from('registration')
                 .update({ 
                     status: restoredStatus, 
-                    revoked_at: null, 
-                    invalid_reason: null 
+                    revoke_at: null, 
+                    revoke_reason: null 
                 })
                 .eq('registration_id', registration_id);
 
@@ -624,6 +615,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }
             }
             
+            // Pre-emptively clean up related records to prevent foreign key errors
+            await supabase.from('change_vehicle_request').delete().eq('registration_id', registration_id);
+            await supabase.from('vehicle_log').delete().eq('registration_id', registration_id);
+            await supabase.from('complaint').delete().eq('registration_id', registration_id);
+
             const { error: deleteError } = await supabase
                 .from('registration')
                 .delete()
