@@ -70,4 +70,16 @@
     color: #fff !important;
     box-shadow: 0 2px 8px rgba(107,26,42,0.3);
   }
+
+  @media (max-width: 480px) {
+    .tab-bar {
+      gap: 0.25rem;
+      padding: 0.25rem;
+    }
+    .tab-btn {
+      padding: 0.4rem 0.5rem;
+      font-size: 0.72rem;
+      min-width: 60px;
+    }
+  }
 </style>

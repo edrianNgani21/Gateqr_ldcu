@@ -271,6 +271,7 @@
   .action-bar {
     display: flex;
     gap: 0.625rem;
+    flex-wrap: wrap;
   }
 
   .action-btn {
@@ -371,4 +372,15 @@
     border: 1.5px solid #fca5a5;
   }
   .btn-delete:not(:disabled):hover { background: #fee2e2; }
+
+  @media (max-width: 480px) {
+    .action-bar {
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .action-btn {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+    }
+  }
 </style>

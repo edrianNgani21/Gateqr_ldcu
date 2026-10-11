@@ -2051,4 +2051,40 @@
     cursor: not-allowed;
     transform: none;
   }
+
+  /* ── Responsive Enhancements ── */
+  @media (max-width: 768px) {
+    .calendar-list {
+      flex-direction: column;
+    }
+    .calendar-item {
+      width: 100%;
+    }
+    .reason-modal-card {
+      padding: 1.25rem 1rem;
+      border-radius: 14px;
+      width: 95%;
+      max-width: 95vw;
+    }
+    .reason-modal-actions {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .btn-confirm-reason, .btn-cancel {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .preset-chips-wrap {
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    .preset-chip {
+      font-size: 0.72rem;
+      padding: 0.35rem 0.6rem;
+    }
+  }
 </style>

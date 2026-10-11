@@ -32,6 +32,11 @@
 
   let manageAppsOpen = $state(false);
   let accountsOpen = $state(false);
+  let mobileNavOpen = $state(false);
+
+  function toggleMobileNav() {
+    mobileNavOpen = !mobileNavOpen;
+  }
 
   $effect(() => {
     if (isManageRoute) {
@@ -276,19 +281,39 @@
 <!-- Page shell -->
 <main class="app-shell theme-osa">
   {#if showSidebar}
-    <aside class="sidebar">
+    <aside class="sidebar" class:mobile-open={mobileNavOpen}>
       <!-- Brand Section -->
       <div class="sidebar-brand">
-        <div class="brand-logo">
-          <img src="/liceo-logo.png" alt="LICEO DE CAGAYAN UNIVERSITY" />
-        </div>
-        <div class="brand-info">
-          <div class="brand-top-row">
-            <span class="brand-name">GateQR</span>
-            <span class="brand-tag">ADMIN PORTAL</span>
+        <div class="brand-left-group">
+          <div class="brand-logo">
+            <img src="/liceo-logo.png" alt="LICEO DE CAGAYAN UNIVERSITY" />
           </div>
-          <span class="brand-sub">Office of Student Affairs</span>
+          <div class="brand-info">
+            <div class="brand-top-row">
+              <span class="brand-name">GateQR</span>
+              <span class="brand-tag">ADMIN PORTAL</span>
+            </div>
+            <span class="brand-sub">Office of Student Affairs</span>
+          </div>
         </div>
+        <button
+          type="button"
+          class="mobile-menu-toggle-btn"
+          onclick={toggleMobileNav}
+          aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+        >
+          <span class="mobile-toggle-text">{mobileNavOpen ? "Close" : "Menu"}</span>
+          <svg class="mobile-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            {#if mobileNavOpen}
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            {:else}
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            {/if}
+          </svg>
+        </button>
       </div>
 
       <!-- Main Navigation Menu -->
@@ -588,9 +613,36 @@
   .sidebar-brand {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.85rem;
     padding-bottom: 1.5rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .brand-left-group {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    min-width: 0;
+  }
+
+  .mobile-menu-toggle-btn {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #E9C25E;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mobile-menu-toggle-btn:hover {
+    background: rgba(233, 194, 94, 0.2);
   }
 
   .brand-logo {
@@ -1251,18 +1303,66 @@
       flex-direction: column;
       padding: 1rem;
       gap: 1.25rem;
+      overflow-x: hidden;
+      width: 100%;
+    }
+
+    .shell-content {
+      width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
     }
 
     .sidebar {
       width: 100%;
       position: static;
       min-height: auto;
+      padding: 1rem 1.25rem;
+      border-radius: 16px;
+    }
+
+    .sidebar-brand {
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .sidebar.mobile-open .sidebar-brand {
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .mobile-menu-toggle-btn {
+      display: inline-flex;
+    }
+
+    .sidebar-menu-wrapper {
+      display: none;
+      margin-top: 1rem;
+    }
+
+    .sidebar-bottom-action {
+      display: none;
+    }
+
+    .sidebar.mobile-open .sidebar-menu-wrapper {
+      display: flex;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .sidebar.mobile-open .sidebar-bottom-action {
+      display: flex;
+      animation: fadeIn 0.2s ease;
     }
 
     .notification-flyout-card {
       width: min(360px, calc(100vw - 2rem));
       right: 0;
     }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   @media (max-width: 768px) {
@@ -1286,6 +1386,7 @@
       width: 100%;
       justify-content: flex-end;
       gap: 0.5rem;
+      flex-wrap: wrap;
     }
 
     .profile-info-block {
@@ -1293,8 +1394,8 @@
     }
 
     .sidebar {
-      padding: 1.25rem 1rem;
-      border-radius: 16px;
+      padding: 0.9rem 1rem;
+      border-radius: 14px;
     }
   }
 
@@ -1326,6 +1427,11 @@
     .topbar-action-pill {
       padding: 0.4rem 0.75rem;
       font-size: 0.75rem;
+    }
+
+    .notification-flyout-card {
+      width: calc(100vw - 1rem);
+      right: -0.5rem;
     }
   }
 </style>

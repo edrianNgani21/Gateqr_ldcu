@@ -2489,6 +2489,18 @@
   }
 
   @media (max-width: 768px) {
+    .header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+    }
+    .header-left {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .search-box {
+      width: 100%;
+    }
     .install-action-row {
       flex-direction: column;
       align-items: stretch;
@@ -2499,6 +2511,10 @@
     }
     .paginator {
       flex-wrap: wrap;
+    }
+    .card-photo-img {
+      max-width: 95vw;
+      max-height: 80vh;
     }
   }
 

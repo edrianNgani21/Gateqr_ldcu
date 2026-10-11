@@ -517,4 +517,70 @@
     color: var(--text-secondary);
     font-style: italic;
   }
+
+  /* ── Responsive Layout for Mobile, Tablet, Laptop, Desktop ── */
+  @media (max-width: 768px) {
+    .controls-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+      padding: 0.85rem;
+    }
+    .search-wrap {
+      width: 100%;
+      min-width: 0;
+    }
+    .filters {
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .filter-select {
+      width: 100%;
+    }
+    .card-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .header-right {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .card-actions {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+      padding: 1rem;
+    }
+    .action-group {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+      width: 100%;
+    }
+    .schedule-input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .btn-action {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .complaint-card {
+      border-radius: 10px;
+    }
+    .card-body {
+      padding: 1rem;
+    }
+    .schedule-banner {
+      margin: 0 1rem 0.75rem;
+      padding: 0.75rem;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+  }
 </style>

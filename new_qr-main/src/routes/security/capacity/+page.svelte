@@ -547,10 +547,13 @@
     border-radius: 6px;
     padding: 0.5rem;
     font-size: 0.75rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .history-table {
     width: 100%;
+    min-width: 380px;
     border-collapse: collapse;
     text-align: left;
   }
@@ -577,27 +580,46 @@
     color: #a0aec0;
   }
 
+  @media (max-width: 1024px) {
+    .capacity-wrapper {
+      padding: 1.5rem 1rem;
+    }
+    .campus-grid {
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+  }
+
   @media (max-width: 640px) {
     .capacity-wrapper {
-      padding: 1rem 0.75rem;
+      padding: 0.75rem 0.4rem;
     }
     .campus-grid {
       grid-template-columns: 1fr;
       gap: 1rem;
     }
     .campus-card {
-      padding: 1.25rem;
+      padding: 1.25rem 0.9rem;
       border-radius: 16px;
     }
     .stats {
-      padding: 0.85rem;
-      margin-bottom: 1.25rem;
+      padding: 0.75rem 0.4rem;
+      margin-bottom: 1rem;
     }
     .value {
-      font-size: 1.25rem;
+      font-size: 1.2rem;
     }
     .header h1 {
       font-size: 1.25rem;
+    }
+    .edit-actions {
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .save-btn, .cancel-btn {
+      width: 100%;
+      text-align: center;
+      justify-content: center;
     }
   }
 </style>

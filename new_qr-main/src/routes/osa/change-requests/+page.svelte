@@ -1423,4 +1423,82 @@
     border-radius: 6px;
     object-fit: contain;
   }
+
+  /* ── Responsive Enhancements ── */
+  @media (max-width: 768px) {
+    .controls-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+      padding: 0.85rem;
+    }
+
+    .search-box {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .filter-tabs {
+      width: 100%;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .filter-tab {
+      flex: 1;
+      text-align: center;
+      padding: 0.5rem 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .rc-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .rc-status-box {
+      align-items: flex-start;
+      width: 100%;
+    }
+
+    .action-buttons {
+      width: 100%;
+      flex-direction: column;
+    }
+
+    .btn-reject, .btn-accept {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .modal-card, .doc-preview-card {
+      width: 95vw;
+      max-width: 95vw;
+      border-radius: 12px;
+    }
+
+    .mc-header, .mc-body, .mc-footer {
+      padding: 1rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .request-card {
+      padding: 1rem 0.75rem;
+    }
+
+    .stats-summary-grid {
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .stat-card {
+      padding: 0.75rem;
+    }
+
+    .sc-count {
+      font-size: 1.25rem;
+    }
+  }
 </style>

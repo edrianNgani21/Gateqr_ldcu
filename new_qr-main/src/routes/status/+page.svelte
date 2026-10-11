@@ -895,7 +895,7 @@
     background: #ffffff;
     border-radius: 14px;
     width: 100%;
-    max-width: 600px;
+    max-width: min(600px, 95vw);
     max-height: 90vh;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
     overflow: hidden;
@@ -1077,8 +1077,17 @@
     .wb-icon-shield {
       display: none;
     }
+    .modal-card {
+      width: 95vw;
+      max-width: 95vw;
+      border-radius: 12px;
+    }
+    .mc-header, .mc-body {
+      padding: 1rem;
+    }
     .mc-footer {
       flex-direction: column;
+      padding: 0.85rem 1rem;
     }
     .btn-cancel, .btn-submit-change {
       width: 100%;

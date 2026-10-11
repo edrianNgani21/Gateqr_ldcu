@@ -1502,4 +1502,32 @@
   .btn-modal-close:hover {
     background: #0f172a;
   }
+
+  @media (max-width: 600px) {
+    .guest-modal-card {
+      width: 95vw;
+      max-width: 95vw;
+      border-radius: 12px;
+    }
+    .guest-grid {
+      grid-template-columns: 1fr;
+    }
+    .detail-box.full-col {
+      grid-column: span 1;
+    }
+    .modal-header {
+      padding: 1rem;
+    }
+    .modal-body {
+      padding: 1rem;
+      gap: 1rem;
+    }
+    .modal-footer {
+      padding: 0.75rem 1rem;
+    }
+    .btn-modal-close {
+      width: 100%;
+      text-align: center;
+    }
+  }
 </style>

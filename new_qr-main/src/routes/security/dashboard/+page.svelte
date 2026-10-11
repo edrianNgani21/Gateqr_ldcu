@@ -1531,4 +1531,146 @@
     background: rgba(255, 255, 255, 0.18);
     color: #ffffff;
   }
+
+  /* ── Enhanced Responsiveness for Mobile, Tablet, Laptop, Desktop ── */
+  @media (max-width: 1024px) {
+    .dashboard-wrapper {
+      padding: 1rem;
+      gap: 1.25rem;
+    }
+    .video-display-area {
+      min-height: 320px;
+      max-height: 440px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-wrapper {
+      padding: 0.75rem 0.5rem;
+      gap: 1rem;
+    }
+    .welcome-banner {
+      padding: 1.25rem 1.25rem;
+      border-radius: 14px;
+    }
+    .wb-title {
+      font-size: 1.25rem;
+    }
+    .wb-sub {
+      font-size: 0.825rem;
+    }
+    .wb-icon-shield {
+      display: none;
+    }
+    .camera-feed-card {
+      padding: 1.25rem 1rem;
+      border-radius: 16px;
+    }
+    .camera-card-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+    }
+    .cam-header-controls {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .gate-toggle-group {
+      width: 100%;
+      display: flex;
+    }
+    .gate-btn {
+      flex: 1;
+      text-align: center;
+      padding: 6px 8px;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    .video-display-area {
+      min-height: 240px;
+      max-height: 360px;
+    }
+    .cctv-osd-top {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+    }
+    .cctv-osd-bottom {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 8px 12px;
+    }
+    .osd-actions {
+      justify-content: flex-end;
+    }
+    .settings-inputs-grid {
+      grid-template-columns: 1fr;
+    }
+    .chart-content {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 0.5rem;
+    }
+    .chart-bars {
+      min-width: 480px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .dashboard-wrapper {
+      padding: 0.5rem 0.25rem;
+    }
+    .camera-feed-card {
+      padding: 1rem 0.65rem;
+      border-radius: 14px;
+    }
+    .cam-title {
+      font-size: 1.05rem;
+    }
+    .cam-subtitle {
+      font-size: 0.75rem;
+    }
+    .campus-tabs-bar {
+      gap: 0.35rem;
+      padding-bottom: 0.35rem;
+      -webkit-overflow-scrolling: touch;
+    }
+    .campus-tab-btn {
+      padding: 6px 10px;
+      font-size: 0.75rem;
+    }
+    .tab-badge {
+      display: none;
+    }
+    .video-display-area {
+      min-height: 190px;
+      max-height: 280px;
+    }
+    .cam-offline-standby {
+      padding: 1.5rem 0.75rem;
+    }
+    .cam-offline-standby h3 {
+      font-size: 0.95rem;
+    }
+    .cam-offline-standby p, .cam-offline-standby code {
+      font-size: 0.75rem;
+      word-break: break-all;
+    }
+    .offline-btn-row {
+      flex-direction: column;
+      width: 100%;
+    }
+    .btn-retry-feed, .btn-config-ip {
+      width: 100%;
+      justify-content: center;
+    }
+    .flagged-table th, .flagged-table td {
+      padding: 0.65rem 0.65rem;
+      font-size: 0.78rem;
+    }
+  }
 </style>

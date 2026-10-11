@@ -650,26 +650,97 @@
     }
 
     @media (max-width: 1024px) {
+        .dashboard-container {
+            padding: 1rem;
+        }
+
         .dashboard-grid {
             grid-template-columns: 1fr;
         }
 
         .stats-grid {
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         }
     }
 
     @media (max-width: 768px) {
-        .dashboard-header {
-            flex-direction: column;
+        .dashboard-container {
+            padding: 0.75rem 0.5rem;
+            gap: 1rem;
         }
 
-        .header-content h1 {
-            font-size: 2rem;
+        .welcome-banner {
+            padding: 1.25rem 1.25rem;
+            border-radius: 14px;
+        }
+
+        .wb-title {
+            font-size: 1.25rem;
+        }
+
+        .wb-sub {
+            font-size: 0.825rem;
+        }
+
+        .wb-icon-shield {
+            display: none;
+        }
+
+        .form-control-bar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.75rem;
+            padding: 1rem;
+        }
+
+        .form-control-info {
+            width: 100%;
+        }
+
+        .form-toggle-btn {
+            width: 100%;
+            text-align: center;
+            justify-content: center;
         }
 
         .stats-grid {
             grid-template-columns: 1fr;
+            gap: 1rem;
         }
-}
+
+        .stat-card {
+            padding: 1.25rem;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .dashboard-container {
+            padding: 0.5rem 0.25rem;
+        }
+
+        .stat-icon-circle {
+            width: 46px;
+            height: 46px;
+        }
+
+        .stat-value {
+            font-size: 1.35rem;
+        }
+
+        .breakdown-section, .recent-section {
+            padding: 1rem 0.85rem;
+            border-radius: 12px;
+        }
+
+        .recent-item {
+            padding: 0.75rem 0;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.4rem;
+        }
+
+        .recent-status {
+            align-self: flex-start;
+        }
+    }
 </style>

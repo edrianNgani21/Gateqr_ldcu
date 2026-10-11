@@ -1066,4 +1066,48 @@
   @keyframes spin {
     to { transform: rotate(360deg); }
   }
+
+  /* ── Responsive Enhancements ── */
+  @media (max-width: 768px) {
+    .filters {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .filter-select {
+      width: 100%;
+    }
+    .reason-modal-card {
+      padding: 1.25rem 1rem;
+      border-radius: 14px;
+      width: 95%;
+      max-width: 95vw;
+    }
+    .reason-modal-actions {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .btn-cancel, .btn-confirm-reason {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .agreement-notice {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.75rem;
+    }
+    .preset-chips-wrap {
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    .preset-chip {
+      font-size: 0.72rem;
+      padding: 0.35rem 0.6rem;
+    }
+  }
 </style>
