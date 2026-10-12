@@ -263,7 +263,7 @@
     { label: 'Rejected Applications', tab: 'rejected', href: '/osa?tab=rejected' },
     { label: 'Revoked Application', tab: 'revoked', href: '/osa?tab=revoked' },
     { label: 'Overdue Application Schedules', tab: 'overdue', href: '/osa?tab=overdue' },
-    { label: 'Application Request', path: '/osa/change-requests', href: '/osa/change-requests' }
+    { label: 'Application request to change details', path: '/osa/change-requests', href: '/osa/change-requests' }
   ];
 
   function isAppTabActive(item: typeof manageAppSubLinks[number]): boolean {
@@ -588,7 +588,12 @@
     gap: 1.75rem;
     background: #f8fafc;
     align-items: flex-start;
+    max-width: 1920px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
   }
+
 
   /* ─── Modern Dark Sidebar (Theme-Preserved) ─── */
   .sidebar {
@@ -1298,6 +1303,18 @@
     border-color: #fbd38d;
   }
 
+  @media (max-width: 1280px) {
+    .app-shell {
+      padding: 1.25rem 1.5rem;
+      gap: 1.25rem;
+    }
+
+    .sidebar {
+      width: 260px;
+      padding: 1.25rem 1rem;
+    }
+  }
+
   @media (max-width: 1024px) {
     .app-shell {
       flex-direction: column;
@@ -1406,6 +1423,7 @@
 
     .meta-system-badge {
       padding: 0.35rem 0.65rem;
+      max-width: 100%;
     }
 
     .meta-sub {
@@ -1430,8 +1448,22 @@
     }
 
     .notification-flyout-card {
-      width: calc(100vw - 1rem);
-      right: -0.5rem;
+      width: min(340px, calc(100vw - 1rem));
+      right: 0;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .app-shell {
+      padding: 0.35rem 0.25rem;
+    }
+
+    .brand-name {
+      font-size: 1rem;
+    }
+
+    .meta-title {
+      font-size: 0.8rem;
     }
   }
 </style>

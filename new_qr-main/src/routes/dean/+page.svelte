@@ -1069,6 +1069,28 @@
 
   /* ── Responsive Enhancements ── */
   @media (max-width: 768px) {
+    .welcome-banner {
+      padding: 1.25rem;
+      border-radius: 14px;
+    }
+    .wb-title {
+      font-size: 1.25rem;
+    }
+    .wb-sub {
+      font-size: 0.825rem;
+    }
+    .wb-icon-shield {
+      display: none;
+    }
+    .stats-grid {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+    .stat-card {
+      padding: 1rem 1.25rem;
+      gap: 1rem;
+    }
     .filters {
       width: 100%;
       flex-direction: column;
@@ -1095,6 +1117,13 @@
   }
 
   @media (max-width: 480px) {
+    .welcome-banner {
+      padding: 1rem;
+    }
+    .stats-grid {
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
     .agreement-notice {
       flex-direction: column;
       align-items: flex-start;

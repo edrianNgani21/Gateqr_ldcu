@@ -71,15 +71,31 @@
     box-shadow: 0 2px 8px rgba(107,26,42,0.3);
   }
 
-  @media (max-width: 480px) {
+  @media (max-width: 640px) {
     .tab-bar {
-      gap: 0.25rem;
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
       padding: 0.25rem;
+      gap: 0.25rem;
+    }
+    .tab-bar::-webkit-scrollbar {
+      display: none;
     }
     .tab-btn {
-      padding: 0.4rem 0.5rem;
-      font-size: 0.72rem;
-      min-width: 60px;
+      flex: 0 0 auto;
+      white-space: nowrap;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.75rem;
+      min-width: auto;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .tab-btn {
+      padding: 0.4rem 0.6rem;
+      font-size: 0.7rem;
     }
   }
 </style>

@@ -1181,17 +1181,18 @@
   .applications-list {
     flex: 1;
     min-width: 0;
-    max-width: calc(100% - 320px);
+    width: 100%;
     padding-bottom: 2rem;
   }
 
   .applications-list.with-schedule-panel {
-    max-width: calc(100% - 420px);
+    max-width: 100%;
   }
 
   @media (max-width: 1024px) {
     .content-layout {
       flex-direction: column;
+      gap: 1.25rem;
     }
     .applications-list {
       max-width: 100%;
@@ -2054,6 +2055,26 @@
 
   /* ── Responsive Enhancements ── */
   @media (max-width: 768px) {
+    .filters-section {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+      padding: 0.85rem;
+    }
+    .search-container {
+      width: 100%;
+      min-width: 0;
+    }
+    .filter-group {
+      width: 100%;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .filter-btn {
+      flex: 1 1 calc(50% - 0.5rem);
+      min-width: 130px;
+      justify-content: center;
+    }
     .calendar-list {
       flex-direction: column;
     }
@@ -2078,6 +2099,14 @@
   }
 
   @media (max-width: 480px) {
+    .filter-btn {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+    .overdue-banner {
+      font-size: 0.78rem;
+      padding: 0.75rem;
+    }
     .preset-chips-wrap {
       flex-wrap: wrap;
       gap: 0.35rem;

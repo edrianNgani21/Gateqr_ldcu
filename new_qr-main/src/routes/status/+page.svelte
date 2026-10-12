@@ -1077,6 +1077,20 @@
     .wb-icon-shield {
       display: none;
     }
+    .cr-action-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.85rem;
+      padding: 1rem;
+    }
+    .btn-change-vehicle {
+      width: 100%;
+      justify-content: center;
+    }
+    .sched-pill {
+      word-break: break-word;
+      max-width: 100%;
+    }
     .modal-card {
       width: 95vw;
       max-width: 95vw;
@@ -1092,6 +1106,31 @@
     .btn-cancel, .btn-submit-change {
       width: 100%;
       text-align: center;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .welcome-banner {
+      padding: 1rem;
+    }
+    .wb-title {
+      font-size: 1.15rem;
+    }
+    .wb-sub {
+      font-size: 0.78rem;
+    }
+    .progress-steps {
+      padding: 0.85rem 0.75rem;
+    }
+    .ps-info {
+      padding-top: 0.25rem;
+    }
+    .ps-label {
+      font-size: 0.8rem;
+    }
+    .ps-desc {
+      font-size: 0.78rem;
     }
   }
 </style>

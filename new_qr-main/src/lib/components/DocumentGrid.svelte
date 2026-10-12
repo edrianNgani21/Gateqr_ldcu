@@ -135,4 +135,23 @@
     color: var(--maroon-light);
     flex-shrink: 0;
   }
+
+  @media (max-width: 640px) {
+    .doc-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 0.45rem;
+    }
+    .doc-tile {
+      height: auto;
+      min-height: 64px;
+      padding: 0.5rem 0.35rem;
+      font-size: 0.68rem;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .doc-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
 </style>

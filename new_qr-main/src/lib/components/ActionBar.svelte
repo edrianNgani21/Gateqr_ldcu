@@ -373,6 +373,16 @@
   }
   .btn-delete:not(:disabled):hover { background: #fee2e2; }
 
+  @media (max-width: 640px) {
+    .action-bar {
+      gap: 0.5rem;
+    }
+    .action-btn {
+      flex: 1 1 calc(50% - 0.5rem);
+      min-width: 130px;
+    }
+  }
+
   @media (max-width: 480px) {
     .action-bar {
       flex-direction: column;

@@ -1689,20 +1689,31 @@
     border-radius: 999px;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .controls-row {
       flex-direction: column;
       align-items: stretch;
+      gap: 0.75rem;
     }
     .search-wrap {
       min-width: 0;
+      width: 100%;
     }
     .filters {
+      width: 100%;
       flex-wrap: wrap;
+      gap: 0.5rem;
     }
     .filter-select {
-      flex: 1;
-      min-width: 0;
+      flex: 1 1 calc(50% - 0.5rem);
+      min-width: 120px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .filter-select {
+      flex: 1 1 100%;
+      width: 100%;
     }
   }
 
@@ -2521,6 +2532,14 @@
   @media (max-width: 480px) {
     .empty-state-install {
       padding: 2.5rem 1rem;
+    }
+    .table-total-badge {
+      width: 100%;
+      justify-content: space-between;
+      margin-left: 0;
+    }
+    .paginator {
+      gap: 0.35rem;
     }
   }
 </style>
