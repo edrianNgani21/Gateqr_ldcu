@@ -128,8 +128,8 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
   <div class="capacity-wrapper">
     <div class="header">
-      <h1>Campus Vehicle Capacity Management</h1>
-      <p>Monitor and set the vehicle capacity limits for each campus.</p>
+      <h1>Campus Management</h1>
+      <p>Manage Event and Vehicle Capacity for campuses</p>
     </div>
 
     <div class="campus-grid">
@@ -244,16 +244,42 @@
     width: 100%;
   }
 
+  .header {
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1.75rem;
+    padding: 1.75rem 2.25rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
+    border: 1px solid rgba(233, 194, 94, 0.25);
+    box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    right: -40px;
+    top: -40px;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(233, 194, 94, 0.25), transparent 70%);
+    pointer-events: none;
+  }
+
   .header h1 {
-    font-size: 1.5rem;
+    font-size: 1.6rem;
     font-weight: 800;
-    color: #1a202c;
-    margin: 0 0 0.5rem 0;
+    color: #E9C25E;
+    margin: 0 0 0.35rem 0;
+    letter-spacing: -0.01em;
   }
 
   .header p {
-    color: #718096;
-    margin: 0 0 2rem 0;
+    color: #F5D5DE;
+    font-size: 0.92rem;
+    font-weight: 500;
+    margin: 0;
   }
 
   .campus-grid {
@@ -277,23 +303,24 @@
   .campus-card::before {
     content: '';
     position: absolute;
-    top: 0; left: 0; right: 0; height: 4px;
-    background: linear-gradient(90deg, #3182ce, #805ad5);
-    opacity: 0;
+    top: 0; left: 0; right: 0; height: 5px;
+    background: linear-gradient(90deg, #8B1A3C, #D4A62A);
+    opacity: 1;
     transition: opacity 0.3s;
   }
   .campus-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 14px 35px rgba(139, 26, 60, 0.15);
+    border-color: rgba(212, 166, 42, 0.5);
   }
   .campus-card:hover::before {
     opacity: 1;
   }
 
   .campus-card h2 {
-    margin: 0 0 1.75rem 0;
-    font-size: 1.35rem;
-    color: #1a202c;
+    margin: 0.25rem 0 1.5rem 0;
+    font-size: 1.3rem;
+    color: #6B1A2A;
     text-align: center;
     font-weight: 800;
     letter-spacing: -0.02em;
@@ -302,11 +329,11 @@
   .stats {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 1.75rem;
-    background: linear-gradient(145deg, #f7fafc, #edf2f7);
+    margin-bottom: 1.25rem;
+    background: linear-gradient(145deg, #fffdf6, #fef7e0);
     padding: 1.25rem;
     border-radius: 16px;
-    border: 1px solid rgba(226, 232, 240, 0.6);
+    border: 1px solid rgba(212, 166, 42, 0.35);
   }
 
   .stat {
@@ -412,21 +439,21 @@
   .set-btn {
     width: 100%;
     padding: 0.85rem;
-    background: #2d3748;
-    color: white;
-    border: none;
+    background: linear-gradient(135deg, #8B1A3C, #6B1A2A);
+    color: #E9C25E;
+    border: 1px solid rgba(212, 166, 42, 0.5);
     border-radius: 12px;
     font-weight: 700;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     font-size: 0.95rem;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 10px rgba(139, 26, 60, 0.3);
   }
 
   .set-btn:hover {
-    background: #1a202c;
+    background: linear-gradient(135deg, #7A1734, #4a0d1e);
     transform: translateY(-1px);
-    box-shadow: 0 6px 10px rgba(0,0,0,0.15);
+    box-shadow: 0 6px 14px rgba(139, 26, 60, 0.4);
   }
 
   .edit-form {
@@ -608,6 +635,11 @@
     }
     .value {
       font-size: 1.2rem;
+    }
+    .header {
+      padding: 1.1rem 1.1rem;
+      border-radius: 14px;
+      margin-bottom: 1.1rem;
     }
     .header h1 {
       font-size: 1.25rem;
