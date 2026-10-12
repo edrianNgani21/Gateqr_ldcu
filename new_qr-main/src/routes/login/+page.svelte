@@ -368,6 +368,9 @@
     position: relative;
     overflow-x: hidden;
     overflow-y: auto;
+    overflow: hidden;
+    max-width: 100vw;
+    touch-action: pan-y;
     font-family: inherit;
     box-sizing: border-box;
   }
@@ -419,7 +422,8 @@
     position: relative;
     z-index: 10;
     width: 100%;
-    max-width: 1040px;
+    min-width: 0;
+    max-width: min(1040px, 100%);
     min-height: 560px;
     background: #ffffff;
     border-radius: 28px;
