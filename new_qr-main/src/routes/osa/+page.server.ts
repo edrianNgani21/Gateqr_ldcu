@@ -20,7 +20,9 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
                 .select(`
                     *,
                     department:department_id(
-                        department_name
+                        department_id,
+                        academic_department,
+                        administrative_department
                     ),
                     user:user_id(
                         email
@@ -68,7 +70,7 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
             return {
                 ...app,
                 id: app.registration_id, // Map registration_id to id
-                department_name: app.department?.department_name || (app.department as any)?.department || 'Unknown Department',
+                department_name: app.department?.academic_department || app.department?.administrative_department || (app.department as any)?.department_name || (app.department as any)?.department || 'Unknown Department',
                 department_email: '-',
                 user_email: app.user?.email,
                 // Map vehicle information fields to match frontend expectations

@@ -58,8 +58,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 department:department_id(
                     department_id,
                     academic_department,
-                    administrative_department,
-                    department_name
+                    administrative_department
                 ),
                 user:user_id(
                     email

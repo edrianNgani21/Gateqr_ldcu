@@ -32,7 +32,9 @@ export const load: PageServerLoad = async ({ locals }) => {
             .select(`
                 *,
                 department:department_id(
-                    department_name
+                    department_id,
+                    academic_department,
+                    administrative_department
                 ),
                 vehicle_information:vehicle_information_id(
                     "or",
@@ -61,7 +63,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             ...applications,
             // Map Supabase column names to match frontend expectations
             id: applications.registration_id, // Map registration_id to id
-            department_name: applications.department?.department_name || applications.department?.department || '-',
+            department_name: applications.department?.academic_department || applications.department?.administrative_department || (applications.department as any)?.department_name || (applications.department as any)?.department || '-',
             user: { email: locals.user.email },
             // Map vehicle information & registration fields to match frontend document expectations
             doc_id: (applications as any).doc_id || 

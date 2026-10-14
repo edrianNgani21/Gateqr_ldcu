@@ -58,7 +58,9 @@ export const GET: RequestHandler = async ({ locals }) => {
             .select(`
                 *,
                 department:department_id(
-                    department_name
+                    department_id,
+                    academic_department,
+                    administrative_department
                 ),
                 user:user_id(
                     email
@@ -68,7 +70,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
         const applications = rows?.map(row => ({
             ...row,
-            department_name: row.department?.department_name || (row.department as any)?.department || 'Unknown Department',
+            department_name: row.department?.academic_department || row.department?.administrative_department || (row.department as any)?.department_name || (row.department as any)?.department || 'Unknown Department',
             department_email: '-',
             user_email: row.user?.email
         })) || [];

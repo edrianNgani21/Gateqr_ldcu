@@ -26,7 +26,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
             .select(`
                 *,
                 user:user_id(email),
-                department:department_id(department, email),
+                department:department_id(department_id, academic_department, administrative_department),
                 vehicle_information:vehicle_information_id(
                     plate_number,
                     brand,
@@ -41,7 +41,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
             reg = {
                 ...uniqueCodeRows,
                 user_email: uniqueCodeRows.user?.email,
-                department_name: uniqueCodeRows.department?.department
+                department_name: uniqueCodeRows.department?.academic_department || uniqueCodeRows.department?.administrative_department || '-'
             };
         } else {
             // Fallback to old REG-{number} format for backward compatibility
@@ -53,7 +53,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     .select(`
                         *,
                         user:user_id(email),
-                        department:department_id(department, email),
+                        department:department_id(department_id, academic_department, administrative_department),
                         vehicle_information:vehicle_information_id(
                             plate_number,
                             brand,
@@ -68,7 +68,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     reg = {
                         ...rows,
                         user_email: rows.user?.email,
-                        department_name: rows.department?.department
+                        department_name: rows.department?.academic_department || rows.department?.administrative_department || '-'
                     };
                 }
             } else {
@@ -78,7 +78,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     .select(`
                         *,
                         user:user_id(email),
-                        department:department_id(department, email),
+                        department:department_id(department_id, academic_department, administrative_department),
                         vehicle_information:vehicle_information_id(
                             plate_number,
                             brand,
@@ -93,7 +93,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     reg = {
                         ...rows,
                         user_email: rows.user?.email,
-                        department_name: rows.department?.department_name || (rows.department as any)?.department
+                        department_name: rows.department?.academic_department || rows.department?.administrative_department || '-'
                     };
                 }
             }

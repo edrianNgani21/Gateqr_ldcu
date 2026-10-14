@@ -37,7 +37,9 @@ export const load: PageServerLoad = async ({ locals }) => {
                 .select(`
                     *,
                     department:department_id(
-                        department_name
+                        department_id,
+                        academic_department,
+                        administrative_department
                     ),
                     user:user_id(
                         email
@@ -105,7 +107,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 security_check_at,
                 security_checked_at: security_check_at,
                 sticker_released_at,
-                department_name: v.department?.department_name || (v.department as any)?.department || 'Unknown Department',
+                department_name: v.department?.academic_department || v.department?.administrative_department || (v.department as any)?.department_name || (v.department as any)?.department || 'Unknown Department',
                 department_email: '-',
                 user_email: v.user?.email,
                 vehicle_information: v.vehicle_information,

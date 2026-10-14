@@ -25,7 +25,9 @@ export const load: PageServerLoad = async ({ locals }) => {
                     status,
                     schedule,
                     department:department_id(
-                        department_name
+                        department_id,
+                        academic_department,
+                        administrative_department
                     ),
                     vehicle_information:vehicle_information_id(
                         vehicle_information_id,
@@ -65,7 +67,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     mobile: reg.mobile || '-',
                     role: reg.role || 'student',
                     campus: 'Main Campus',
-                    department: reg.department?.department_name || '-',
+                    department: reg.department?.academic_department || reg.department?.administrative_department || reg.department?.department_name || '-',
                     department_email: '-',
                     year_level: null,
                     registration_status: reg.status || '-',

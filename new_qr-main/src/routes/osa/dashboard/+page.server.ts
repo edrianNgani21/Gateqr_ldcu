@@ -34,7 +34,11 @@ export const load: PageServerLoad = async ({ locals }) => {
             supabase.from('registration').select(`
                 *,
                 user:user_id(email),
-                department:department_id(department_name)
+                department:department_id(
+                    department_id,
+                    academic_department,
+                    administrative_department
+                )
             `).order('created_at', { ascending: false }).limit(5)
         ]);
 
@@ -46,7 +50,13 @@ export const load: PageServerLoad = async ({ locals }) => {
         const totalDepartments = totalDepartmentsResult?.count || 0;
 
         const statusBreakdown = statusBreakdownResult?.data;
-        const recentApplications = recentApplicationsResult?.data;
+        const recentApplications = (recentApplicationsResult?.data || []).map((app: any) => ({
+            ...app,
+            department: {
+                ...app.department,
+                department_name: app.department?.academic_department || app.department?.administrative_department || 'No Department'
+            }
+        }));
 
         const statusCounts: Record<string, number> = {
             pending: 0,

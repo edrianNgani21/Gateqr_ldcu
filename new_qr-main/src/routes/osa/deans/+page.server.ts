@@ -27,14 +27,17 @@ export const load: PageServerLoad = async ({ locals }) => {
         const { data: deptRows } = await supabase
             .from('department')
             .select('*')
-            .order('department_name', { ascending: true });
+            .order('department_id', { ascending: true });
 
-        const departments = (deptRows || []).map(dept => ({
-            department_id: dept.department_id,
-            department: dept.department_name,
-            department_name: dept.department_name,
-            is_active: dept.is_active ?? true
-        }));
+        const departments = (deptRows || []).map(dept => {
+            const name = dept.academic_department || dept.administrative_department || (dept as any).department_name || 'Department';
+            return {
+                department_id: dept.department_id,
+                department: name,
+                department_name: name,
+                is_active: dept.is_active ?? true
+            };
+        });
 
         return {
             deans,
