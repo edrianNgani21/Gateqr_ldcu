@@ -34,7 +34,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'user-complaints-realtime',
-            tables: ['complaint'],
+            tables: ['incident_report'],
             onSync: () => loadComplaints()
         });
     });
@@ -58,7 +58,7 @@
                 await loadComplaints(); // Refresh the list
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to submit complaint');
+                alert(json.error || 'Failed to submit incident report');
             }
         } catch (e) {
             alert('Network error');
@@ -67,7 +67,7 @@
     }
 
     async function deleteComplaint(id: number) {
-        if (!confirm('Are you sure you want to delete this complaint?')) return;
+        if (!confirm('Are you sure you want to delete this incident report?')) return;
 
         try {
             const res = await fetch(`/api/complaints/${id}`, {
@@ -78,7 +78,7 @@
                 complaints = complaints.filter(c => c.complaint_id !== id);
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to delete complaint');
+                alert(json.error || 'Failed to delete incident report');
             }
         } catch (e) {
             alert('Network error');
@@ -87,15 +87,15 @@
 </script>
 
 <svelte:head>
-  <title>My Complaints — GateQR</title>
-  <meta name="description" content="View and submit complaints." />
+  <title>Incident Report — GateQR</title>
+  <meta name="description" content="View and submit incident reports." />
 </svelte:head>
 
 <AppShell userRole="applicant" userEmail={data.userEmail} showSidebar={false}>
   <div class="welcome-banner">
     <div class="wb-content">
-      <h1 class="wb-title">My Complaints</h1>
-      <p class="wb-sub">Submit and track your complaints to the Safety & Security Office.</p>
+      <h1 class="wb-title">Incident Report</h1>
+      <p class="wb-sub">Submit and track your incident reports to the Safety & Security Office.</p>
     </div>
     <div class="wb-actions-right">
       <a href="/status" class="btn-back">
@@ -111,7 +111,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
       </div>
       <div>
-        <strong>Meeting Scheduled</strong> — The security office has scheduled a meeting with you. Please check your complaint details below.
+        <strong>Meeting Scheduled</strong> — The security office has scheduled a meeting with you. Please check your incident report details below.
       </div>
     </div>
   {/if}
@@ -120,7 +120,7 @@
     <div class="submit-section">
       <div class="form-card">
         <div class="form-card-header">
-          <h3>New Complaint</h3>
+          <h3>New Incident Report</h3>
         </div>
         <div class="form-card-body">
           <p>Your message will be sent securely to the security office. They will review it and may schedule a meeting with you.</p>
@@ -151,7 +151,7 @@
     </div>
 
     <div class="history-section">
-      <h3 class="section-heading">Complaint History</h3>
+      <h3 class="section-heading">Incident Report History</h3>
       
       {#if loading}
         <div class="loading-state">
@@ -163,7 +163,7 @@
       {:else if complaints.length === 0}
         <div class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          <p>No complaints submitted yet</p>
+          <p>No incident reports submitted yet</p>
         </div>
       {:else}
         <div class="cards-list">
@@ -197,7 +197,7 @@
 
               <div class="card-footer">
                 {#if c.status === 'resolved'}
-                  <span class="resolved-note">This complaint has been resolved.</span>
+                  <span class="resolved-note">This incident report has been resolved.</span>
                 {:else if !c.schedule}
                   <span class="pending-note">Awaiting security review</span>
                 {:else}

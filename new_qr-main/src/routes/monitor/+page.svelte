@@ -8,7 +8,7 @@
         { label: 'Dashboard', href: '/security/dashboard' },
         { label: 'Operations', href: '/security' },
         { label: 'Monitor', href: '/monitor' },
-        { label: 'Complaints', href: '/security/complaints' }
+        { label: 'Incident Report', href: '/security/complaints' }
     ];
 
     import { startLiveSync } from '$lib/utils/liveSync';

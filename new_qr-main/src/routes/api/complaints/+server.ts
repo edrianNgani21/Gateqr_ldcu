@@ -15,7 +15,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         if (locals.user.role === 'security') {
             // Security sees all complaints, with sender details
             const { data: rows } = await supabase
-                .from('complaint')
+                .from('incident_report')
                 .select(`
                     *,
                     user:user_id(
@@ -58,7 +58,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             }
 
             const { data: rows } = await supabase
-                .from('complaint')
+                .from('incident_report')
                 .select('*')
                 .eq('user_id', userData.user_id)
                 .order('created_at', { ascending: false });
@@ -97,7 +97,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { error: insertError } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .insert({
                 user_id: userData.user_id,
                 message: message.trim()

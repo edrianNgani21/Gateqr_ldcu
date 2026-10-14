@@ -157,20 +157,40 @@
           Under Request to Change Registration Details
         </span>
       {/if}
+
+      <!-- Distinct Rejected or Revoked indicator requested by user -->
+      {#if appStatus === 'rejected'}
+        <span class="indicator-pill indicator-rejected" title="Application is Rejected">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          REJECTED
+        </span>
+      {:else if appStatus === 'revoked'}
+        <span class="indicator-pill indicator-revoked" title="Application/Vehicle is Revoked">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          REVOKED
+        </span>
+      {/if}
+
       {#if rejectionReason === 'OVERDUE' || (data.sch && (!data.hdc || data.hdc === '-') && new Date(data.sch) < new Date())}
-        <span class="status-pill" style="background: #fef2f2; color: #b91c1c; border-color: #fca5a5;">OVERDUE</span>
+        <span class="indicator-pill indicator-overdue" title="Passed scheduled visit date">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          OVERDUE SCHEDULE
+        </span>
       {:else if rejectionReason === 'RESCHEDULED'}
         <span class="status-pill" style="background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">RESCHEDULED</span>
       {/if}
+
       <span class="role-badge" style="background: {roleColor}18; color: {roleColor}; border-color: {roleColor}33;">
         {role}
       </span>
       {#if data.plate}
         <span class="plate-chip">{data.plate}</span>
       {/if}
-      <span class="status-pill" style="background: {pill.bg}; color: {pill.text}; border-color: {pill.border};">
-        {statusLabel}
-      </span>
+      {#if appStatus !== 'rejected' && appStatus !== 'revoked'}
+        <span class="status-pill" style="background: {pill.bg}; color: {pill.text}; border-color: {pill.border};">
+          {statusLabel}
+        </span>
+      {/if}
       <svg class="chevron" class:open={expanded} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <polyline points="6 9 12 15 18 9"/>
       </svg>
@@ -181,6 +201,43 @@
   {#if expanded}
     <div class="card-detail">
       <div class="detail-inner">
+
+        {#if appStatus === 'rejected'}
+          <div class="app-alert-banner alert-rejected-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            <div>
+              <strong>Rejected Application:</strong> This vehicle registration application was rejected.
+              {#if rejectionReason}
+                <div class="alert-reason-text"><strong>Reason:</strong> {rejectionReason}</div>
+              {/if}
+            </div>
+          </div>
+        {:else if appStatus === 'revoked'}
+          <div class="app-alert-banner alert-revoked-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div>
+              <strong>Revoked Account / Application:</strong> Vehicle sticker privileges have been revoked.
+              {#if rejectionReason}
+                <div class="alert-reason-text"><strong>Revocation Reason:</strong> {rejectionReason}</div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        {#if (rejectionReason === 'OVERDUE' || (data.sch && (!data.hdc || data.hdc === '-') && new Date(data.sch) < new Date())) && appStatus !== 'rejected' && appStatus !== 'revoked'}
+          <div class="app-alert-banner alert-overdue-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <div>
+              <strong>Missed Submission Schedule:</strong> Scheduled visit date was {data.sch ? new Date(data.sch).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'in the past'}. Click <em>Verify Hardcopy</em> to proceed if applicant has appeared, or <em>Reschedule</em> to set a new date.
+            </div>
+          </div>
+        {/if}
 
         {#if data.change_vehicle_request || data.is_change_vehicle}
           <div class="change-vehicle-banner">
@@ -515,6 +572,73 @@
     border: 1px solid;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .indicator-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    padding: 0.22rem 0.65rem;
+    border-radius: 99px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .indicator-rejected {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1.5px solid #f87171;
+  }
+  .indicator-revoked {
+    background: #fff1f2;
+    color: #9f1239;
+    border: 1.5px solid #fda4af;
+  }
+  .indicator-overdue {
+    background: #fffbeb;
+    color: #b45309;
+    border: 1.5px solid #fcd34d;
+    animation: overdue-glow 2s infinite ease-in-out;
+  }
+  @keyframes overdue-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+    50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15); }
+  }
+
+  .app-alert-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .app-alert-banner svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .alert-rejected-banner {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+  }
+  .alert-revoked-banner {
+    background: #fff1f2;
+    border: 1px solid #fecdd3;
+    color: #881337;
+  }
+  .alert-overdue-banner {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+  }
+  .alert-reason-text {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: inherit;
+    opacity: 0.95;
   }
 
   /* ─── Chevron ────────────────────────────────────────────────────────── */

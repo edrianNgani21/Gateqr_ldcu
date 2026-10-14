@@ -92,7 +92,14 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             const isVip = Boolean(row.vip_access) || Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
             const isGuest = Boolean(guestRecord) || st === 'guest' || st.includes('guest');
 
-            let role = row.registration?.role ? (row.registration.role.charAt(0).toUpperCase() + row.registration.role.slice(1)) : 'Driver';
+            let rawRole = (row.registration?.role || '').toLowerCase().trim();
+            let role = 'Driver';
+            if (rawRole === 'vps') role = 'VPS';
+            else if (rawRole === 'vip') role = 'VIP';
+            else if (rawRole === 'concessionaire' || rawRole === 'concessionnaire') role = 'Concessionaire';
+            else if (rawRole === 'administrator' || rawRole === 'admin') role = 'Administrator';
+            else if (rawRole) role = rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
+
             let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || 'Driver';
             let plate = row.vehicle_information?.plate_number || 'No Plate';
 
@@ -112,8 +119,21 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             }
 
             // Role filter check
-            if (normalizedRolesFilter.length > 0 && !normalizedRolesFilter.includes(role.toLowerCase())) {
-                return;
+            if (normalizedRolesFilter.length > 0) {
+                const rLower = role.toLowerCase().trim();
+                const matches = normalizedRolesFilter.some(selected => {
+                    const sLower = selected.toLowerCase().trim();
+                    if (sLower === rLower) return true;
+                    if (sLower === 'employee' && (rLower === 'staff' || rLower === 'faculty' || rLower === 'employee')) return true;
+                    if (sLower === 'staff' && (rLower === 'staff' || rLower === 'employee')) return true;
+                    if (sLower === 'administrator' && (rLower === 'administrator' || rLower === 'admin')) return true;
+                    if (sLower === 'concessionaire' && (rLower === 'concessionaire' || rLower === 'concessionnaire')) return true;
+                    if (sLower === 'visitor' && (rLower === 'visitor' || rLower === 'guest')) return true;
+                    return false;
+                });
+                if (!matches) {
+                    return;
+                }
             }
 
             // Campus filter check: only show logs for the specific campus

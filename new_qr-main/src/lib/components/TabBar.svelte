@@ -15,7 +15,7 @@
 </script>
 
 <div class="tab-bar" role="tablist">
-  {#each tabs as tab}
+  {#each tabs as tab, i}
     <button
       role="tab"
       aria-selected={active === tab}
@@ -24,6 +24,9 @@
       onclick={() => onchange(tab)}
     >
       <span class="tab-label">{labels[tab] || tab}</span>
+      {#if counts && counts[i] !== undefined}
+        <span class="tab-badge-pill">{counts[i]}</span>
+      {/if}
     </button>
   {/each}
 </div>
@@ -69,6 +72,24 @@
     background: var(--maroon) !important;
     color: #fff !important;
     box-shadow: 0 2px 8px rgba(107,26,42,0.3);
+  }
+
+  .tab-badge-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 6px;
+    padding: 1px 7px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.08);
+    color: inherit;
+  }
+
+  .tab-active .tab-badge-pill {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
   }
 
   @media (max-width: 640px) {

@@ -68,7 +68,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // If this application was undergoing a change vehicle request, finalize it
         try {
             const { data: changeReq } = await supabase
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .select('*')
                 .eq('registration_id', registration_id)
                 .in('status', ['approved', 'pending'])
@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (changeReq) {
                 await supabase
-                    .from('change_vehicle_request')
+                    .from('modification_request')
                     .update({ status: 'approved', process_at: new Date().toISOString() })
                     .eq('change_vehicle_request_id', changeReq.change_vehicle_request_id);
             }

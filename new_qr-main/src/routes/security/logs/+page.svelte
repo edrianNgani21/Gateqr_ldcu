@@ -50,37 +50,56 @@
     viewingGuestLog = null;
   }
 
-  // Role filter functionality
-  const allRoles = ['student', 'employee', 'visitor', 'concessionaire', 'guest', 'vip'];
+  // Role filter functionality - All university gate roles
+  const allRoles = [
+    'student',
+    'faculty',
+    'staff',
+    'administrator',
+    'concessionaire',
+    'supplier',
+    'vps',
+    'visitor',
+    'guest',
+    'vip'
+  ];
   let selectedRoles = $state<string[]>([]);
   let roleDropdownOpen = $state(false);
 
-  function toggleRole(role: string) {
-    if (selectedRoles.includes(role)) {
-      selectedRoles = selectedRoles.filter(r => r !== role);
+  function formatRoleLabel(role: string): string {
+    const lower = (role || '').toLowerCase();
+    if (lower === 'vps') return 'VPS';
+    if (lower === 'vip') return 'VIP';
+    return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+
+  function selectRole(role: string) {
+    if (role === 'all' || !role) {
+      selectedRoles = [];
     } else {
-      selectedRoles = [...selectedRoles, role];
+      selectedRoles = [role];
     }
+    roleDropdownOpen = false;
     currentPage = 1;
     fetchLogs();
   }
 
   function getRoleDropdownLabel() {
     if (selectedRoles.length === 0 || selectedRoles.length === allRoles.length) return 'All Roles';
-    if (selectedRoles.length === 1) return selectedRoles[0].charAt(0).toUpperCase() + selectedRoles[0].slice(1);
-    return `${selectedRoles.length} Roles Selected`;
+    if (selectedRoles.length === 1) return formatRoleLabel(selectedRoles[0]);
+    return formatRoleLabel(selectedRoles[0]);
   }
 
   function clickOutside(node: HTMLElement, callback: () => void) {
     const handleClick = (e: MouseEvent) => {
-      if (node && !node.contains(e.target as Node) && !e.defaultPrevented) {
+      if (node && !node.contains(e.target as Node)) {
         callback();
       }
     };
-    document.addEventListener('click', handleClick, true);
+    document.addEventListener('click', handleClick);
     return {
       destroy() {
-        document.removeEventListener('click', handleClick, true);
+        document.removeEventListener('click', handleClick);
       }
     };
   }
@@ -248,6 +267,83 @@
   $effect(() => {
     fetchLogs();
   });
+
+  // ── Camera CCTV Feed States ──
+  let selectedFeedCampus = $state<'Main' | 'Rnp' | 'Paseo'>('Main');
+  let selectedGateView = $state<'active' | 'in' | 'out'>('active');
+  let camError = $state<Record<string, boolean>>({ Main: false, Rnp: false, Paseo: false });
+  let isCamSettingsOpen = $state(false);
+
+  let campusHosts = $state({
+    Main: 'http://192.168.1.50:5000',
+    Rnp: 'http://192.168.1.51:5001',
+    Paseo: 'http://192.168.1.52:5002'
+  });
+
+  $effect(() => {
+    try {
+      const saved = localStorage.getItem('cctv_hosts');
+      if (saved) {
+        campusHosts = { ...campusHosts, ...JSON.parse(saved) };
+      }
+    } catch {}
+  });
+
+  let activeStreamUrl = $derived.by(() => {
+    const base = campusHosts[selectedFeedCampus] || '';
+    if (!base) return '';
+    const cleanBase = base.replace(/\/+$/, '');
+    if (selectedGateView === 'in') return `${cleanBase}/video_feed_in`;
+    if (selectedGateView === 'out') return `${cleanBase}/video_feed_out`;
+    return `${cleanBase}/video_feed`;
+  });
+
+  function retryCamFeed() {
+    camError[selectedFeedCampus] = false;
+    const current = campusHosts[selectedFeedCampus];
+    campusHosts[selectedFeedCampus] = '';
+    setTimeout(() => {
+      campusHosts[selectedFeedCampus] = current;
+    }, 50);
+  }
+
+  function saveHostConfig() {
+    try {
+      localStorage.setItem('cctv_hosts', JSON.stringify(campusHosts));
+    } catch {}
+    isCamSettingsOpen = false;
+    retryCamFeed();
+  }
+
+  function captureSnapshot() {
+    const img = document.querySelector('.live-stream-img') as HTMLImageElement;
+    if (!img) return;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 1280;
+      canvas.height = img.naturalHeight || 720;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/jpeg');
+        a.download = `cctv-${selectedFeedCampus.toLowerCase()}-${Date.now()}.jpg`;
+        a.click();
+      }
+    } catch {
+      window.open(activeStreamUrl, '_blank');
+    }
+  }
+
+  function toggleCamFullscreen() {
+    const el = document.getElementById('cctv-camera-container');
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
 </script>
 
 <svelte:head>
@@ -301,17 +397,66 @@
             class="select-control date-input"
           />
 
-          <div class="dropdown-wrap" use:clickOutside={() => roleDropdownOpen = false}>
-            <button class="select-control dropdown-btn" onclick={() => roleDropdownOpen = !roleDropdownOpen}>
-              {getRoleDropdownLabel()}
+          <div class="dropdown-wrap" use:clickOutside={() => (roleDropdownOpen = false)}>
+            <button
+              type="button"
+              class="select-control dropdown-btn"
+              onclick={(e) => {
+                e.stopPropagation();
+                roleDropdownOpen = !roleDropdownOpen;
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={roleDropdownOpen}
+            >
+              <span>{getRoleDropdownLabel()}</span>
+              <svg
+                class="dropdown-arrow"
+                class:rotated={roleDropdownOpen}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
             </button>
             {#if roleDropdownOpen}
-              <div class="dropdown-menu">
+              <div class="dropdown-menu" role="listbox">
+                <button
+                  type="button"
+                  class="dropdown-item"
+                  class:selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                  onclick={() => selectRole('all')}
+                  role="option"
+                  aria-selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                >
+                  <span>All Roles</span>
+                  {#if selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                    <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  {/if}
+                </button>
                 {#each allRoles as role}
-                  <label class="dropdown-item">
-                    <input type="checkbox" checked={selectedRoles.includes(role)} onchange={() => toggleRole(role)} />
-                    {role.charAt(0).toUpperCase() + role.slice(1)}
-                  </label>
+                  <button
+                    type="button"
+                    class="dropdown-item"
+                    class:selected={selectedRoles.includes(role)}
+                    onclick={() => selectRole(role)}
+                    role="option"
+                    aria-selected={selectedRoles.includes(role)}
+                  >
+                    <span>{formatRoleLabel(role)}</span>
+                    {#if selectedRoles.includes(role)}
+                      <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    {/if}
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -418,8 +563,18 @@
                           </button>
                         {:else if log.role?.toLowerCase() === 'student'}
                           <span class="badge-role badge-student">Student</span>
-                        {:else if log.role?.toLowerCase() === 'employee'}
-                          <span class="badge-role badge-employee">Employee</span>
+                        {:else if log.role?.toLowerCase() === 'faculty'}
+                          <span class="badge-role badge-faculty">Faculty</span>
+                        {:else if log.role?.toLowerCase() === 'staff' || log.role?.toLowerCase() === 'employee'}
+                          <span class="badge-role badge-employee">Staff</span>
+                        {:else if log.role?.toLowerCase() === 'administrator'}
+                          <span class="badge-role badge-admin">Administrator</span>
+                        {:else if log.role?.toLowerCase() === 'concessionaire'}
+                          <span class="badge-role badge-concessionaire">Concessionaire</span>
+                        {:else if log.role?.toLowerCase() === 'supplier'}
+                          <span class="badge-role badge-supplier">Supplier</span>
+                        {:else if log.role?.toLowerCase() === 'vps'}
+                          <span class="badge-role badge-vps">VPS</span>
                         {:else}
                           <span class="badge-role badge-default">{log.role || 'Visitor'}</span>
                         {/if}
@@ -485,6 +640,191 @@
           </div>
         {/if}
       {/if}
+    </div>
+
+    <!-- Campus Real-Time Gate Camera Feeds Section -->
+    <div class="card camera-feed-card" id="cctv-camera-container">
+      <div class="camera-card-header">
+        <div class="cam-header-left">
+          <div class="live-indicator">
+            <span class="live-dot"></span>
+            <span class="live-text">LIVE CCTV</span>
+          </div>
+          <div>
+            <h2 class="cam-title">Campus Real-Time Gate Camera Feeds</h2>
+            <p class="cam-subtitle">Monitor live gate camera video streams across all university campuses on local network</p>
+          </div>
+        </div>
+
+        <div class="cam-header-controls">
+          <!-- Gate Selector Toggle -->
+          <div class="gate-toggle-group">
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'active'}
+              onclick={() => { selectedGateView = 'active'; retryCamFeed(); }}>
+              Dual / Active View
+            </button>
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'in'}
+              onclick={() => { selectedGateView = 'in'; retryCamFeed(); }}>
+              Entrance Cam
+            </button>
+            <button 
+              class="gate-btn" 
+              class:active={selectedGateView === 'out'}
+              onclick={() => { selectedGateView = 'out'; retryCamFeed(); }}>
+              Exit Cam
+            </button>
+          </div>
+
+          <!-- IP Settings & Fullscreen -->
+          <button class="cam-action-btn" class:active-btn={isCamSettingsOpen} onclick={() => isCamSettingsOpen = !isCamSettingsOpen} title="Configure Pi IP Addresses">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            Pi Network
+          </button>
+          <button class="cam-action-btn" onclick={toggleCamFullscreen} title="Fullscreen View">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Campus Switcher Tabs Bar -->
+      <div class="campus-tabs-bar">
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Main'}
+          style="--tab-color: #8B1A3C;"
+          onclick={() => { selectedFeedCampus = 'Main'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 1</span>
+          MAIN CAMPUS FEED
+        </button>
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Rnp'}
+          style="--tab-color: #D4A62A;"
+          onclick={() => { selectedFeedCampus = 'Rnp'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 2</span>
+          RNP CAMPUS FEED
+        </button>
+        <button 
+          class="campus-tab-btn" 
+          class:active={selectedFeedCampus === 'Paseo'}
+          style="--tab-color: #8B1A3C;"
+          onclick={() => { selectedFeedCampus = 'Paseo'; retryCamFeed(); }}>
+          <span class="tab-badge">GATE 3</span>
+          PASEO CAMPUS FEED
+        </button>
+      </div>
+
+      <!-- Settings Dropdown Panel for configuring Raspberry Pi Host/IP -->
+      {#if isCamSettingsOpen}
+        <div class="cam-settings-panel">
+          <div class="settings-title-row">
+            <h4>Configure Raspberry Pi Stream Addresses</h4>
+            <span class="settings-hint">Both your computer and the Raspberry Pi must be connected to the same Wi-Fi / LAN network.</span>
+          </div>
+          <div class="settings-inputs-grid">
+            <div class="setting-field">
+              <label for="host-main">Main Campus Pi Address / Port:</label>
+              <input id="host-main" type="text" bind:value={campusHosts.Main} placeholder="http://192.168.1.50:5000" />
+            </div>
+            <div class="setting-field">
+              <label for="host-rnp">RNP Campus Pi Address / Port:</label>
+              <input id="host-rnp" type="text" bind:value={campusHosts.Rnp} placeholder="http://192.168.1.51:5001" />
+            </div>
+            <div class="setting-field">
+              <label for="host-paseo">Paseo Campus Pi Address / Port:</label>
+              <input id="host-paseo" type="text" bind:value={campusHosts.Paseo} placeholder="http://192.168.1.52:5002" />
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn-save-settings" onclick={saveHostConfig}>Save &amp; Connect</button>
+            <button class="btn-close-settings" onclick={() => isCamSettingsOpen = false}>Cancel</button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Main Video Feed Viewer Container -->
+      <div class="cctv-viewer">
+        <!-- OSD Overlay: Top Bar -->
+        <div class="cctv-osd-top">
+          <div class="osd-cam-label">
+            <span class="osd-rec-dot"></span>
+            <strong>{selectedFeedCampus.toUpperCase()} CAMPUS</strong>
+            <span class="osd-divider">•</span>
+            <span>{selectedGateView === 'in' ? 'ENTRANCE CAMERA' : (selectedGateView === 'out' ? 'EXIT CAMERA' : 'ACTIVE VIEW')}</span>
+          </div>
+          <div class="osd-meta">
+            <span class="osd-res">720P • 25 FPS</span>
+            <span class="osd-ip">{campusHosts[selectedFeedCampus]}</span>
+          </div>
+        </div>
+
+        <!-- Video Player Image or Offline Placeholder -->
+        <div class="video-display-area">
+          {#if !camError[selectedFeedCampus]}
+            <img 
+              src={activeStreamUrl} 
+              alt="{selectedFeedCampus} Campus Live Feed"
+              class="live-stream-img"
+              onerror={() => { camError[selectedFeedCampus] = true; }}
+            />
+          {/if}
+
+          {#if camError[selectedFeedCampus]}
+            <div class="cam-offline-standby">
+              <div class="offline-icon-pulse">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#D4A62A" stroke-width="1.75">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </div>
+              <h3>Camera Feed Standby / Connecting...</h3>
+              <p>Waiting for connection from <strong>{selectedFeedCampus} Campus</strong> Raspberry Pi stream:</p>
+              <code>{activeStreamUrl}</code>
+              <div class="offline-help-text">
+                Ensure <code>main.py</code> is running on the Raspberry Pi camera server and both devices are connected to the same Wi-Fi.
+              </div>
+              <div class="offline-btn-row">
+                <button class="btn-retry-feed" onclick={retryCamFeed}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  Retry Stream
+                </button>
+                <button class="btn-config-ip" onclick={() => isCamSettingsOpen = true}>
+                  Configure IP Address
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- OSD Overlay: Bottom Bar -->
+        <div class="cctv-osd-bottom">
+          <div class="osd-time">
+            MONITORING ACTIVE • {selectedFeedCampus.toUpperCase()} GATE
+          </div>
+          <div class="osd-actions">
+            <button class="osd-btn" onclick={captureSnapshot} title="Capture Snapshot">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+              </svg>
+              Snapshot
+            </button>
+            <button class="osd-btn" onclick={retryCamFeed} title="Refresh Stream">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              Reconnect
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -725,12 +1065,27 @@
 
   .dropdown-wrap {
     position: relative;
+    display: inline-block;
   }
 
   .dropdown-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 125px;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .dropdown-arrow {
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    color: var(--text-secondary, #64748b);
+  }
+
+  .dropdown-arrow.rotated {
+    transform: rotate(180deg);
   }
 
   .dropdown-menu {
@@ -738,29 +1093,53 @@
     top: calc(100% + 4px);
     left: 0;
     background: #ffffff;
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-light, #e2e8f0);
     border-radius: 10px;
-    padding: 0.5rem;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
-    z-index: 50;
-    min-width: 170px;
+    padding: 0.35rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    min-width: 175px;
+    max-height: 290px;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 2px;
   }
 
   .dropdown-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.825rem;
-    padding: 0.35rem 0.5rem;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: transparent;
+    border: none;
     border-radius: 6px;
+    font-size: 0.825rem;
+    font-weight: 500;
+    color: var(--text-primary, #1e293b);
+    text-align: left;
     cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    font-family: inherit;
+    box-sizing: border-box;
   }
 
   .dropdown-item:hover {
     background: #fdf2f4;
+    color: var(--maroon, #8B1A3C);
+  }
+
+  .dropdown-item.selected {
+    background: rgba(139, 26, 60, 0.08);
+    color: var(--maroon, #8B1A3C);
+    font-weight: 700;
+  }
+
+  .check-icon {
+    color: var(--maroon, #8B1A3C);
+    margin-left: 0.5rem;
+    flex-shrink: 0;
   }
 
   .btn-action {
@@ -937,10 +1316,34 @@
     border: 1px solid rgba(16, 185, 129, 0.25);
   }
 
-  :global(.dark) .badge-employee {
-    background: rgba(16, 185, 129, 0.2);
-    color: #34d399;
-    border-color: rgba(16, 185, 129, 0.35);
+  .badge-faculty {
+    background: rgba(79, 70, 229, 0.12);
+    color: #4338ca;
+    border: 1px solid rgba(79, 70, 229, 0.25);
+  }
+
+  .badge-admin {
+    background: rgba(220, 38, 38, 0.12);
+    color: #b91c1c;
+    border: 1px solid rgba(220, 38, 38, 0.25);
+  }
+
+  .badge-concessionaire {
+    background: rgba(234, 88, 12, 0.12);
+    color: #c2410c;
+    border: 1px solid rgba(234, 88, 12, 0.25);
+  }
+
+  .badge-supplier {
+    background: rgba(217, 119, 6, 0.12);
+    color: #b45309;
+    border: 1px solid rgba(217, 119, 6, 0.25);
+  }
+
+  .badge-vps {
+    background: rgba(202, 138, 4, 0.15);
+    color: #854d0e;
+    border: 1px solid rgba(202, 138, 4, 0.35);
   }
 
   .badge-default {
@@ -1528,6 +1931,597 @@
     .btn-modal-close {
       width: 100%;
       text-align: center;
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     Liceo-Themed CCTV Camera Feeds Component (Vehicle Log)
+     ════════════════════════════════════════════════════════════════ */
+  .camera-feed-card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 20px rgba(139, 26, 60, 0.04);
+    border: 1px solid rgba(139, 26, 60, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .camera-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .cam-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(139, 26, 60, 0.08);
+    border: 1px solid rgba(139, 26, 60, 0.25);
+    padding: 6px 12px;
+    border-radius: 20px;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    background: #e53e3e;
+    border-radius: 50%;
+    animation: cctv-live-pulse 1.5s infinite;
+  }
+
+  @keyframes cctv-live-pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.7); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(229, 62, 62, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 62, 62, 0); }
+  }
+
+  .live-text {
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #8B1A3C;
+  }
+
+  .cam-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #1a202c;
+    margin: 0;
+  }
+
+  .cam-subtitle {
+    font-size: 0.82rem;
+    color: #718096;
+    margin: 2px 0 0 0;
+  }
+
+  .cam-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .gate-toggle-group {
+    display: flex;
+    background: #f8fafc;
+    padding: 3px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+  }
+
+  .gate-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4a5568;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .gate-btn.active {
+    background: #8B1A3C;
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(139, 26, 60, 0.25);
+  }
+
+  .cam-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 7px 12px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4a5568;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .cam-action-btn:hover {
+    background: #edf2f7;
+    color: #1a202c;
+    border-color: #cbd5e1;
+  }
+
+  .cam-action-btn.active-btn {
+    background: #8B1A3C;
+    color: #ffffff;
+    border-color: #8B1A3C;
+  }
+
+  /* Campus Switcher Tabs Bar */
+  .campus-tabs-bar {
+    display: flex;
+    gap: 0.75rem;
+    border-bottom: 2px solid #edf2f7;
+    padding-bottom: 0.5rem;
+    overflow-x: auto;
+  }
+
+  .campus-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #718096;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  .tab-badge {
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: #e2e8f0;
+    color: #4a5568;
+  }
+
+  .campus-tab-btn:hover {
+    color: #2d3748;
+    background: #f8fafc;
+  }
+
+  .campus-tab-btn.active {
+    color: var(--tab-color, #8B1A3C);
+    background: rgba(139, 26, 60, 0.06);
+  }
+
+  .campus-tab-btn.active .tab-badge {
+    background: var(--tab-color, #8B1A3C);
+    color: #ffffff;
+  }
+
+  .campus-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -0.6rem;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--tab-color, #8B1A3C);
+    border-radius: 3px;
+  }
+
+  /* Settings Panel */
+  .cam-settings-panel {
+    background: #fcf8f9;
+    border: 1px solid rgba(139, 26, 60, 0.15);
+    border-radius: 14px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .settings-title-row h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #1a202c;
+    font-weight: 700;
+  }
+
+  .settings-hint {
+    font-size: 0.78rem;
+    color: #718096;
+  }
+
+  .settings-inputs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+
+  .setting-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .setting-field label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #4a5568;
+  }
+
+  .setting-field input {
+    border: 1px solid #cbd5e0;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 0.85rem;
+    background: #ffffff;
+    font-family: monospace;
+  }
+
+  .settings-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
+  .btn-save-settings {
+    background: #8B1A3C;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-save-settings:hover {
+    background: #701530;
+  }
+
+  .btn-close-settings {
+    background: #edf2f7;
+    color: #4a5568;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* CCTV Viewer Screen */
+  .cctv-viewer {
+    background: #090e18;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 2px solid #1e293b;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35);
+    position: relative;
+  }
+
+  .cctv-osd-top {
+    background: rgba(15, 23, 42, 0.95);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    font-family: 'Courier New', monospace;
+    font-size: 0.82rem;
+    z-index: 2;
+  }
+
+  .osd-cam-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .osd-rec-dot {
+    width: 9px;
+    height: 9px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: cctv-live-pulse 1.2s infinite;
+  }
+
+  .osd-divider {
+    color: #64748b;
+  }
+
+  .osd-meta {
+    display: flex;
+    gap: 12px;
+    color: #94a3b8;
+    font-size: 0.78rem;
+  }
+
+  .osd-res {
+    color: #D4A62A;
+    font-weight: 700;
+  }
+
+  .video-display-area {
+    min-height: 440px;
+    max-height: 580px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #060911;
+    position: relative;
+  }
+
+  .live-stream-img {
+    width: 100%;
+    height: auto;
+    max-height: 580px;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* Standby / Offline UI */
+  .cam-offline-standby {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    color: #f8fafc;
+    gap: 0.75rem;
+  }
+
+  .offline-icon-pulse {
+    background: rgba(212, 166, 42, 0.12);
+    border: 2px solid rgba(212, 166, 42, 0.3);
+    padding: 1rem;
+    border-radius: 50%;
+    margin-bottom: 0.5rem;
+  }
+
+  .cam-offline-standby h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  .cam-offline-standby p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+  }
+
+  .cam-offline-standby code {
+    background: #1e293b;
+    color: #D4A62A;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: monospace;
+  }
+
+  .offline-help-text {
+    font-size: 0.78rem;
+    color: #64748b;
+    max-width: 480px;
+    margin-top: 4px;
+  }
+
+  .offline-btn-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .btn-retry-feed {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #8B1A3C;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-retry-feed:hover {
+    background: #701530;
+  }
+
+  .btn-config-ip {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-config-ip:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* CCTV Bottom OSD */
+  .cctv-osd-bottom {
+    background: rgba(15, 23, 42, 0.95);
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    z-index: 2;
+  }
+
+  .osd-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .osd-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .osd-btn:hover {
+    background: rgba(212, 166, 42, 0.2);
+    color: #ECC94B;
+    border-color: rgba(212, 166, 42, 0.4);
+  }
+
+  /* Responsiveness for CCTV */
+  @media (max-width: 1024px) {
+    .video-display-area {
+      min-height: 320px;
+      max-height: 440px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .camera-feed-card {
+      padding: 1.25rem 1rem;
+      border-radius: 16px;
+    }
+    .camera-card-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+    }
+    .cam-header-controls {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .gate-toggle-group {
+      width: 100%;
+      display: flex;
+    }
+    .gate-btn {
+      flex: 1;
+      text-align: center;
+      padding: 6px 8px;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    .video-display-area {
+      min-height: 240px;
+      max-height: 360px;
+    }
+    .cctv-osd-top {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+    }
+    .cctv-osd-bottom {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 8px 12px;
+    }
+    .osd-actions {
+      justify-content: flex-end;
+    }
+    .settings-inputs-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .camera-feed-card {
+      padding: 1rem 0.65rem;
+      border-radius: 14px;
+    }
+    .cam-title {
+      font-size: 1.05rem;
+    }
+    .cam-subtitle {
+      font-size: 0.75rem;
+    }
+    .campus-tabs-bar {
+      gap: 0.35rem;
+      padding-bottom: 0.35rem;
+      -webkit-overflow-scrolling: touch;
+    }
+    .campus-tab-btn {
+      padding: 6px 10px;
+      font-size: 0.75rem;
+    }
+    .tab-badge {
+      display: none;
+    }
+    .video-display-area {
+      min-height: 190px;
+      max-height: 280px;
+    }
+    .cam-offline-standby {
+      padding: 1.5rem 0.75rem;
+    }
+    .cam-offline-standby h3 {
+      font-size: 0.95rem;
+    }
+    .cam-offline-standby p, .cam-offline-standby code {
+      font-size: 0.75rem;
+      word-break: break-all;
+    }
+    .offline-btn-row {
+      flex-direction: column;
+      width: 100%;
+    }
+    .btn-retry-feed, .btn-config-ip {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>

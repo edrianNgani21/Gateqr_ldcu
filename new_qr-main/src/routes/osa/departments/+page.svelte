@@ -23,29 +23,37 @@
     });
 
     let showForm = $state(false);
+    let formType = $state<'academic' | 'administrative'>('academic');
+    let selectedTable = $state<'academic' | 'administrative'>('academic');
     let newDeptName = $state('');
-    let newDeptEmail = $state('');
     let loading = $state(false);
     let editingDeptId: number | null = $state(null);
-    let statusFilter = $state('all'); // 'all', 'active', 'inactive'
+    let statusFilter = $state<'active' | 'inactive'>('active');
 
     const navLinks = [];
 
-    let filteredDepartments = $derived.by(() => {
-        if (statusFilter === 'all') return departments;
-        return departments.filter(dept => 
+    let filteredAcademicDepartments = $derived.by(() => {
+        const list = departments.filter(d => d.type === 'academic');
+        return list.filter(dept => 
+            statusFilter === 'active' ? dept.is_active : !dept.is_active
+        );
+    });
+
+    let filteredAdministrativeDepartments = $derived.by(() => {
+        const list = departments.filter(d => d.type === 'administrative');
+        return list.filter(dept => 
             statusFilter === 'active' ? dept.is_active : !dept.is_active
         );
     });
 
     async function handleSave() {
-        if (!newDeptName) return;
+        if (!newDeptName.trim()) return;
         loading = true;
         try {
             const method = editingDeptId ? 'PUT' : 'POST';
             const body = editingDeptId 
-                ? { auto_id: editingDeptId, name: newDeptName }
-                : { name: newDeptName };
+                ? { auto_id: editingDeptId, name: newDeptName.trim(), type: formType }
+                : { name: newDeptName.trim(), type: formType };
 
             const res = await fetch('/api/departments', {
                 method,
@@ -53,12 +61,14 @@
                 body: JSON.stringify(body)
             });
             if (res.ok) {
+                selectedTable = formType;
                 showForm = false;
                 newDeptName = '';
                 editingDeptId = null;
                 await invalidateAll();
             } else {
-                alert('Failed to save department');
+                const err = await res.json();
+                alert(err.error || 'Failed to save department');
             }
         } catch(e) {
             alert('Network error');
@@ -106,7 +116,7 @@
 
 <svelte:head>
   <title>Departments — OSA | GateQR</title>
-  <meta name="description" content="Manage college departments and their dean access for GateQR." />
+  <meta name="description" content="Manage college departments and administrative offices for GateQR." />
 </svelte:head>
 
 <AppShell showSidebar={true} userEmail={userEmail}>
@@ -116,92 +126,69 @@
     <!-- Header Section -->
     <div class="page-header" style="justify-content: flex-end;">
       <div class="header-actions">
-        <a href="/osa/deans" class="secondary-button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          Dean Management
-        </a>
-        <button class="primary-button" onclick={() => { showForm = !showForm; if (!showForm) { editingDeptId = null; newDeptName = ''; } }}>
-          {#if showForm}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            Cancel
-          {:else}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Department
-          {/if}
+        <!-- + Academic Department Button -->
+        <button 
+          type="button"
+          class="dept-header-btn"
+          class:active={showForm && formType === 'academic'}
+          onclick={() => { 
+            if (showForm && formType === 'academic') {
+              showForm = false;
+              editingDeptId = null; 
+              newDeptName = '';
+            } else {
+              formType = 'academic'; 
+              selectedTable = 'academic';
+              editingDeptId = null; 
+              newDeptName = ''; 
+              showForm = true; 
+            }
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Academic Department
+        </button>
+
+        <!-- + Administrative Department Button -->
+        <button 
+          type="button"
+          class="dept-header-btn"
+          class:active={showForm && formType === 'administrative'}
+          onclick={() => { 
+            if (showForm && formType === 'administrative') {
+              showForm = false;
+              editingDeptId = null; 
+              newDeptName = '';
+            } else {
+              formType = 'administrative'; 
+              selectedTable = 'administrative';
+              editingDeptId = null; 
+              newDeptName = ''; 
+              showForm = true; 
+            }
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Administrative Department
         </button>
       </div>
     </div>
 
-    <!-- Status Filter -->
-    <div class="status-filter">
-      <button 
-        class={`filter-tab ${statusFilter === 'all' ? 'active' : ''}`}
-        onclick={() => statusFilter = 'all'}
-      >
-        All Departments
-      </button>
-      <button 
-        class={`filter-tab ${statusFilter === 'active' ? 'active' : ''}`}
-        onclick={() => statusFilter = 'active'}
-      >
-        Active
-      </button>
-      <button 
-        class={`filter-tab ${statusFilter === 'inactive' ? 'active' : ''}`}
-        onclick={() => statusFilter = 'inactive'}
-      >
-        Inactive
-      </button>
-    </div>
-
-    <!-- Course List -->
-    <div class="course-list-section">
-      <h2>Course List</h2>
-      <div class="course-list-items">
-        {#each filteredDepartments as dept}
-          <div class="course-list-item">
-            <span class="course-name">{dept.name}</span>
-            <div class="course-actions">
-              <span class="course-status-badge {dept.is_active ? 'active' : 'inactive'}">
-                {dept.is_active ? '🟢 Active' : '⚪ Inactive'}
-              </span>
-              <button class="course-action-btn edit-btn" onclick={() => { 
-                newDeptName = dept.name; 
-                editingDeptId = dept.auto_id; 
-                showForm = true; 
-              }}>
-                Edit
-              </button>
-              {#if dept.is_active}
-                <button class="course-action-btn hide-btn" onclick={() => handleDeactivate(dept.auto_id)}>
-                  Hide
-                </button>
-              {:else}
-                <button class="course-action-btn activate-btn" onclick={() => handleActivate(dept.auto_id)}>
-                  Activate
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/each}
-        {#if filteredDepartments.length === 0}
-          <p class="no-courses">No departments found.</p>
-        {/if}
-      </div>
-    </div>
-
-    <!-- New department form -->
+    <!-- Form on Top (when clicked, moves list below it) -->
     {#if showForm}
-      <div class="form-card">
+      <div class="form-card top-form-card">
         <div class="form-header">
           <div class="form-header-content">
-            <h2>{editingDeptId ? 'Edit Department' : 'Add New Department'}</h2>
+            <h2>
+              {#if editingDeptId}
+                Edit {formType === 'administrative' ? 'Administrative Department' : 'Academic Department'}
+              {:else}
+                Add {formType === 'administrative' ? 'Administrative Department' : 'Academic Department'}
+              {/if}
+            </h2>
             <p class="form-subtitle">Fill in the department details below</p>
           </div>
-          <button class="close-button" title="Close" aria-label="Close form" onclick={() => { showForm = false; editingDeptId = null; newDeptName = ''; newDeptEmail = ''; }}>
+          <button class="close-button" title="Close" aria-label="Close form" onclick={() => { showForm = false; editingDeptId = null; newDeptName = ''; }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -211,7 +198,9 @@
         
         <div class="form-grid">
           <div class="form-group">
-            <label for="dept-name">Department Name</label>
+            <label for="dept-name">
+              {formType === 'administrative' ? 'Administrative Department Name' : 'Academic Department Name'}
+            </label>
             <div class="input-wrapper">
               <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -220,20 +209,20 @@
               <input 
                 id="dept-name" 
                 type="text" 
-                placeholder="Enter department name..." 
+                placeholder={formType === 'administrative' ? 'e.g. Accounting, Human Resources, Registrar Office...' : 'e.g. College of Information Technology, College of Nursing...'} 
                 bind:value={newDeptName} 
                 disabled={loading}
                 class="form-input"
               />
             </div>
             <p class="input-hint">
-              Enter the department name directly
+              Enter the official {formType === 'administrative' ? 'administrative department' : 'academic department'} name
             </p>
           </div>
         </div>
 
         <div class="form-actions">
-          <button class="secondary-button" onclick={() => { showForm = false; editingDeptId = null; newDeptName = ''; newDeptEmail = ''; }} disabled={loading}>
+          <button class="secondary-button" onclick={() => { showForm = false; editingDeptId = null; newDeptName = ''; }} disabled={loading}>
             Cancel
           </button>
           <button class="primary-button" onclick={handleSave} disabled={loading}>
@@ -246,6 +235,140 @@
               {editingDeptId ? 'Update Department' : 'Save Department'}
             {/if}
           </button>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Controls Row: Table Selector Button (Academic vs Administrative) & Status Filter (Active / Inactive) -->
+    <div class="table-controls-row">
+      <!-- Buttons for List Table: Academic and Administrative -->
+      <div class="table-type-selector">
+        <button 
+          type="button"
+          class="type-toggle-btn" 
+          class:active={selectedTable === 'academic'}
+          onclick={() => selectedTable = 'academic'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          Academic Department
+          <span class="count-pill">{filteredAcademicDepartments.length}</span>
+        </button>
+        <button 
+          type="button"
+          class="type-toggle-btn" 
+          class:active={selectedTable === 'administrative'}
+          onclick={() => selectedTable = 'administrative'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+          </svg>
+          Administrative Department
+          <span class="count-pill">{filteredAdministrativeDepartments.length}</span>
+        </button>
+      </div>
+
+      <!-- Status Filter (Only Active and Inactive) -->
+      <div class="status-filter">
+        <button 
+          type="button"
+          class={`filter-tab ${statusFilter === 'active' ? 'active' : ''}`}
+          onclick={() => statusFilter = 'active'}
+        >
+          Active
+        </button>
+        <button 
+          type="button"
+          class={`filter-tab ${statusFilter === 'inactive' ? 'active' : ''}`}
+          onclick={() => statusFilter = 'inactive'}
+        >
+          Inactive
+        </button>
+      </div>
+    </div>
+
+    <!-- List Table: Shows selected table (Academic or Administrative) -->
+    {#if selectedTable === 'academic'}
+      <div class="course-list-section">
+        <div class="section-title-row">
+          <h2>Academic Department List</h2>
+          <span class="count-badge">{filteredAcademicDepartments.length}</span>
+        </div>
+        <div class="course-list-items">
+          {#each filteredAcademicDepartments as dept}
+            <div class="course-list-item">
+              <span class="course-name">{dept.name}</span>
+              <div class="course-actions">
+                <span class="course-status-badge {dept.is_active ? 'active' : 'inactive'}">
+                  {dept.is_active ? '🟢 Active' : '⚪ Inactive'}
+                </span>
+                <button class="course-action-btn edit-btn" onclick={() => { 
+                  newDeptName = dept.name; 
+                  editingDeptId = dept.auto_id; 
+                  formType = 'academic';
+                  selectedTable = 'academic';
+                  showForm = true; 
+                }}>
+                  Edit
+                </button>
+                {#if dept.is_active}
+                  <button class="course-action-btn hide-btn" onclick={() => handleDeactivate(dept.auto_id)}>
+                    Hide
+                  </button>
+                {:else}
+                  <button class="course-action-btn activate-btn" onclick={() => handleActivate(dept.auto_id)}>
+                    Activate
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+          {#if filteredAcademicDepartments.length === 0}
+            <p class="no-courses">No academic departments found ({statusFilter}).</p>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="course-list-section">
+        <div class="section-title-row">
+          <h2>Administrative Department List</h2>
+          <span class="count-badge">{filteredAdministrativeDepartments.length}</span>
+        </div>
+        <div class="course-list-items">
+          {#each filteredAdministrativeDepartments as dept}
+            <div class="course-list-item">
+              <span class="course-name">{dept.name}</span>
+              <div class="course-actions">
+                <span class="course-status-badge {dept.is_active ? 'active' : 'inactive'}">
+                  {dept.is_active ? '🟢 Active' : '⚪ Inactive'}
+                </span>
+                <button class="course-action-btn edit-btn" onclick={() => { 
+                  newDeptName = dept.name; 
+                  editingDeptId = dept.auto_id; 
+                  formType = 'administrative';
+                  selectedTable = 'administrative';
+                  showForm = true; 
+                }}>
+                  Edit
+                </button>
+                {#if dept.is_active}
+                  <button class="course-action-btn hide-btn" onclick={() => handleDeactivate(dept.auto_id)}>
+                    Hide
+                  </button>
+                {:else}
+                  <button class="course-action-btn activate-btn" onclick={() => handleActivate(dept.auto_id)}>
+                    Activate
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+          {#if filteredAdministrativeDepartments.length === 0}
+            <p class="no-courses">No administrative departments found ({statusFilter}).</p>
+          {/if}
         </div>
       </div>
     {/if}
@@ -286,6 +409,40 @@
     gap: 0.75rem;
   }
 
+  .dept-header-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.875rem 1.5rem;
+    background: #ffffff;
+    color: var(--text-primary, #0f172a);
+    border: 1.5px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .dept-header-btn:hover {
+    background: var(--surface-hover, #f8fafc);
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+  }
+
+  .dept-header-btn.active {
+    background: var(--maroon, #6b1a2a);
+    color: #ffffff;
+    border-color: var(--maroon, #6b1a2a);
+    box-shadow: 0 4px 12px rgba(107, 26, 42, 0.25);
+  }
+
+  .dept-header-btn.active:hover {
+    background: var(--maroon-light, #822234);
+    border-color: var(--maroon-light, #822234);
+  }
+
   .primary-button {
     display: inline-flex;
     align-items: center;
@@ -313,14 +470,75 @@
     transform: none;
   }
 
+  /* Controls Row: Table selector & Status filter */
+  .table-controls-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .table-type-selector {
+    display: inline-flex;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 0.35rem;
+  }
+
+  .type-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1.25rem;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .type-toggle-btn:hover {
+    color: var(--text-primary);
+    background: var(--surface-hover);
+  }
+
+  .type-toggle-btn.active {
+    background: var(--maroon);
+    color: white;
+    box-shadow: 0 2px 8px rgba(107, 26, 42, 0.25);
+  }
+
+  .type-toggle-btn .count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.08);
+    color: inherit;
+  }
+
+  .type-toggle-btn.active .count-pill {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+  }
+
   /* Status Filter */
   .status-filter {
     display: flex;
     gap: 0.5rem;
-    padding: 0.5rem;
+    padding: 0.35rem;
     background: var(--surface);
     border: 1.5px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
   }
 
   .filter-tab {
@@ -355,11 +573,30 @@
     padding: 1.5rem;
   }
 
-  .course-list-section h2 {
+  .section-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .section-title-row h2 {
     font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0 0 1rem 0;
+    font-weight: 700;
+    margin: 0;
     color: var(--text-primary);
+  }
+
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2rem 0.65rem;
+    background: var(--maroon-muted);
+    color: var(--maroon);
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
   }
 
   .course-list-items {

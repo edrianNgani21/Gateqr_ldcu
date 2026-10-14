@@ -47,7 +47,7 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Get the change request details
         const { data: changeRequest, error: queryError } = await supabaseAdmin
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select(`
                 *,
                 registration:registration_id(
@@ -83,7 +83,7 @@ export async function POST({ request, locals }: RequestEvent) {
 
             // 1. Update change request status to approved
             const { error: updateReqError } = await supabaseAdmin
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .update({ 
                     status: 'approved',
                     process_at: new Date().toISOString()
@@ -153,7 +153,7 @@ export async function POST({ request, locals }: RequestEvent) {
                     `Your request to change vehicle has been accepted! Please visit the OSA office on ${schedStr} to comply with your hard copy requirements for your new vehicle.`,
                     actorId,
                     'approve_registration_change',
-                    'change_vehicle_request',
+                    'modification_request',
                     request_id,
                     changeRequest.registration_id,
                     { schedule: scheduleDate }
@@ -169,7 +169,7 @@ export async function POST({ request, locals }: RequestEvent) {
             const reason = (rejection_reason || 'Request did not meet requirements').trim();
 
             const { error: updateReqError } = await supabaseAdmin
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .update({ 
                     status: 'rejected',
                     process_at: new Date().toISOString()
@@ -198,7 +198,7 @@ export async function POST({ request, locals }: RequestEvent) {
                     `Your request to change registration details was rejected by OSA. Reason: ${reason}`,
                     actorId,
                     'reject_registration_change',
-                    'change_vehicle_request',
+                    'modification_request',
                     request_id,
                     changeRequest.registration_id,
                     { reason }

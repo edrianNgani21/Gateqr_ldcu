@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
+import { supabase } from '$lib/server/supabase';
 
 export const load: PageServerLoad = async ({ locals }) => {
     // RBAC: Only OSA
@@ -8,22 +9,36 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     try {
-        console.log('Loading OSA-assigned admin users for:', locals.user.email);
+        const { data: deptRows } = await supabase
+            .from('department')
+            .select('*')
+            .eq('is_active', true)
+            .order('created_at', { ascending: true });
 
-        // For now, return empty array as admin management uses different system
-        let allAdmins: any[] = [];
+        const academicDepartments: { id: number; name: string }[] = [];
+        const administrativeDepartments: { id: number; name: string }[] = [];
 
-        console.log('Processed OSA-assigned admin users:', allAdmins);
+        (deptRows || []).forEach(d => {
+            const admin = d.administrative_department || d['Administrative Department'];
+            const acad = d.academic_department || d['Academic Department'] || (!admin ? d.department_name : null);
+            if (admin) {
+                administrativeDepartments.push({ id: d.department_id, name: admin });
+            } else if (acad) {
+                academicDepartments.push({ id: d.department_id, name: acad });
+            }
+        });
 
         return {
-            users: allAdmins,
-            userEmail: locals.user.email
+            userEmail: locals.user.email,
+            academicDepartments,
+            administrativeDepartments
         };
     } catch (error) {
-        console.error('Error loading admin users:', error);
+        console.error('Error loading admin page data:', error);
         return {
-            users: [],
-            userEmail: locals.user.email
+            userEmail: locals.user.email,
+            academicDepartments: [],
+            administrativeDepartments: []
         };
     }
 };

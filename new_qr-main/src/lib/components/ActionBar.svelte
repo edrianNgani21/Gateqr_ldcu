@@ -63,35 +63,19 @@
       {/if}
     </button>
 
-  {:else if tab === 'distribution'}
+  {:else if tab === 'distribution' || tab === 'overdue'}
     <button
       class="action-btn btn-deliver"
-      onclick={() => act('check_hardcopy')}
+      onclick={() => act(tab === 'overdue' ? 'proceed_overdue' : 'check_hardcopy')}
       disabled={!!loadingAction}
-      class:btn-loading={loadingAction === 'check_hardcopy'}
+      class:btn-loading={loadingAction === 'check_hardcopy' || loadingAction === 'proceed_overdue'}
     >
-      {#if loadingAction === 'check_hardcopy'}
-        {@render spinner()}
-        Checking…
-      {:else}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-        Check
-      {/if}
-    </button>
-
-  {:else if tab === 'overdue'}
-    <button
-      class="action-btn btn-deliver"
-      onclick={() => act('proceed_overdue')}
-      disabled={!!loadingAction}
-      class:btn-loading={loadingAction === 'proceed_overdue'}
-    >
-      {#if loadingAction === 'proceed_overdue'}
+      {#if loadingAction === 'check_hardcopy' || loadingAction === 'proceed_overdue'}
         {@render spinner()}
         Processing…
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        Proceed process
+        Verify Hardcopy
       {/if}
     </button>
     <button
@@ -171,7 +155,7 @@
       {/if}
     </button>
 
-  {:else if tab.toLowerCase() === 'registered'}
+  {:else if tab.toLowerCase().includes('register')}
     <button
       class="action-btn btn-revoke"
       onclick={() => act('revoke')}
@@ -201,8 +185,40 @@
       {/if}
     </button>
 
-  {:else if tab.toLowerCase() === 'revoked' || tab.toLowerCase() === 'revoked registered'}
-    {#if status !== 'rejected' && status !== 'revoked'}
+  {:else if tab.toLowerCase().includes('reject') || tab.toLowerCase().includes('revoke')}
+    {#if status === 'revoked'}
+      {#if !isExpired}
+        <button
+          class="action-btn btn-unrevoke"
+          onclick={() => act('unrevoke')}
+          disabled={!!loadingAction}
+          class:btn-loading={loadingAction === 'unrevoke'}
+        >
+          {#if loadingAction === 'unrevoke'}
+            {@render spinner()}
+            Restoring…
+          {:else}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            Unrevoke
+          {/if}
+        </button>
+      {/if}
+    {:else if status === 'rejected'}
+      <button
+        class="action-btn btn-revoke"
+        onclick={() => act('retract')}
+        disabled={!!loadingAction}
+        class:btn-loading={loadingAction === 'retract'}
+      >
+        {#if loadingAction === 'retract'}
+          {@render spinner()}
+          Reconsidering…
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          Reconsider Application
+        {/if}
+      </button>
+    {:else}
       <button
         class="action-btn btn-revoke"
         onclick={() => act('retract')}
@@ -218,22 +234,6 @@
         {/if}
       </button>
     {/if}
-    {#if status === 'revoked' && !isExpired}
-      <button
-        class="action-btn btn-unrevoke"
-        onclick={() => act('unrevoke')}
-        disabled={!!loadingAction}
-        class:btn-loading={loadingAction === 'unrevoke'}
-      >
-        {#if loadingAction === 'unrevoke'}
-          {@render spinner()}
-          Restoring…
-        {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-          Unrevoke
-        {/if}
-      </button>
-    {/if}
     <button
       class="action-btn btn-delete"
       onclick={() => act('delete')}
@@ -246,22 +246,6 @@
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         Delete
-      {/if}
-    </button>
-
-  {:else if tab.toLowerCase() === 'rejected'}
-    <button
-      class="action-btn btn-revoke"
-      onclick={() => act('retract')}
-      disabled={!!loadingAction}
-      class:btn-loading={loadingAction === 'retract'}
-    >
-      {#if loadingAction === 'retract'}
-        {@render spinner()}
-        Reconsidering…
-      {:else}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-        Reconsider Application
       {/if}
     </button>
   {/if}

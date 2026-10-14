@@ -50,7 +50,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }, { status: 403 });
         }
 
-        const { email, user_type, password, pin } = await request.json();
+        const { email, user_type, password, pin, department_id } = await request.json();
 
         if (!email || !user_type) {
             return json({ error: 'Missing required fields: email and admin type are required' }, { status: 400 });
@@ -77,17 +77,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
 
-        // Map incoming adminType to valid PostgreSQL lowercase enums
+        // Map incoming adminType to valid PostgreSQL types and identification
         const cleanType = (user_type || '').toString().trim().toLowerCase();
-        let dbUserType: 'osa' | 'safety_security' | 'applicant' = 'osa';
-        let dbIdentification: 'admin' | 'staff' | 'faculty' | 'student' = 'admin';
+        let dbUserType: string = 'osa';
+        let dbIdentification: string = 'admin';
 
         if (cleanType.includes('security')) {
             dbUserType = 'safety_security';
             dbIdentification = 'admin';
-        } else if (cleanType.includes('dean') || cleanType.includes('faculty')) {
-            dbUserType = 'applicant';
+        } else if (cleanType.includes('academic') || cleanType.includes('dean')) {
+            dbUserType = 'dean';
             dbIdentification = 'faculty';
+        } else if (cleanType.includes('administrative')) {
+            dbUserType = 'dean';
+            dbIdentification = 'staff';
         } else {
             dbUserType = 'osa';
             dbIdentification = 'admin';
@@ -110,16 +113,30 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const password_hash = bcrypt.hashSync(rawPassword, 10);
 
         // Create new admin user in users table
+        const insertPayload: any = {
+            email: email.trim().toLowerCase(),
+            user_type: dbUserType,
+            identification: dbIdentification,
+            password_hash,
+            is_active: true
+        };
+        if (department_id) {
+            insertPayload.department_id = department_id;
+        }
+
         const { data: newUser, error: createError } = await supabase
             .from('users')
-            .insert({
-                email: email.trim().toLowerCase(),
-                user_type: dbUserType,
-                identification: dbIdentification,
-                password_hash,
-                is_active: true
-            })
-            .select('user_id, email, user_type, identification, is_active, created_at')
+            .insert(insertPayload)
+            .select(`
+                user_id, 
+                email, 
+                user_type, 
+                identification, 
+                department_id,
+                department:department_id(*),
+                is_active, 
+                created_at
+            `)
             .single();
 
         if (createError) {
@@ -140,7 +157,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     'users',
                     newUser.user_id,
                     newUser.user_id,
-                    { user_type: dbUserType, identification: dbIdentification }
+                    { user_type: dbUserType, identification: dbIdentification, department_id }
                 );
             }
         }
@@ -161,8 +178,17 @@ export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: users, error } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, is_active, created_at')
-            .or('user_type.in.(osa,safety_security),identification.eq.faculty')
+            .select(`
+                user_id, 
+                email, 
+                user_type, 
+                identification, 
+                department_id,
+                department:department_id(*),
+                is_active, 
+                created_at
+            `)
+            .or('user_type.in.(osa,safety_security,dean),identification.in.(admin,faculty,staff),department_id.not.is.null')
             .order('created_at', { ascending: false });
 
         if (error) throw error;

@@ -52,10 +52,10 @@ export const load: PageServerLoad = async ({ locals }) => {
                         type
                     )
                 `)
-                .in('status', ['approved', 'distributed', 'completed', 'security_checked', 'revoked', 'osa_validated'])
+                .in('status', ['approved', 'distributed', 'completed', 'security_checked', 'revoked', 'osa_validated', 'rejected'])
                 .order('created_at', { ascending: false }),
             supabase
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .select('*')
                 .in('status', ['pending', 'approved']),
             supabase
@@ -68,11 +68,11 @@ export const load: PageServerLoad = async ({ locals }) => {
                 .select('*', { count: 'exact', head: true })
                 .in('status', ['approved', 'distributed', 'completed', 'security_checked']),
             supabase
-                .from('complaint')
+                .from('incident_report')
                 .select('*', { count: 'exact', head: true })
                 .eq('status', 'pending'),
             supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .select('parking_capacity, slot_occupied, slot_unoccupied, date_time')
                 .order('date_time', { ascending: false })
                 .limit(1)

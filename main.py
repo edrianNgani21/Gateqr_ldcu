@@ -350,7 +350,7 @@ def get_latest_parking_row():
     if not campus:
         return _EmptyResponse()
     gate, norm_campus = get_campus_gate_and_name()
-    return supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+    return supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
 
 def get_campus_occupied(campus_name=None):
     """Count active occupied vehicles inside campus (entry records +1 occupied, exit records -1 occupied).
@@ -405,7 +405,7 @@ def sync_parking_availability(occupied_count=None):
     gate, norm_campus = get_campus_gate_and_name()
         
     try:
-        pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
         capacity = 200
         if pa_res.data and pa_res.data[0].get('parking_capacity'):
             capacity = pa_res.data[0]['parking_capacity']
@@ -429,7 +429,7 @@ def sync_parking_availability(occupied_count=None):
 
         if pa_res.data:
             last_id = pa_res.data[0]['parking_availability_id']
-            supabase.table('parking_availability').update({
+            supabase.table('parking_capacity').update({
                 "parking_capacity": capacity,
                 "capacity": capacity,
                 "slot_occupied": occupied_count,
@@ -442,7 +442,7 @@ def sync_parking_availability(occupied_count=None):
                 "recorded_at": now_iso
             }).eq('parking_availability_id', last_id).execute()
         else:
-            supabase.table('parking_availability').insert({
+            supabase.table('parking_capacity').insert({
                 "campus": norm_campus,
                 "campus_gate": gate,
                 "parking_capacity": capacity,
@@ -473,7 +473,7 @@ def refresh_parking_data():
             return
         gate, norm_campus = get_campus_gate_and_name()
 
-        pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
         capacity = 200
         if pa_res.data and pa_res.data[0].get('parking_capacity'):
             capacity = pa_res.data[0]['parking_capacity']
@@ -508,7 +508,7 @@ def poll_supabase():
             if campus:
                 gate, norm_campus = get_campus_gate_and_name()
 
-                pa_res = supabase.table('parking_availability').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+                pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
                 capacity = 200
                 if pa_res.data and pa_res.data[0].get('parking_capacity'):
                     capacity = pa_res.data[0]['parking_capacity']

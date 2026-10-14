@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     try {
         // Fetch pending complaints count from Supabase
         const { count: unreadComplaints } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending');
 

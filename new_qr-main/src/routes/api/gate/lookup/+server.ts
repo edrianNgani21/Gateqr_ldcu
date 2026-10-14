@@ -105,7 +105,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
 
         // Check if there is an approved change vehicle request (which means QR should be deactivated until sticker release)
         const { data: activeChange } = await supabase
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select('status')
             .eq('registration_id', reg.registration_id)
             .eq('status', 'approved')

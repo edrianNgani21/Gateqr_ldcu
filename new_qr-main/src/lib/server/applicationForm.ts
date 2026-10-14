@@ -20,7 +20,7 @@ export async function isApplicationFormOpen(): Promise<boolean> {
 export async function getApplicationFormStatus(): Promise<FormStatusResult> {
     try {
         const { data, error } = await supabase
-            .from('application_form_settings')
+            .from('form_settings')
             .select('*')
             .order('application_form_settings_id', { ascending: false })
             .limit(1)
@@ -58,9 +58,9 @@ export async function setApplicationFormOpen(open: boolean, userId?: number, use
     const statusVal = open ? 'open' : 'closed';
     const emailVal = userEmail || 'System';
 
-    // Check existing record in application_form_settings
+    // Check existing record in form_settings
     const { data: existing, error: fetchErr } = await supabase
-        .from('application_form_settings')
+        .from('form_settings')
         .select('*')
         .limit(1)
         .maybeSingle();
@@ -72,7 +72,7 @@ export async function setApplicationFormOpen(open: boolean, userId?: number, use
     if (existing && existing.application_form_settings_id !== undefined) {
         // Update standard database schema
         const { error: updateErr } = await supabase
-            .from('application_form_settings')
+            .from('form_settings')
             .update({
                 status: statusVal,
                 updated_by: emailVal,
@@ -88,7 +88,7 @@ export async function setApplicationFormOpen(open: boolean, userId?: number, use
     } else if (existing && (existing as any).key !== undefined) {
         // Update key-value schema
         const { error: upsertErr } = await supabase
-            .from('application_form_settings')
+            .from('form_settings')
             .upsert({
                 key: 'application_form_open',
                 value: open ? 'true' : 'false',
@@ -101,7 +101,7 @@ export async function setApplicationFormOpen(open: boolean, userId?: number, use
     } else {
         // Insert new initial row into standard schema
         const { error: insertErr } = await supabase
-            .from('application_form_settings')
+            .from('form_settings')
             .insert({
                 status: statusVal,
                 updated_by: emailVal,
@@ -112,7 +112,7 @@ export async function setApplicationFormOpen(open: boolean, userId?: number, use
         if (insertErr) {
             // Fallback key-value insert if standard table doesn't match
             const { error: fallbackErr } = await supabase
-                .from('application_form_settings')
+                .from('form_settings')
                 .insert({
                     key: 'application_form_open',
                     value: open ? 'true' : 'false',

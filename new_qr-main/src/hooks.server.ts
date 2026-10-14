@@ -40,9 +40,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	// Protect Dean routes (Dean only)
-	if (url.startsWith('/dean')) {
-		if (!event.locals.user || event.locals.user.role !== 'dean') {
+	// Protect Dean and Administrative routes
+	if (url.startsWith('/dean') || url.startsWith('/administrative')) {
+		if (!event.locals.user || (event.locals.user.role !== 'dean' && event.locals.user.role !== 'administrative')) {
 			throw redirect(303, '/login');
 		}
 	}

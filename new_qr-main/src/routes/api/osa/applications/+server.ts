@@ -266,7 +266,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         else if (action === 'release_sticker' && ['distributed', 'osa_validated', 'security_checked'].includes((reg.status || '').toLowerCase())) {
             // Check if this application was undergoing a Request to Change Registration Details
             const { data: changeReq } = await supabase
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .select('*')
                 .eq('registration_id', registration_id)
                 .in('status', ['approved', 'pending'])
@@ -306,7 +306,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }
 
                 await supabase
-                    .from('change_vehicle_request')
+                    .from('modification_request')
                     .update({ status: 'approved', process_at: nowIso })
                     .eq('change_vehicle_request_id', changeReq.change_vehicle_request_id);
 
@@ -616,9 +616,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
             
             // Pre-emptively clean up related records to prevent foreign key errors
-            await supabase.from('change_vehicle_request').delete().eq('registration_id', registration_id);
+            await supabase.from('modification_request').delete().eq('registration_id', registration_id);
             await supabase.from('vehicle_log').delete().eq('registration_id', registration_id);
-            await supabase.from('complaint').delete().eq('registration_id', registration_id);
+            await supabase.from('incident_report').delete().eq('registration_id', registration_id);
 
             const { error: deleteError } = await supabase
                 .from('registration')

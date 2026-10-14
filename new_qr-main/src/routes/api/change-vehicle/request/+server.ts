@@ -132,7 +132,7 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Check if there is already a pending change request
         const { data: existingRequests, error: checkError } = await supabaseAdmin
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select('*')
             .eq('registration_id', registration.registration_id)
             .eq('status', 'pending');
@@ -173,7 +173,7 @@ export async function POST({ request, locals }: RequestEvent) {
         };
 
         const { data: insertedRequest, error: insertError } = await supabaseAdmin
-            .from('change_vehicle_request')
+            .from('modification_request')
             .insert([insertPayload])
             .select()
             .single();
@@ -202,7 +202,7 @@ export async function POST({ request, locals }: RequestEvent) {
             'Your request to change registration details has been submitted to OSA for review.',
             userData.user_id,
             'request_registration_change',
-            'change_vehicle_request',
+            'modification_request',
             insertedRequest?.change_vehicle_request_id,
             registration.registration_id,
             { reason, vehicle_make, vehicle_plate }

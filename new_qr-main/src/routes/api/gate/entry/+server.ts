@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Deactivate QR if there is an approved change request pending sticker release
         const { data: activeChange } = await supabase
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select('status')
             .eq('registration_id', registration_id)
             .eq('status', 'approved')
@@ -87,7 +87,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Get current parking capacity settings
         const { data: settingsData } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('parking_capacity')
             .eq('campus', entryCampus)
             .order('date_time', { ascending: false })
@@ -98,7 +98,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Get current slot counts from the most recent parking availability record
         const { data: lastParkingData } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('slot_occupied, slot_unoccupied')
             .eq('campus', entryCampus)
             .order('date_time', { ascending: false })
@@ -126,7 +126,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Create new parking availability record
         const { error: parkingError } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .insert({
                 vehicle_log_id,
                 campus: entryCampus,
@@ -137,7 +137,7 @@ export const POST: RequestHandler = async ({ request }) => {
             });
 
         if (parkingError) {
-            console.error('[Gate] Parking availability insert error:', parkingError);
+            console.error('[Gate] Parking capacity insert error:', parkingError);
         }
 
         return json({ success: true, message: 'Entry recorded' });

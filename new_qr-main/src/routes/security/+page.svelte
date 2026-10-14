@@ -16,8 +16,8 @@
   const tabs = [
     "Document Review",
     "Sticker Installation",
-    "Registered",
-    "Revoked Registered",
+    "Registered Vehicles",
+    "Rejected or Revoked Accounts & Applications",
   ];
 
   // ── Vehicle Monitoring ──────────────────────────────────────────────────
@@ -32,7 +32,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: "security-realtime",
-      tables: ["registration", "vehicle_log", "parking_availability"],
+      tables: ["registration", "vehicle_log", "parking_capacity"],
       onSync: () => {
         fetchLogs();
         fetchParkingStatus();
@@ -53,13 +53,13 @@
           (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
       );
     }
-    if (t === "Registered") {
+    if (t === "Registered Vehicles" || t === "Registered") {
       return vehicles.filter(
         (v: any) => (v.status || "").toLowerCase() === "approved"
       );
     }
-    if (t === "Revoked Registered") {
-      return vehicles.filter((v: any) => (v.status || "").toLowerCase() === "revoked");
+    if (t === "Rejected or Revoked Accounts & Applications" || t === "Revoked Registered") {
+      return vehicles.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()));
     }
     return [];
   }
@@ -133,14 +133,14 @@
 
   function clickOutside(node: HTMLElement, callback: () => void) {
     const handleClick = (e: MouseEvent) => {
-      if (node && !node.contains(e.target as Node) && !e.defaultPrevented) {
+      if (node && !node.contains(e.target as Node)) {
         callback();
       }
     };
-    document.addEventListener("click", handleClick, true);
+    document.addEventListener("click", handleClick);
     return {
       destroy() {
-        document.removeEventListener("click", handleClick, true);
+        document.removeEventListener("click", handleClick);
       },
     };
   }
@@ -164,36 +164,44 @@
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Role filter functionality
+  // Role filter functionality - All university gate roles
   const allRoles = [
     "student",
-    "employee",
-    "visitor",
+    "faculty",
+    "staff",
+    "administrator",
     "concessionaire",
+    "supplier",
+    "vps",
+    "visitor",
     "guest",
     "vip",
   ];
   let selectedRoles = $state<string[]>([]);
   let roleDropdownOpen = $state(false);
 
-  function toggleRole(role: string) {
-    if (selectedRoles.includes(role)) {
-      selectedRoles = selectedRoles.filter((r) => r !== role);
+  function formatRoleLabel(role: string): string {
+    const lower = (role || "").toLowerCase();
+    if (lower === "vps") return "VPS";
+    if (lower === "vip") return "VIP";
+    return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+
+  function selectRole(role: string) {
+    if (role === 'all' || !role) {
+      selectedRoles = [];
     } else {
-      selectedRoles = [...selectedRoles, role];
+      selectedRoles = [role];
     }
+    roleDropdownOpen = false;
     currentPage = 1;
     fetchLogs();
   }
 
   function getRoleDropdownLabel() {
-    if (selectedRoles.length === 0) return "All Roles";
-    if (selectedRoles.length === allRoles.length) return "All Roles";
-    if (selectedRoles.length === 1)
-      return (
-        selectedRoles[0].charAt(0).toUpperCase() + selectedRoles[0].slice(1)
-      );
-    return `${selectedRoles.length} Roles Selected`;
+    if (selectedRoles.length === 0 || selectedRoles.length === allRoles.length) return "All Roles";
+    if (selectedRoles.length === 1) return formatRoleLabel(selectedRoles[0]);
+    return formatRoleLabel(selectedRoles[0]);
   }
 
   function toDocUrl(val: any): string | null {
@@ -245,12 +253,12 @@
         (v: any) =>
           (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
       );
-    } else if (tab === "Registered") {
+    } else if (tab === "Registered Vehicles" || tab === "Registered") {
       filtered = filtered.filter(
         (v: any) => (v.status || "").toLowerCase() === "approved"
       );
-    } else if (tab === "Revoked Registered") {
-      filtered = filtered.filter((v: any) => (v.status || "").toLowerCase() === "revoked");
+    } else if (tab === "Rejected or Revoked Accounts & Applications" || tab === "Revoked Registered") {
+      filtered = filtered.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()));
     }
 
     if (roleFilter !== "all") {
@@ -259,6 +267,10 @@
         if (roleFilter === "student") return r === "student";
         if (roleFilter === "faculty") return r === "faculty";
         if (roleFilter === "staff") return r === "staff" || r === "employee";
+        if (roleFilter === "administrator") return r === "administrator" || r === "admin";
+        if (roleFilter === "concessionaire") return r === "concessionaire" || r === "concessionnaire";
+        if (roleFilter === "supplier") return r === "supplier";
+        if (roleFilter === "vps") return r === "vps";
         return r === roleFilter.toLowerCase();
       });
     }
@@ -716,7 +728,7 @@
 
   <TabBar {tabs} active={tab} onchange={(t) => (tab = t)} />
 
-  {#if tab === "Document Review" || tab === "Sticker Installation" || tab === "Registered" || tab === "Revoked Registered"}
+  {#if tab === "Document Review" || tab === "Sticker Installation" || tab === "Registered" || tab === "Registered Vehicles" || tab === "Revoked Registered" || tab === "Rejected or Revoked Accounts & Applications"}
     <!-- Monitoring Tab - Registered Vehicles -->
     <div class="controls-row">
       <div class="search-wrap">
@@ -753,6 +765,10 @@
           <option value="student">Student</option>
           <option value="faculty">Faculty</option>
           <option value="staff">Staff</option>
+          <option value="administrator">Administrator</option>
+          <option value="concessionaire">Concessionaire</option>
+          <option value="supplier">Supplier</option>
+          <option value="vps">VPS</option>
         </select>
         <select bind:value={vehicleTypeFilter} class="filter-select">
           <option value="all">All Vehicles</option>
@@ -898,6 +914,73 @@
           <h2 class="title">Gate History</h2>
         </div>
         <div class="filters">
+          <div
+            class="dropdown-wrap"
+            use:clickOutside={() => (roleDropdownOpen = false)}
+          >
+            <button
+              type="button"
+              class="filter-select dropdown-btn"
+              onclick={(e) => {
+                e.stopPropagation();
+                roleDropdownOpen = !roleDropdownOpen;
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={roleDropdownOpen}
+            >
+              <span>{getRoleDropdownLabel()}</span>
+              <svg
+                class="dropdown-arrow"
+                class:rotated={roleDropdownOpen}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            {#if roleDropdownOpen}
+              <div class="dropdown-menu" role="listbox">
+                <button
+                  type="button"
+                  class="dropdown-item"
+                  class:selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                  onclick={() => selectRole('all')}
+                  role="option"
+                  aria-selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                >
+                  <span>All Roles</span>
+                  {#if selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                    <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  {/if}
+                </button>
+                {#each allRoles as role}
+                  <button
+                    type="button"
+                    class="dropdown-item"
+                    class:selected={selectedRoles.includes(role)}
+                    onclick={() => selectRole(role)}
+                    role="option"
+                    aria-selected={selectedRoles.includes(role)}
+                  >
+                    <span>{formatRoleLabel(role)}</span>
+                    {#if selectedRoles.includes(role)}
+                      <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
           <select
             bind:value={boundFilter}
             onchange={() => {
@@ -1134,22 +1217,64 @@
             use:clickOutside={() => (roleDropdownOpen = false)}
           >
             <button
+              type="button"
               class="filter-select dropdown-btn"
-              onclick={() => (roleDropdownOpen = !roleDropdownOpen)}
+              onclick={(e) => {
+                e.stopPropagation();
+                roleDropdownOpen = !roleDropdownOpen;
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={roleDropdownOpen}
             >
-              {getRoleDropdownLabel()}
+              <span>{getRoleDropdownLabel()}</span>
+              <svg
+                class="dropdown-arrow"
+                class:rotated={roleDropdownOpen}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
             </button>
             {#if roleDropdownOpen}
-              <div class="dropdown-menu">
+              <div class="dropdown-menu" role="listbox">
+                <button
+                  type="button"
+                  class="dropdown-item"
+                  class:selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                  onclick={() => selectRole('all')}
+                  role="option"
+                  aria-selected={selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                >
+                  <span>All Roles</span>
+                  {#if selectedRoles.length === 0 || selectedRoles.length === allRoles.length}
+                    <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  {/if}
+                </button>
                 {#each allRoles as role}
-                  <label class="dropdown-item">
-                    <input
-                      type="checkbox"
-                      checked={selectedRoles.includes(role)}
-                      onchange={() => toggleRole(role)}
-                    />
-                    {role.charAt(0).toUpperCase() + role.slice(1)}
-                  </label>
+                  <button
+                    type="button"
+                    class="dropdown-item"
+                    class:selected={selectedRoles.includes(role)}
+                    onclick={() => selectRole(role)}
+                    role="option"
+                    aria-selected={selectedRoles.includes(role)}
+                  >
+                    <span>{formatRoleLabel(role)}</span>
+                    {#if selectedRoles.includes(role)}
+                      <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    {/if}
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -1791,42 +1916,74 @@
 
   .dropdown-wrap {
     position: relative;
+    display: inline-block;
   }
   .dropdown-btn {
     min-width: 130px;
     text-align: left;
-    display: flex;
+    display: inline-flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .dropdown-arrow {
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    color: var(--text-secondary, #64748b);
+  }
+  .dropdown-arrow.rotated {
+    transform: rotate(180deg);
   }
   .dropdown-menu {
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    background: var(--surface);
+    background: #ffffff;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-md);
-    padding: 0.5rem;
-    z-index: 100;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    padding: 0.35rem;
+    z-index: 1000;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    min-width: 140px;
+    gap: 2px;
+    min-width: 175px;
+    max-height: 290px;
+    overflow-y: auto;
   }
   .dropdown-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    justify-content: space-between;
+    width: 100%;
     font-size: 0.8125rem;
+    font-weight: 500;
     color: var(--text);
     cursor: pointer;
-    padding: 0.25rem 0.5rem;
+    padding: 0.45rem 0.65rem;
     border-radius: var(--radius-sm);
-    transition: background 0.15s;
+    border: none;
+    background: transparent;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+    font-family: inherit;
+    box-sizing: border-box;
   }
   .dropdown-item:hover {
-    background: var(--surface-hover);
+    background: #fdf2f4;
+    color: var(--maroon, #8B1A3C);
+  }
+  .dropdown-item.selected {
+    background: rgba(139, 26, 60, 0.08);
+    color: var(--maroon, #8B1A3C);
+    font-weight: 700;
+  }
+  .check-icon {
+    color: var(--maroon, #8B1A3C);
+    margin-left: 0.5rem;
+    flex-shrink: 0;
   }
 
   /* ── Loading ─────────────────────────────────────────────────────────── */

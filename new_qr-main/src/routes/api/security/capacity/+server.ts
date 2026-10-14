@@ -24,9 +24,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .eq('campus_gate', gate)
                 .eq('is_active', true);
 
-            // Also clear it from parking_availability just to be safe
+            // Also clear it from parking_capacity just to be safe
             const { data: latestPa } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .select('parking_availability_id')
                 .or(`campus.eq.${campus},campus_gate.eq.${gate}`)
                 .order('date_time', { ascending: false })
@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .maybeSingle();
                 
             if (latestPa) {
-                await supabase.from('parking_availability').update({ event_name: null }).eq('parking_availability_id', latestPa.parking_availability_id);
+                await supabase.from('parking_capacity').update({ event_name: null }).eq('parking_availability_id', latestPa.parking_availability_id);
             }
             return json({ success: true });
         }
@@ -68,7 +68,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // We insert a new record for this campus to act as the latest state
         // Need to know current occupied to carry it over
         const { data: lastData } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('*')
             .or(`campus.eq.${campus},campus_gate.eq.${gate}`)
             .order('date_time', { ascending: false })
@@ -82,7 +82,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (lastData) {
             // Update the existing latest record to avoid creating duplicate rows and foreign key constraint issues
             const { error } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .update({
                     parking_capacity,
                     capacity: parking_capacity,
@@ -114,23 +114,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (vehicleLog?.vehicle_log_id) {
                 vehicle_log_id = vehicleLog.vehicle_log_id;
             } else {
-                // Fallback: Try to get any valid vehicle_log_id from existing parking_availability
+                // Fallback: Try to get any valid vehicle_log_id from existing parking_capacity
                 const { data: anyPa } = await supabase
-                    .from('parking_availability')
+                    .from('parking_capacity')
                     .select('vehicle_log_id')
                     .not('vehicle_log_id', 'is', null)
                     .limit(1)
                     .maybeSingle();
                 
-                if (anyPa?.vehicle_log_id) {
-                    vehicle_log_id = anyPa.vehicle_log_id;
-                } else {
-                    vehicle_log_id = null;
-                }
+            if (anyPa?.vehicle_log_id) {
+                vehicle_log_id = anyPa.vehicle_log_id;
+            } else {
+                vehicle_log_id = null;
             }
+        }
 
             const { error } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .insert([{
                     vehicle_log_id,
                     campus,
@@ -150,14 +150,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 // If it still fails, try updating ANY existing record and changing its campus
                 // (Only do this as an absolute last resort to avoid crashing)
                 const { data: anyRecord } = await supabase
-                    .from('parking_availability')
+                    .from('parking_capacity')
                     .select('*')
                     .limit(1)
                     .maybeSingle();
                     
                 if (anyRecord) {
                     const { error: updateError } = await supabase
-                        .from('parking_availability')
+                        .from('parking_capacity')
                         .insert([{
                             vehicle_log_id: anyRecord.vehicle_log_id,
                             campus,
@@ -169,13 +169,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                         
                     if (updateError) {
                         if (updateError.code === '23502' || updateError.code === '23503') {
-                            return json({ error: 'DATABASE ERROR: You must run "ALTER TABLE parking_availability ALTER COLUMN vehicle_log_id DROP NOT NULL;" in your Supabase SQL Editor to initialize capacity!' }, { status: 400 });
+                            return json({ error: 'DATABASE ERROR: You must run "ALTER TABLE parking_capacity ALTER COLUMN vehicle_log_id DROP NOT NULL;" in your Supabase SQL Editor to initialize capacity!' }, { status: 400 });
                         }
                         throw updateError;
                     }
                 } else {
                     if (error.code === '23502' || error.code === '23503') {
-                        return json({ error: 'DATABASE ERROR: You must run "ALTER TABLE parking_availability ALTER COLUMN vehicle_log_id DROP NOT NULL;" in your Supabase SQL Editor to initialize capacity!' }, { status: 400 });
+                        return json({ error: 'DATABASE ERROR: You must run "ALTER TABLE parking_capacity ALTER COLUMN vehicle_log_id DROP NOT NULL;" in your Supabase SQL Editor to initialize capacity!' }, { status: 400 });
                     }
                     throw error;
                 }

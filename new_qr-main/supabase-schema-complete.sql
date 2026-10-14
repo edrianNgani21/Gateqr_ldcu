@@ -21,10 +21,10 @@ BEGIN
     FROM information_schema.tables
     WHERE table_schema = 'public'
       AND table_name IN (
-        'application_form_settings', 'notifications', 'notification',
-        'change_vehicle_requests', 'change_vehicle_request',
+        'form_settings', 'application_form_settings', 'notifications', 'notification',
+        'modification_request', 'change_vehicle_requests', 'change_vehicle_request',
         'otp_codes', 'guest_log', 'guest', 'vip_log',
-        'complaint', 'parking_availability', 'vehicle_log',
+        'incident_report', 'complaint', 'parking_capacity', 'parking_availability', 'vehicle_log',
         'registration', 'vehicle_information', 'user_log',
         'system_settings', 'department', 'user', 'users',
         'campus_events', 'campus_event'
@@ -73,11 +73,16 @@ CREATE TYPE form_status_enum        AS ENUM ('open', 'closed');
 -- ---------------------------------------------------------------------
 
 -- Table 1. DEPARTMENT
+-- Migration SQL for existing databases:
+-- ALTER TABLE department RENAME COLUMN department_name TO academic_department;
+-- ALTER TABLE department ADD COLUMN IF NOT EXISTS administrative_department VARCHAR(100) UNIQUE;
+-- ALTER TABLE department ALTER COLUMN academic_department DROP NOT NULL;
 CREATE TABLE department (
-  department_id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  department_name VARCHAR(100) NOT NULL UNIQUE,
-  is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
-  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  department_id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  academic_department       VARCHAR(100) UNIQUE,
+  administrative_department VARCHAR(100) UNIQUE,
+  is_active                 BOOLEAN      NOT NULL DEFAULT TRUE,
+  created_at                TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- Table 2. USERS ("user" is reserved in Postgres; table is "users")
@@ -168,8 +173,8 @@ CREATE TABLE vehicle_log (
   CONSTRAINT vehicle_log_time_chk  CHECK (check_out IS NULL OR check_out >= check_in)
 );
 
--- Table 7. COMPLAINT
-CREATE TABLE complaint (
+-- Table 7. INCIDENT_REPORT (Formerly Complaint)
+CREATE TABLE incident_report (
   complaint_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id      INTEGER NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
   message      TEXT    NOT NULL,
@@ -179,8 +184,8 @@ CREATE TABLE complaint (
   resolved_at  TIMESTAMPTZ            -- null until resolved
 );
 
--- Table 8. PARKING_AVAILABILITY
-CREATE TABLE parking_availability (
+-- Table 8. PARKING_CAPACITY (Formerly Parking_Availability)
+CREATE TABLE parking_capacity (
   parking_availability_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   vehicle_log_id          INTEGER REFERENCES vehicle_log (vehicle_log_id) ON DELETE SET NULL,
   parking_capacity        INTEGER NOT NULL DEFAULT 200 CHECK (parking_capacity >= 0),
@@ -216,8 +221,8 @@ CREATE TABLE notification (
   is_read             BOOLEAN NOT NULL DEFAULT FALSE
 );
 
--- Table 10. CHANGE_VEHICLE_REQUEST
-CREATE TABLE change_vehicle_request (
+-- Table 10. MODIFICATION_REQUEST (Formerly Change_Vehicle_Request)
+CREATE TABLE modification_request (
   change_vehicle_request_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id           INTEGER NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
   registration_id   INTEGER NOT NULL REFERENCES registration (registration_id) ON DELETE CASCADE,
@@ -242,8 +247,8 @@ CREATE TABLE campus_event (
   CONSTRAINT campus_event_dates_chk CHECK (end_date >= start_date)
 );
 
--- Table 12. APPLICATION_FORM_SETTINGS
-CREATE TABLE application_form_settings (
+-- Table 12. FORM_SETTINGS (Formerly Application_Form_Settings)
+CREATE TABLE form_settings (
   application_form_settings_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id    INTEGER REFERENCES users (user_id) ON DELETE SET NULL,
   status     form_status_enum NOT NULL DEFAULT 'open',
@@ -252,13 +257,18 @@ CREATE TABLE application_form_settings (
 );
 
 -- ---------------------------------------------------------------------
--- 5. REMOVE LEGACY COMPATIBILITY VIEWS (Clean database structure)
+-- 5. COMPATIBILITY VIEWS (Ensure both old and new table names resolve)
 -- ---------------------------------------------------------------------
 DROP VIEW IF EXISTS public."user" CASCADE;
 DROP VIEW IF EXISTS public.notifications CASCADE;
 DROP VIEW IF EXISTS public.change_vehicle_requests CASCADE;
 DROP VIEW IF EXISTS public.campus_events CASCADE;
 DROP VIEW IF EXISTS public.guest_log CASCADE;
+
+CREATE OR REPLACE VIEW public.complaint AS SELECT * FROM public.incident_report;
+CREATE OR REPLACE VIEW public.parking_availability AS SELECT * FROM public.parking_capacity;
+CREATE OR REPLACE VIEW public.change_vehicle_request AS SELECT * FROM public.modification_request;
+CREATE OR REPLACE VIEW public.application_form_settings AS SELECT * FROM public.form_settings;
 
 -- ---------------------------------------------------------------------
 -- 6. INDEXES (Foreign keys + frequent lookups)
@@ -278,15 +288,15 @@ CREATE INDEX idx_vehicle_log_vehicle         ON vehicle_log (vehicle_information
 CREATE INDEX idx_vehicle_log_guest           ON vehicle_log (guest_id);
 CREATE INDEX idx_vehicle_log_check_in        ON vehicle_log (check_in DESC);
 CREATE INDEX idx_vehicle_log_status          ON vehicle_log (logged_status);
-CREATE INDEX idx_complaint_user              ON complaint (user_id);
-CREATE INDEX idx_parking_vehicle_log         ON parking_availability (vehicle_log_id);
-CREATE INDEX idx_parking_recorded_at         ON parking_availability (recorded_at DESC);
+CREATE INDEX idx_complaint_user              ON incident_report (user_id);
+CREATE INDEX idx_parking_vehicle_log         ON parking_capacity (vehicle_log_id);
+CREATE INDEX idx_parking_recorded_at         ON parking_capacity (recorded_at DESC);
 CREATE INDEX idx_notification_user_unread    ON notification (user_id, is_read);
-CREATE INDEX idx_cvr_user                    ON change_vehicle_request (user_id);
-CREATE INDEX idx_cvr_registration            ON change_vehicle_request (registration_id);
-CREATE INDEX idx_cvr_recipient               ON change_vehicle_request (recipient_id);
+CREATE INDEX idx_cvr_user                    ON modification_request (user_id);
+CREATE INDEX idx_cvr_registration            ON modification_request (registration_id);
+CREATE INDEX idx_cvr_recipient               ON modification_request (recipient_id);
 CREATE INDEX idx_campus_event_user           ON campus_event (user_id);
-CREATE INDEX idx_app_form_settings_user      ON application_form_settings (user_id);
+CREATE INDEX idx_app_form_settings_user      ON form_settings (user_id);
 
 -- ---------------------------------------------------------------------
 -- 7. AUTOMATIC TIMESTAMPS & WORKFLOW TRIGGERS
@@ -307,7 +317,7 @@ CREATE TRIGGER trg_registration_updated_at
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER trg_app_form_settings_updated_at
-  BEFORE UPDATE ON application_form_settings
+  BEFORE UPDATE ON form_settings
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Trigger: Automatically manage registration workflow timestamps
@@ -349,7 +359,7 @@ BEGIN
     IF NEW.campus IS NULL OR NEW.campus = '' OR NEW.campus = 'Main Campus' THEN
       NEW.campus := CASE NEW.campus_gate WHEN 'rnp' THEN 'RNP' WHEN 'paseo' THEN 'PASEO' ELSE 'Main Campus' END;
     END IF;
-  ELSIF TG_TABLE_NAME = 'parking_availability' THEN
+  ELSIF TG_TABLE_NAME = 'parking_capacity' OR TG_TABLE_NAME = 'parking_availability' THEN
     NEW.capacity := COALESCE(NEW.parking_capacity, NEW.capacity, 200);
     NEW.occupied := COALESCE(NEW.slot_occupied, NEW.occupied, 0);
     NEW.available := COALESCE(NEW.slot_unoccupied, NEW.available, 200);
@@ -375,7 +385,7 @@ CREATE TRIGGER trg_vehicle_log_legacy_sync
   FOR EACH ROW EXECUTE FUNCTION trg_sync_legacy_columns();
 
 CREATE TRIGGER trg_parking_legacy_sync
-  BEFORE INSERT OR UPDATE ON parking_availability
+  BEFORE INSERT OR UPDATE ON parking_capacity
   FOR EACH ROW EXECUTE FUNCTION trg_sync_legacy_columns();
 
 CREATE TRIGGER trg_notification_legacy_sync
@@ -417,7 +427,7 @@ BEGIN
 
   v_unoccupied := GREATEST(0, v_capacity - v_occupied);
 
-  INSERT INTO parking_availability (
+  INSERT INTO parking_capacity (
     vehicle_log_id,
     parking_capacity,
     slot_occupied,
@@ -787,12 +797,12 @@ ALTER TABLE vehicle_information        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registration               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guest                      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicle_log                ENABLE ROW LEVEL SECURITY;
-ALTER TABLE complaint                  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE parking_availability       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incident_report            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parking_capacity           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification               ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_vehicle_request     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE modification_request       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE campus_event               ENABLE ROW LEVEL SECURITY;
-ALTER TABLE application_form_settings  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_settings              ENABLE ROW LEVEL SECURITY;
 
 -- Department: readable by all signed-in users
 CREATE POLICY "Departments are readable by authenticated users"
@@ -863,18 +873,18 @@ CREATE POLICY "Users update their own notifications"
 CREATE POLICY "Allow authenticated read on vehicle_log"
   ON vehicle_log FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Allow authenticated read on parking_availability"
-  ON parking_availability FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated read on parking_capacity"
+  ON parking_capacity FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Allow authenticated read on campus_event"
   ON campus_event FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Allow authenticated read on application_form_settings"
-  ON application_form_settings FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated read on form_settings"
+  ON form_settings FOR SELECT TO authenticated USING (true);
 
--- Complaints
+-- Incident Reports (Complaints)
 CREATE POLICY "Users view own complaints"
-  ON complaint FOR SELECT TO authenticated
+  ON incident_report FOR SELECT TO authenticated
   USING (
     user_id = (SELECT get_current_user_id())
     OR is_osa_admin((SELECT auth.jwt() ->> 'email'))
@@ -882,7 +892,7 @@ CREATE POLICY "Users view own complaints"
   );
 
 CREATE POLICY "Users create complaint"
-  ON complaint FOR INSERT TO authenticated
+  ON incident_report FOR INSERT TO authenticated
   WITH CHECK (user_id = (SELECT get_current_user_id()));
 
 -- ---------------------------------------------------------------------
@@ -890,27 +900,27 @@ CREATE POLICY "Users create complaint"
 -- ---------------------------------------------------------------------
 ALTER TABLE public.registration REPLICA IDENTITY FULL;
 ALTER TABLE public.vehicle_log REPLICA IDENTITY FULL;
-ALTER TABLE public.complaint REPLICA IDENTITY FULL;
-ALTER TABLE public.change_vehicle_request REPLICA IDENTITY FULL;
-ALTER TABLE public.parking_availability REPLICA IDENTITY FULL;
+ALTER TABLE public.incident_report REPLICA IDENTITY FULL;
+ALTER TABLE public.modification_request REPLICA IDENTITY FULL;
+ALTER TABLE public.parking_capacity REPLICA IDENTITY FULL;
 ALTER TABLE public.campus_event REPLICA IDENTITY FULL;
 ALTER TABLE public.department REPLICA IDENTITY FULL;
 ALTER TABLE public.users REPLICA IDENTITY FULL;
 ALTER TABLE public.notification REPLICA IDENTITY FULL;
-ALTER TABLE public.application_form_settings REPLICA IDENTITY FULL;
+ALTER TABLE public.form_settings REPLICA IDENTITY FULL;
 
 DO $$
 BEGIN
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.registration; EXCEPTION WHEN duplicate_object THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.vehicle_log; EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.complaint; EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.change_vehicle_request; EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.parking_availability; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.incident_report; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.modification_request; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.parking_capacity; EXCEPTION WHEN duplicate_object THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.campus_event; EXCEPTION WHEN duplicate_object THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.department; EXCEPTION WHEN duplicate_object THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.users; EXCEPTION WHEN duplicate_object THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.notification; EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.application_form_settings; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.form_settings; EXCEPTION WHEN duplicate_object THEN NULL; END;
 END $$;
 
 -- ---------------------------------------------------------------------
@@ -936,7 +946,7 @@ ON CONFLICT (email) DO UPDATE SET
   password_hash = '$2b$10$/ShvmvVm2Uk8nfCqVNFg9.3fxQs4K8cIqmAayu77FuOKHcahsJPvW';
 
 -- Default initial application form setting
-INSERT INTO application_form_settings (status, updated_by)
+INSERT INTO form_settings (status, updated_by)
 VALUES ('open', 'System')
 ON CONFLICT DO NOTHING;
 
@@ -958,5 +968,35 @@ ALTER TYPE complaint_status_enum ADD VALUE IF NOT EXISTS 'Resolved';
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS osa_dist_at TIMESTAMPTZ;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_released_at TIMESTAMPTZ;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_installed_at TIMESTAMPTZ;
+
+-- ---------------------------------------------------------------------
+-- 14. TABLE RENAMES MIGRATION (Safe rename for existing databases)
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+  -- 1. application_form_settings -> form_settings
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'application_form_settings' AND table_type = 'BASE TABLE')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'form_settings') THEN
+    ALTER TABLE public.application_form_settings RENAME TO form_settings;
+  END IF;
+
+  -- 2. change_vehicle_request -> modification_request
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'change_vehicle_request' AND table_type = 'BASE TABLE')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'modification_request') THEN
+    ALTER TABLE public.change_vehicle_request RENAME TO modification_request;
+  END IF;
+
+  -- 3. complaint -> incident_report
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'complaint' AND table_type = 'BASE TABLE')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'incident_report') THEN
+    ALTER TABLE public.complaint RENAME TO incident_report;
+  END IF;
+
+  -- 4. parking_availability -> parking_capacity
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'parking_availability' AND table_type = 'BASE TABLE')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'parking_capacity') THEN
+    ALTER TABLE public.parking_availability RENAME TO parking_capacity;
+  END IF;
+END $$;
 
 

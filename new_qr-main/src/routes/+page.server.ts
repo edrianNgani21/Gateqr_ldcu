@@ -25,16 +25,36 @@ export const load: PageServerLoad = async ({ locals }) => {
         // Fetch only active departments for the select dropdown from Supabase
         const { data: rows } = await supabase
             .from('department')
-            .select('department_name')
+            .select('*')
             .eq('is_active', true)
-            .order('department_name', { ascending: true });
+            .order('created_at', { ascending: true });
         
+        const academicDepartments: string[] = [];
+        const administrativeDepartments: string[] = [];
+
+        (rows || []).forEach(r => {
+            const admin = r.administrative_department || r['Administrative Department'];
+            const acad = r.academic_department || r['Academic Department'];
+            if (admin) {
+                administrativeDepartments.push(admin);
+            } else if (acad) {
+                academicDepartments.push(acad);
+            } else if (r.department_name) {
+                academicDepartments.push(r.department_name);
+            }
+        });
+
+        const sortedAcad = Array.from(new Set(academicDepartments)).sort();
+        const sortedAdmin = Array.from(new Set(administrativeDepartments)).sort();
+
         return {
             userEmail,
             applicationOpen,
-            departments: (rows || []).map(r => r.department_name)
+            academicDepartments: sortedAcad,
+            administrativeDepartments: sortedAdmin,
+            departments: [...sortedAcad, ...sortedAdmin]
         };
     } catch (e) {
-        return { userEmail, applicationOpen, departments: [] };
+        return { userEmail, applicationOpen, academicDepartments: [], administrativeDepartments: [], departments: [] };
     }
 };

@@ -10,7 +10,7 @@
   $effect(() => {
     const channel = supabaseClient
       .channel('osa-change-requests-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_vehicle_request' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'modification_request' }, () => {
         invalidateAll();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
@@ -205,18 +205,18 @@
 </script>
 
 <svelte:head>
-  <title>Request to Change Registration Details — OSA | GateQR</title>
+  <title>Profile Update Requests — OSA | GateQR</title>
 </svelte:head>
 
 <AppShell userEmail={data.userEmail} showSidebar={true}>
-  <NavBar title="Request to Change Registration Details" />
+  <NavBar title="Profile Update Requests" />
 
   <div class="page-container">
     <!-- Header banner -->
     <div class="info-header">
       <div class="ih-text">
-        <h2>Requests to Change Registration Details</h2>
-        <p>Review registered applicants requesting to update their registration and vehicle details. Accepting a request will schedule them for hardcopy compliance and seamlessly move the application into the <strong>Manage Applications</strong> system flow.</p>
+        <h2>Profile Update Requests</h2>
+        <p>Review registered applicants requesting to update their profile, registration, and vehicle details. Accepting a request will schedule them for document submission and seamlessly move the application into the <strong>Manage Applications</strong> system flow.</p>
       </div>
     </div>
 

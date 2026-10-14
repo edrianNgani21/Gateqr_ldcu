@@ -14,7 +14,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
 
         // Get the current complaint to check if schedule/status changed
         const { data: complaint, error: queryError } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .select(`
                 *,
                 user:user_id(
@@ -39,7 +39,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
 
         if (Object.keys(updateData).length > 0) {
             const { error: updateError } = await supabase
-                .from('complaint')
+                .from('incident_report')
                 .update(updateData)
                 .eq('complaint_id', id);
 
@@ -82,7 +82,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
         const { id } = params;
 
         const { data: complaint, error: queryError } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .select(`
                 *,
                 user:user_id(
@@ -104,7 +104,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
         }
 
         const { error: deleteError } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .delete()
             .eq('complaint_id', id);
 

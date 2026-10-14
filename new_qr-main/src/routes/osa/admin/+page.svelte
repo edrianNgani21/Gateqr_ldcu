@@ -15,7 +15,8 @@
     let adminEmail = $state('');
     let adminPassword = $state('');
     let adminPin = $state('');
-    let adminType = $state('OSA');
+    let adminType = $state('Office of Student Affairs');
+    let selectedDepartmentId = $state('');
     let loading = $state(false);
     let error = $state('');
     let success = $state('');
@@ -26,14 +27,81 @@
 
     const isPrimaryAdmin = $derived((data?.userEmail || '').trim().toLowerCase() === 'aluban98304@liceo.edu.ph');
 
-    const adminTypes = ['OSA', 'Safety Security', 'Dean'];
+    const adminTypes = [
+        'Office of Student Affairs',
+        'Safety and Security',
+        'Academic Department Head',
+        'Administrative Department'
+    ];
+
+    const adminTypeCategories = [
+        { 
+            key: 'Office of Student Affairs', 
+            label: 'Office of Student Affairs',
+            badgeBg: 'rgba(107, 26, 42, 0.1)',
+            badgeColor: '#6b1a2a',
+            icon: 'osa'
+        },
+        { 
+            key: 'Safety and Security', 
+            label: 'Safety and Security',
+            badgeBg: 'rgba(30, 64, 175, 0.1)',
+            badgeColor: '#1e40af',
+            icon: 'security'
+        },
+        { 
+            key: 'Academic Department Head', 
+            label: 'Academic Department Head',
+            badgeBg: 'rgba(21, 128, 61, 0.1)',
+            badgeColor: '#15803d',
+            icon: 'academic'
+        },
+        { 
+            key: 'Administrative Department', 
+            label: 'Administrative Department',
+            badgeBg: 'rgba(180, 83, 9, 0.1)',
+            badgeColor: '#b45309',
+            icon: 'administrative'
+        }
+    ];
+
+    function getAdminCategoryKey(admin: any): string {
+        const ut = (admin?.user_type || '').toLowerCase();
+        const id = (admin?.identification || '').toLowerCase();
+        const dept = admin?.department;
+        const isAdminDept = id === 'staff' || (dept && (dept.administrative_department || dept['Administrative Department']));
+
+        if (ut === 'osa') return 'Office of Student Affairs';
+        if (ut === 'safety_security' || ut.includes('security')) return 'Safety and Security';
+        if (ut === 'dean' || id === 'faculty' || id === 'staff') {
+            if (isAdminDept) return 'Administrative Department';
+            return 'Academic Department Head';
+        }
+        return 'Office of Student Affairs';
+    }
+
+    function getDepartmentDisplay(admin: any): string {
+        return admin?.department?.academic_department || 
+               admin?.department?.['Academic Department'] || 
+               admin?.department?.administrative_department || 
+               admin?.department?.['Administrative Department'] || 
+               admin?.department?.department_name || 
+               '—';
+    }
 
     function formatRole(admin: any) {
         const ut = (admin?.user_type || '').toLowerCase();
         const id = (admin?.identification || '').toLowerCase();
-        if (ut === 'osa') return 'OSA Admin';
-        if (ut === 'safety_security' || ut.includes('security')) return 'Safety Security';
-        if (ut === 'dean' || id === 'faculty') return 'Dean';
+        const deptName = getDepartmentDisplay(admin);
+
+        if (ut === 'osa') return 'Office of Student Affairs';
+        if (ut === 'safety_security' || ut.includes('security')) return 'Safety and Security';
+        if (ut === 'dean' || id === 'faculty' || id === 'staff') {
+            if (id === 'staff' || (admin?.department?.administrative_department || admin?.department?.['Administrative Department'])) {
+                return deptName !== '—' ? `Administrative Department (${deptName})` : 'Administrative Department';
+            }
+            return deptName !== '—' ? `Academic Department Head (${deptName})` : 'Academic Department Head';
+        }
         return admin?.user_type || 'Admin';
     }
 
@@ -94,6 +162,11 @@
             return;
         }
 
+        if ((adminType === 'Academic Department Head' || adminType === 'Administrative Department') && !selectedDepartmentId) {
+            error = `Please select an ${adminType === 'Administrative Department' ? 'Administrative Department' : 'Academic Department'}`;
+            return;
+        }
+
         if (adminPassword && adminPassword.length < 6) {
             error = 'Password must be at least 6 characters long';
             return;
@@ -116,7 +189,8 @@
                     email: adminEmail.trim(),
                     user_type: adminType,
                     password: adminPassword.trim() || 'Admin123!',
-                    pin: adminPin.trim()
+                    pin: adminPin.trim(),
+                    department_id: selectedDepartmentId ? parseInt(selectedDepartmentId) : null
                 })
             });
 
@@ -125,6 +199,7 @@
                 adminEmail = '';
                 adminPassword = '';
                 adminPin = '';
+                selectedDepartmentId = '';
                 showForm = false;
                 loadAdmins(); // Reload admin list
             } else {
@@ -143,6 +218,7 @@
         adminEmail = '';
         adminPassword = '';
         adminPin = '';
+        selectedDepartmentId = '';
         error = '';
         success = '';
     }
@@ -197,8 +273,13 @@
     }
 </script>
 
+<svelte:head>
+    <title>Accounts — OSA | GateQR</title>
+    <meta name="description" content="Manage administrative and department head accounts in GateQR." />
+</svelte:head>
+
 <AppShell userEmail={data.userEmail} showSidebar={true}>
-    <NavBar title="Add Admin" />
+    <NavBar title="Accounts" />
     
     <div class="admin-container">
 
@@ -308,13 +389,53 @@
                                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                                 <circle cx="9" cy="7" r="4"/>
                             </svg>
-                            <select id="adminType" bind:value={adminType} disabled={loading} class="form-input">
+                            <select id="adminType" bind:value={adminType} onchange={() => selectedDepartmentId = ''} disabled={loading} class="form-input">
                                 {#each adminTypes as type}
                                     <option value={type}>{type}</option>
                                 {/each}
                             </select>
                         </div>
                     </div>
+
+                    {#if adminType === 'Academic Department Head'}
+                        <div class="form-group full-width">
+                            <label for="academicDept">
+                                <span class="label-text">Academic Department</span>
+                                <span class="label-required">*</span>
+                            </label>
+                            <div class="input-wrapper">
+                                <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                    <polyline points="9 22 9 12 15 12 15 22"/>
+                                </svg>
+                                <select id="academicDept" bind:value={selectedDepartmentId} disabled={loading} class="form-input">
+                                    <option value="" disabled selected>Select an academic department...</option>
+                                    {#each (data.academicDepartments || []) as dept}
+                                        <option value={String(dept.id)}>{dept.name}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                        </div>
+                    {:else if adminType === 'Administrative Department'}
+                        <div class="form-group full-width">
+                            <label for="adminDept">
+                                <span class="label-text">Administrative Department</span>
+                                <span class="label-required">*</span>
+                            </label>
+                            <div class="input-wrapper">
+                                <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                    <polyline points="9 22 9 12 15 12 15 22"/>
+                                </svg>
+                                <select id="adminDept" bind:value={selectedDepartmentId} disabled={loading} class="form-input">
+                                    <option value="" disabled selected>Select an administrative department...</option>
+                                    {#each (data.administrativeDepartments || []) as dept}
+                                        <option value={String(dept.id)}>{dept.name}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                        </div>
+                    {/if}
 
                     <div class="form-group full-width">
                         <label for="adminPassword">
@@ -420,75 +541,117 @@
                     <p>No admin accounts found.</p>
                 </div>
             {:else}
-                <div class="admin-grid">
-                    {#each admins as admin}
-                        <div class="admin-card">
-                            <div class="admin-header">
-                                <div class="admin-avatar" class:active={admin.is_active} class:inactive={!admin.is_active}>
-                                    {admin.email.charAt(0).toUpperCase()}
+                <div class="admin-type-sections">
+                    {#each adminTypeCategories as category}
+                        {@const groupAdmins = admins.filter(a => getAdminCategoryKey(a) === category.key)}
+                        <div class="admin-type-section-card">
+                            <div class="admin-type-section-header">
+                                <div class="type-header-left">
+                                    <span class="type-icon-bubble" style="background: {category.badgeBg}; color: {category.badgeColor};">
+                                        {#if category.key === 'Office of Student Affairs'}
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                            </svg>
+                                        {:else if category.key === 'Safety and Security'}
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                            </svg>
+                                        {:else if category.key === 'Academic Department Head'}
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                                                <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+                                            </svg>
+                                        {:else}
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                                            </svg>
+                                        {/if}
+                                    </span>
+                                    <h3>{category.label}</h3>
+                                    <span class="type-count-badge">{groupAdmins.length}</span>
                                 </div>
-                                <div class="admin-info">
-                                    <h3>{admin.email}</h3>
-                                    <div class="badges">
-                                        <span class="admin-type-badge">{formatRole(admin)}</span>
-                                        <span class="status-badge" class:active={admin.is_active} class:inactive={!admin.is_active}>
-                                            {admin.is_active ? 'Active' : 'Inactive'}
-                                        </span>
+                            </div>
+
+                            {#if groupAdmins.length === 0}
+                                <div class="empty-category-row">
+                                    <span>No accounts currently registered under {category.label}.</span>
+                                </div>
+                            {:else}
+                                {@const hasDeptCol = category.key !== 'Office of Student Affairs' && category.key !== 'Safety and Security'}
+                                <div class="admin-row-table" class:no-dept={!hasDeptCol}>
+                                    <div class="row-table-header">
+                                        <span class="col-account">Account Email</span>
+                                        {#if hasDeptCol}
+                                            <span class="col-dept">Department / Affiliation</span>
+                                        {/if}
+                                        <span class="col-date">Date Created</span>
+                                        <span class="col-status">Status</span>
+                                        <span class="col-actions">Actions</span>
+                                    </div>
+
+                                    <div class="row-table-body">
+                                        {#each groupAdmins as admin}
+                                            <div class="admin-table-row">
+                                                <!-- Col 1: Account Email & Avatar -->
+                                                <div class="col-account">
+                                                    <div class="admin-avatar" class:active={admin.is_active} class:inactive={!admin.is_active}>
+                                                        {admin.email.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div class="account-meta">
+                                                        <span class="account-email" title={admin.email}>{admin.email}</span>
+                                                    </div>
+                                                </div>
+
+                                                {#if hasDeptCol}
+                                                    <!-- Col 2: Department / Affiliation -->
+                                                    <div class="col-dept">
+                                                        <span class="dept-text">{getDepartmentDisplay(admin)}</span>
+                                                    </div>
+                                                {/if}
+
+                                                <!-- Col 3: Created Date -->
+                                                <div class="col-date">
+                                                    <span class="date-text">{new Date(admin.created_at).toLocaleDateString()}</span>
+                                                </div>
+
+                                                <!-- Col 4: Status Badge -->
+                                                <div class="col-status">
+                                                    <span class="status-pill" class:active={admin.is_active} class:inactive={!admin.is_active}>
+                                                        <span class="status-dot"></span>
+                                                        {admin.is_active ? 'Active' : 'Inactive'}
+                                                    </span>
+                                                </div>
+
+                                                <!-- Col 5: Actions -->
+                                                <div class="col-actions">
+                                                    {#if isPrimaryAdmin}
+                                                        <button 
+                                                            class="row-action-btn toggle-btn"
+                                                            class:activate={!admin.is_active}
+                                                            class:deactivate={admin.is_active}
+                                                            onclick={() => toggleAdminStatus(admin.user_id, admin.is_active)}
+                                                            title={admin.is_active ? 'Deactivate account' : 'Activate account'}
+                                                        >
+                                                            {admin.is_active ? 'Deactivate' : 'Activate'}
+                                                        </button>
+                                                        <button 
+                                                            class="row-action-btn delete-btn" 
+                                                            onclick={() => deleteAdmin(admin.user_id)}
+                                                            title="Delete admin"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    {:else}
+                                                        <span class="read-only-badge">View Only</span>
+                                                    {/if}
+                                                </div>
+                                            </div>
+                                        {/each}
                                     </div>
                                 </div>
-                            </div>
-                            <div class="admin-details">
-                                <div class="detail-item">
-                                    <span class="detail-label">Role:</span>
-                                    <span class="detail-value">{formatRole(admin)}</span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Created:</span>
-                                    <span class="detail-value">{new Date(admin.created_at).toLocaleDateString()}</span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Status:</span>
-                                    <span class="detail-value status-text" class:active={admin.is_active} class:inactive={!admin.is_active}>
-                                        {admin.is_active ? 'Active' : 'Inactive'}
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="admin-actions">
-                                {#if isPrimaryAdmin}
-                                    <button 
-                                        class="toggle-btn"
-                                        class:activate={!admin.is_active}
-                                        class:deactivate={admin.is_active}
-                                        onclick={() => toggleAdminStatus(admin.user_id, admin.is_active)}
-                                        title={admin.is_active ? 'Deactivate account' : 'Activate account'}
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            {#if admin.is_active}
-                                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                                <line x1="9" y1="9" x2="15" y2="15"/>
-                                                <line x1="15" y1="9" x2="9" y2="15"/>
-                                            {:else}
-                                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                                                <polyline points="22 4 12 14.01 9 11.01"/>
-                                            {/if}
-                                        </svg>
-                                        {admin.is_active ? 'Deactivate' : 'Activate'}
-                                    </button>
-                                    <button 
-                                        class="delete-btn" 
-                                        onclick={() => deleteAdmin(admin.user_id)}
-                                        title="Delete admin"
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <polyline points="3 6 5 6 21 6"/>
-                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                        </svg>
-                                        Delete
-                                    </button>
-                                {:else}
-                                    <span class="read-only-badge">View Only</span>
-                                {/if}
-                            </div>
+                            {/if}
                         </div>
                     {/each}
                 </div>
@@ -842,43 +1005,140 @@
         color: var(--text-dim);
     }
 
-    .admin-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 1rem;
+    /* Admin Type Sections & By-Row List */
+    .admin-type-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
     }
 
-    .admin-card {
+    .admin-type-section-card {
         background: var(--card-bg);
         border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 1.25rem;
-        transition: all 0.2s;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
     }
 
-    .admin-card:hover {
-        border-color: var(--maroon);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    .admin-header {
+    .admin-type-section-header {
         display: flex;
         align-items: center;
+        justify-content: space-between;
+        padding: 0.9rem 1.25rem;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+    }
+
+    .type-header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .type-icon-bubble {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .type-header-left h3 {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .type-count-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.15rem 0.6rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        border-radius: 999px;
+        background: var(--surface-hover);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+    }
+
+    .empty-category-row {
+        padding: 1.75rem 1.25rem;
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 0.875rem;
+        font-style: italic;
+    }
+
+    .admin-row-table {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .row-table-header {
+        display: grid;
+        grid-template-columns: 2.2fr 1.8fr 1fr 1fr 1.4fr;
         gap: 1rem;
-        margin-bottom: 1rem;
+        padding: 0.75rem 1.25rem;
+        background: var(--surface-hover);
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+        border-bottom: 1px solid var(--border);
+    }
+
+    .row-table-body {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .admin-table-row {
+        display: grid;
+        grid-template-columns: 2.2fr 1.8fr 1fr 1fr 1.4fr;
+        gap: 1rem;
+        align-items: center;
+        padding: 0.875rem 1.25rem;
+        border-bottom: 1px solid var(--border-light, #f1f5f9);
+        transition: background 0.15s;
+    }
+
+    .admin-row-table.no-dept .row-table-header,
+    .admin-row-table.no-dept .admin-table-row {
+        grid-template-columns: 3fr 1.2fr 1.2fr 1.4fr;
+    }
+
+    .admin-table-row:last-child {
+        border-bottom: none;
+    }
+
+    .admin-table-row:hover {
+        background: var(--surface-hover);
+    }
+
+    .col-account {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-width: 0;
     }
 
     .admin-avatar {
-        width: 48px;
-        height: 48px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         background: var(--maroon);
         color: white;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.25rem;
-        font-weight: 600;
+        font-size: 0.95rem;
+        font-weight: 700;
+        flex-shrink: 0;
         transition: all 0.2s;
     }
 
@@ -890,147 +1150,131 @@
         background: #6b7280;
     }
 
-    .admin-info {
-        flex: 1;
+    .account-meta {
         min-width: 0;
     }
 
-    .admin-info h3 {
-        font-size: 0.875rem;
+    .col-account .account-email {
         font-weight: 600;
+        font-size: 0.875rem;
         color: var(--text-primary);
-        margin: 0 0 0.25rem 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        display: block;
     }
 
-    .badges {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-    }
-
-    .admin-type-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        background: var(--maroon-muted);
-        color: var(--maroon);
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
-    }
-
-    .status-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
-    }
-
-    .status-badge.active {
-        background: #d1fae5;
-        color: #059669;
-    }
-
-    .status-badge.inactive {
-        background: #f3f4f6;
-        color: #6b7280;
-    }
-
-    .admin-details {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        margin-bottom: 1rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid var(--border);
-    }
-
-    .detail-item {
-        display: flex;
-        justify-content: space-between;
-        font-size: 0.875rem;
-    }
-
-    .detail-label {
+    .col-dept .dept-text {
+        font-size: 0.85rem;
         color: var(--text-secondary);
         font-weight: 500;
     }
 
-    .detail-value {
-        color: var(--text-primary);
-        font-weight: 500;
+    .col-date .date-text {
+        font-size: 0.825rem;
+        color: var(--text-dim);
     }
 
-    .status-text.active {
-        color: #059669;
+    .col-status .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
         font-weight: 600;
     }
 
-    .status-text.inactive {
-        color: #6b7280;
-        font-weight: 600;
+    .status-pill.active {
+        background: #d1fae5;
+        color: #065f46;
     }
 
-    .admin-actions {
+    .status-pill.inactive {
+        background: #f1f5f9;
+        color: #64748b;
+    }
+
+    .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .col-actions {
         display: flex;
         gap: 0.5rem;
+        align-items: center;
         justify-content: flex-end;
     }
 
-    .toggle-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        border: 1px solid;
+    .row-action-btn {
+        padding: 0.35rem 0.75rem;
         border-radius: 6px;
-        font-size: 0.875rem;
-        font-weight: 500;
+        font-size: 0.75rem;
+        font-weight: 600;
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.15s;
+        border: 1px solid transparent;
     }
 
-    .toggle-btn.activate {
+    .row-action-btn.toggle-btn.deactivate {
+        background: #fff1f2;
+        color: #be123c;
+        border-color: #fecdd3;
+    }
+
+    .row-action-btn.toggle-btn.deactivate:hover {
+        background: #ffe4e6;
+    }
+
+    .row-action-btn.toggle-btn.activate {
+        background: #ecfdf5;
+        color: #047857;
+        border-color: #a7f3d0;
+    }
+
+    .row-action-btn.toggle-btn.activate:hover {
         background: #d1fae5;
-        color: #059669;
-        border-color: #10b981;
     }
 
-    .toggle-btn.activate:hover {
-        background: #a7f3d0;
+    .row-action-btn.delete-btn {
+        background: var(--surface);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
     }
 
-    .toggle-btn.deactivate {
-        background: #fef3c7;
-        color: #d97706;
-        border-color: #f59e0b;
+    .row-action-btn.delete-btn:hover {
+        background: #ef4444;
+        color: white;
+        border-color: #ef4444;
     }
 
-    .toggle-btn.deactivate:hover {
-        background: #fde68a;
+    .read-only-badge {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        font-style: italic;
     }
 
-    .delete-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        background: #fef2f2;
-        color: #dc2626;
-        border: 1px solid #fca5a5;
-        border-radius: 6px;
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
+    @media (max-width: 840px) {
+        .row-table-header {
+            display: none;
+        }
 
-    .delete-btn:hover {
-        background: #fee2e2;
-        border-color: #f87171;
+        .admin-table-row {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.5rem;
+            padding: 1rem;
+        }
+
+        .col-actions {
+            width: 100%;
+            justify-content: flex-start;
+            margin-top: 0.5rem;
+        }
     }
 
     .pin-input {

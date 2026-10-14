@@ -34,7 +34,7 @@ async function createNotification(
 }
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-    if (!locals.user || locals.user.role !== 'dean') {
+    if (!locals.user || (locals.user.role !== 'dean' && locals.user.role !== 'administrative')) {
         return json({ error: 'Unauthorized' }, { status: 403 });
     }
 

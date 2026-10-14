@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     try {
         const { data: rows, error } = await supabase
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select(`
                 *,
                 user:user_id(

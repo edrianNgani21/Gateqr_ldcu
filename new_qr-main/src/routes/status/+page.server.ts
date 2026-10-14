@@ -51,7 +51,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         // Count complaints with a schedule (new alert for the user)
         const { count: scheduledCount } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .not('schedule', 'is', null)
@@ -86,7 +86,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         // Fetch most recent change vehicle request for this user
         const { data: changeRequest } = await supabase
-            .from('change_vehicle_request')
+            .from('modification_request')
             .select('*')
             .eq('user_id', userId)
             .order('request_at', { ascending: false })

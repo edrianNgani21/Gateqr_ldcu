@@ -80,10 +80,27 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         } else if (uType === 'safety_security' || uType === 'safety security' || uType === 'security') {
             role = 'security';
             redirectUrl = '/security';
-        } else if (ident === 'faculty' || uType === 'dean') {
-            // Faculty with department linkage acts as Dean
-            role = 'dean';
-            redirectUrl = '/dean';
+        } else if (ident === 'faculty' || uType === 'dean' || uType === 'administrative') {
+            // Check if department is administrative
+            let isAdministrativeDept = false;
+            if (user.department_id) {
+                const { data: deptData } = await supabase
+                    .from('department')
+                    .select('*')
+                    .eq('department_id', user.department_id)
+                    .maybeSingle();
+                if (deptData && (deptData.administrative_department || deptData['Administrative Department'])) {
+                    isAdministrativeDept = true;
+                }
+            }
+
+            if (isAdministrativeDept || uType === 'administrative') {
+                role = 'administrative';
+                redirectUrl = '/administrative';
+            } else {
+                role = 'dean';
+                redirectUrl = '/dean';
+            }
         } else {
             role = 'applicant';
             redirectUrl = '/status';

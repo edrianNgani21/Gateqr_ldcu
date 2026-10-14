@@ -11,7 +11,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'applicant-status-realtime',
-            tables: ['registration', 'change_vehicle_request']
+            tables: ['registration', 'modification_request']
         });
     });
 

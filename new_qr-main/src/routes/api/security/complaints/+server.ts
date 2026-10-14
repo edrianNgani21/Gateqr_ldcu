@@ -11,7 +11,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     try {
         let query = supabase
-            .from('complaint')
+            .from('incident_report')
             .select(`
                 *,
                 user:user_id(
@@ -77,7 +77,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { data: newComplaint, error: insertError } = await supabase
-            .from('complaint')
+            .from('incident_report')
             .insert([{
                 user_id: userData.user_id,
                 message: message.trim()
@@ -96,7 +96,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 message: 'Your complaint has been submitted successfully to Safety & Security.',
                 actor_id: userData.user_id,
                 action_type: 'create_complaint',
-                target_entity_type: 'complaint',
+                target_entity_type: 'incident_report',
                 target_entity_id: newComplaint?.complaint_id,
                 is_read: false
             });
@@ -120,7 +120,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     message: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
                     actor_id: userData.user_id,
                     action_type: 'new_complaint',
-                    target_entity_type: 'complaint',
+                    target_entity_type: 'incident_report',
                     target_entity_id: newComplaint?.complaint_id,
                     is_read: false
                 }));

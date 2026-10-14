@@ -6,7 +6,7 @@ import { supabase } from '$lib/server/supabase';
 export async function GET({}: RequestEvent) {
     try {
         const { data, error } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('registration_open')
             .eq('id', 1)
             .single();
@@ -33,7 +33,7 @@ export async function PUT({ request }: RequestEvent) {
         }
 
         const { error: updateError } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .update({ registration_open })
             .eq('id', 1);
 

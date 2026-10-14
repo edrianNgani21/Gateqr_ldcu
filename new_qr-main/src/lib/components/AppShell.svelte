@@ -95,11 +95,15 @@
   );
   let userRoleLabel = $derived(
     userRole === 'applicant' ? (userEmail || 'Applicant') :
-    (userRole === 'security' ? 'Security Administrator' : (userRole === 'dean' ? 'College Dean' : 'OSA Administrator'))
+    userRole === 'security' ? 'Security Administrator' :
+    userRole === 'administrative' ? 'Administrative Department Head' :
+    userRole === 'dean' ? 'Academic Department Head' :
+    'OSA Administrator'
   );
   let portalSubtitle = $derived(
     userRole === 'applicant' ? 'Application Form' :
-    userRole === 'dean' ? 'Department Head Portal' :
+    userRole === 'administrative' ? 'Administrative Department Portal' :
+    userRole === 'dean' ? 'Academic Department Head Portal' :
     userRole === 'security' ? 'Safety & Security Office' :
     'Office of Student Affairs'
   );
@@ -242,28 +246,26 @@
       description: 'Gate entry and exit history logs'
     },
     {
-      label: 'Complaints',
+      label: 'Incident Report',
       href: '/security/complaints',
       icon: `<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
-      description: 'View and manage complaints'
+      description: 'View and manage incident reports'
     },
     {
-      label: 'Campus Management',
+      label: 'Parking Capacity Records',
       href: '/security/capacity',
       icon: `<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/><path d="M12 22v-7"/><path d="M20 22v-7"/>`,
-      description: 'Manage capacity per campus'
+      description: 'Total Count of Registered Vehicles per Campus and Parking Capacities'
     }
   ];
 
   const manageAppSubLinks = [
-    { label: 'Accept & Schedule Application', tab: 'validation', href: '/osa?tab=validation' },
-    { label: 'Application Schedules for Hardcopy Compliance', tab: 'distribution', href: '/osa?tab=distribution' },
-    { label: 'Sticker Release', tab: 'release', href: '/osa?tab=release' },
-    { label: 'Registered Vehicle', tab: 'registered', href: '/osa?tab=registered' },
-    { label: 'Rejected Applications', tab: 'rejected', href: '/osa?tab=rejected' },
-    { label: 'Revoked Application', tab: 'revoked', href: '/osa?tab=revoked' },
-    { label: 'Overdue Application Schedules', tab: 'overdue', href: '/osa?tab=overdue' },
-    { label: 'Application request to change details', path: '/osa/change-requests', href: '/osa/change-requests' }
+    { label: 'Screening of Applications', tab: 'validation', href: '/osa?tab=validation' },
+    { label: 'Submission of Documents', tab: 'distribution', href: '/osa?tab=distribution' },
+    { label: 'Sticker Releasing', tab: 'release', href: '/osa?tab=release' },
+    { label: 'Registered Vehicles', tab: 'registered', href: '/osa?tab=registered' },
+    { label: 'Rejected or Revoked Accounts & Applications', tab: 'rejected', href: '/osa?tab=rejected' },
+    { label: 'Profile Update Requests', path: '/osa/change-requests', href: '/osa/change-requests' }
   ];
 
   function isAppTabActive(item: typeof manageAppSubLinks[number]): boolean {
@@ -272,6 +274,12 @@
     }
     if (currentPath === '/osa') {
       const activeTab = currentSearchTab || 'validation';
+      if (item.tab === 'rejected' && (activeTab === 'rejected' || activeTab === 'revoked')) {
+        return true;
+      }
+      if (item.tab === 'distribution' && (activeTab === 'distribution' || activeTab === 'overdue')) {
+        return true;
+      }
       return activeTab === item.tab;
     }
     return false;
@@ -279,7 +287,7 @@
 </script>
 
 <!-- Page shell -->
-<main class="app-shell theme-osa">
+<main class="app-shell theme-osa" class:has-sidebar={showSidebar} class:no-sidebar={!showSidebar}>
   {#if showSidebar}
     <aside class="sidebar" class:mobile-open={mobileNavOpen}>
       <!-- Brand Section -->
@@ -368,46 +376,19 @@
               {/if}
             </div>
 
-            <!-- Accounts (Dropdown: Add Admin & Add Dean) -->
-            <div class="dropdown-parent-group" class:is-open={accountsOpen}>
-              <button
-                type="button"
-                class="menu-item-btn dropdown-toggle"
-                class:active-parent={currentPath.startsWith('/osa/admin') || currentPath.startsWith('/osa/deans')}
-                onclick={toggleAccounts}
-              >
-                <div class="menu-item-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                  </svg>
-                </div>
-                <span class="menu-item-label">Accounts</span>
-                <span class="dropdown-chevron" class:rotated={accountsOpen}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </span>
-              </button>
-
-              {#if accountsOpen}
-                <div class="submenu-container">
-                  <a
-                    href="/osa/admin"
-                    class="submenu-link"
-                    class:active={currentPath === '/osa/admin'}
-                  >
-                    <span class="submenu-text">Add Admin</span>
-                  </a>
-                  <a
-                    href="/osa/deans"
-                    class="submenu-link"
-                    class:active={currentPath === '/osa/deans'}
-                  >
-                    <span class="submenu-text">Add Dean</span>
-                  </a>
-                </div>
-              {/if}
-            </div>
+            <!-- Accounts (Single Tab) -->
+            <a
+              href="/osa/admin"
+              class="menu-item-btn"
+              class:active={currentPath === '/osa/admin' || currentPath.startsWith('/osa/deans')}
+            >
+              <div class="menu-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+              </div>
+              <span class="menu-item-label">Accounts</span>
+            </a>
 
             <!-- Departments Link -->
             <a href="/osa/departments" class="menu-item-btn" class:active={currentPath === '/osa/departments'}>
@@ -452,12 +433,38 @@
         </button>
       </div>
     </aside>
+
+    {#if mobileNavOpen}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="sidebar-backdrop" onclick={toggleMobileNav}></div>
+    {/if}
   {/if}
 
   <div class="shell-content">
-    <!-- Topbar Header (Matching Screenshots 1 & 2) -->
+    <!-- Topbar Header (Dedicated top bar background for GateQR & Header details) -->
     <div class="content-header">
       <div class="header-left-meta">
+        {#if showSidebar}
+          <button
+            type="button"
+            class="topbar-mobile-hamburger"
+            onclick={toggleMobileNav}
+            aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              {#if mobileNavOpen}
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              {:else}
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              {/if}
+            </svg>
+          </button>
+        {/if}
+
         <span class="meta-system-badge">
           <img src="/liceo-logo.png" alt="LDCU" class="badge-mini-logo" />
           <span class="meta-title">GateQR</span>
@@ -480,7 +487,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
               </svg>
-              <span>My Complaints</span>
+              <span>Incident Report</span>
             </a>
           {/if}
         {/if}
@@ -574,7 +581,9 @@
     </div>
 
     <!-- Page Body Slot -->
-    {@render children()}
+    <div class="page-body-container">
+      {@render children()}
+    </div>
   </div>
 
   <AdminSettingsModal open={settingsModalOpen} onclose={() => settingsModalOpen = false} />
@@ -583,35 +592,56 @@
 <style>
   .app-shell {
     min-height: 100vh;
-    padding: 1.5rem 2rem;
+    padding: 0;
+    margin: 0;
     display: flex;
-    gap: 1.75rem;
     background: #f8fafc;
-    align-items: flex-start;
-    max-width: 1920px;
-    margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
   }
 
-
-  /* ─── Modern Dark Sidebar (Theme-Preserved) ─── */
+  /* ─── Modern Dark Sidebar (Fit tightly to side, no extra space, not movable, scrollable) ─── */
   .sidebar {
-    width: 290px;
-    flex-shrink: 0;
-    background: linear-gradient(180deg, #10192e 0%, #0a1120 100%);
-    border-radius: 20px;
+    width: 280px;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    margin: 0;
     padding: 1.5rem 1.25rem;
-    position: sticky;
-    top: 1.5rem;
-    align-self: flex-start;
+    background: linear-gradient(180deg, #10192e 0%, #0a1120 100%);
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - 3rem);
-    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    z-index: 40;
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.25);
+    z-index: 100;
     box-sizing: border-box;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 90;
   }
 
   /* Brand Header */
@@ -947,15 +977,62 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    min-height: 100vh;
+    box-sizing: border-box;
+    width: 100%;
+    margin-left: 0;
   }
 
-  /* ─── Topbar Header ─── */
+  .app-shell.has-sidebar .shell-content {
+    margin-left: 280px;
+    width: calc(100% - 280px);
+  }
+
+  .app-shell.no-sidebar .shell-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+
+  /* ─── Topbar Header (Dedicated top bar background for GateQR & actions) ─── */
   .content-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.35rem 0;
+    padding: 0.85rem 2rem;
+    background: #ffffff;
+    border-bottom: 1.5px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .topbar-mobile-hamburger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+    cursor: pointer;
+    margin-right: 0.75rem;
+    padding: 0;
+  }
+
+  .topbar-mobile-hamburger:hover {
+    background: #f1f5f9;
+  }
+
+  .page-body-container {
+    padding: 1.75rem 2rem 2.5rem 2rem;
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .header-left-meta {
@@ -1304,46 +1381,55 @@
   }
 
   @media (max-width: 1280px) {
-    .app-shell {
-      padding: 1.25rem 1.5rem;
-      gap: 1.25rem;
-    }
-
     .sidebar {
       width: 260px;
-      padding: 1.25rem 1rem;
+    }
+
+    .app-shell.has-sidebar .shell-content {
+      margin-left: 260px;
+      width: calc(100% - 260px);
     }
   }
 
   @media (max-width: 1024px) {
     .app-shell {
       flex-direction: column;
-      padding: 1rem;
-      gap: 1.25rem;
+      padding: 0;
+      gap: 0;
       overflow-x: hidden;
       width: 100%;
     }
 
     .shell-content {
-      width: 100%;
+      margin-left: 0 !important;
+      width: 100% !important;
       min-width: 0;
       overflow-x: hidden;
     }
 
+    .topbar-mobile-hamburger {
+      display: inline-flex;
+    }
+
     .sidebar {
-      width: 100%;
-      position: static;
-      min-height: auto;
-      padding: 1rem 1.25rem;
-      border-radius: 16px;
+      width: 280px;
+      position: fixed;
+      top: 0;
+      left: -290px;
+      bottom: 0;
+      height: 100vh;
+      border-radius: 0;
+      z-index: 100;
+      transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: none;
+    }
+
+    .sidebar.mobile-open {
+      left: 0;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
     }
 
     .sidebar-brand {
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-
-    .sidebar.mobile-open .sidebar-brand {
       padding-bottom: 1.25rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
@@ -1353,22 +1439,20 @@
     }
 
     .sidebar-menu-wrapper {
-      display: none;
+      display: flex;
       margin-top: 1rem;
     }
 
     .sidebar-bottom-action {
-      display: none;
+      display: flex;
     }
 
-    .sidebar.mobile-open .sidebar-menu-wrapper {
-      display: flex;
-      animation: fadeIn 0.2s ease;
+    .content-header {
+      padding: 0.75rem 1rem;
     }
 
-    .sidebar.mobile-open .sidebar-bottom-action {
-      display: flex;
-      animation: fadeIn 0.2s ease;
+    .page-body-container {
+      padding: 1.25rem 1rem 2rem 1rem;
     }
 
     .notification-flyout-card {
@@ -1384,41 +1468,42 @@
 
   @media (max-width: 768px) {
     .app-shell {
-      padding: 0.75rem 0.5rem;
-      gap: 1rem;
+      padding: 0;
+      gap: 0;
+    }
+
+    .page-body-container {
+      padding: 1rem 0.75rem 2rem 0.75rem;
     }
 
     .content-header {
-      flex-direction: column;
-      align-items: stretch;
+      flex-direction: row;
+      align-items: center;
       gap: 0.75rem;
+      padding: 0.65rem 0.85rem;
     }
 
     .header-left-meta {
-      width: 100%;
-      justify-content: space-between;
+      flex: 1;
+      min-width: 0;
     }
 
     .header-actions-group {
-      width: 100%;
-      justify-content: flex-end;
-      gap: 0.5rem;
-      flex-wrap: wrap;
+      gap: 0.45rem;
     }
 
     .profile-info-block {
       display: none;
     }
-
-    .sidebar {
-      padding: 0.9rem 1rem;
-      border-radius: 14px;
-    }
   }
 
   @media (max-width: 480px) {
     .app-shell {
-      padding: 0.5rem 0.35rem;
+      padding: 0;
+    }
+
+    .page-body-container {
+      padding: 0.85rem 0.5rem 1.75rem 0.5rem;
     }
 
     .meta-system-badge {
@@ -1455,7 +1540,11 @@
 
   @media (max-width: 360px) {
     .app-shell {
-      padding: 0.35rem 0.25rem;
+      padding: 0;
+    }
+
+    .page-body-container {
+      padding: 0.65rem 0.35rem 1.5rem 0.35rem;
     }
 
     .brand-name {

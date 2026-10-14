@@ -6,7 +6,7 @@ import { supabase } from '$lib/server/supabase';
 export async function GET({}: RequestEvent) {
     try {
         const { data, error } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('gate_access_filter, gate_access_filter_reason')
             .eq('id', 1)
             .single();
@@ -41,7 +41,7 @@ export async function PUT({ request }: RequestEvent) {
         }
 
         const { error: updateError } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .update({ 
                 gate_access_filter,
                 gate_access_filter_reason: gate_access_filter_reason || null

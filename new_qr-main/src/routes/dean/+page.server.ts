@@ -3,36 +3,62 @@ import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
 
 export const load: PageServerLoad = async ({ locals }) => {
-    if (!locals.user || locals.user.role !== 'dean') {
+    if (!locals.user || (locals.user.role !== 'dean' && locals.user.role !== 'administrative')) {
         throw redirect(303, '/login');
     }
 
     const userEmail = locals.user.email;
 
     try {
-        // Fetch department name for the logged-in dean
-        let departmentName = '';
-        
-        if (locals.user.department_id) {
-            const { data: departmentData } = await supabase
-                .from('department')
-                .select('department_name')
-                .eq('department_id', locals.user.department_id)
+        // Get the department_id to use for fetching applications
+        let departmentIdForQuery = locals.user.department_id;
+
+        if (!departmentIdForQuery) {
+            const { data: userRow } = await supabase
+                .from('users')
+                .select('department_id')
+                .eq('email', locals.user.email)
                 .maybeSingle();
 
-            if (departmentData) {
-                departmentName = (departmentData as any).department_name || (departmentData as any).department || '';
+            if (userRow?.department_id) {
+                departmentIdForQuery = userRow.department_id;
             }
         }
 
-        // Get the department_id to use for fetching applications
-        let departmentIdForQuery = locals.user.department_id;
+        // Fetch department details for the logged-in user
+        let departmentName = '';
+        let departmentType = 'academic';
+        
+        if (departmentIdForQuery) {
+            const { data: departmentData } = await supabase
+                .from('department')
+                .select('*')
+                .eq('department_id', departmentIdForQuery)
+                .maybeSingle();
+
+            if (departmentData) {
+                const adminDept = departmentData.administrative_department || departmentData['Administrative Department'];
+                const acadDept = departmentData.academic_department || departmentData['Academic Department'];
+                if (adminDept) {
+                    departmentType = 'administrative';
+                    departmentName = adminDept;
+                } else if (acadDept) {
+                    departmentType = 'academic';
+                    departmentName = acadDept;
+                } else {
+                    departmentName = (departmentData as any).department_name || (departmentData as any).department || '';
+                }
+            }
+        }
 
         const { data: rows } = await supabase
             .from('registration')
             .select(`
                 *,
                 department:department_id(
+                    department_id,
+                    academic_department,
+                    administrative_department,
                     department_name
                 ),
                 user:user_id(
@@ -51,12 +77,23 @@ export const load: PageServerLoad = async ({ locals }) => {
             .eq('department_id', departmentIdForQuery)
             .order('created_at', { ascending: false });
 
-        const applications = (rows || []).map(app => ({
-            ...app,
-            id: app.registration_id, // Map registration_id to id
-            department_name: app.department?.department_name || (app.department as any)?.department || 'Unknown Department',
-            department_email: '-',
-            user_email: app.user?.email,
+        const applications = (rows || []).map(app => {
+            const appDept = app.department;
+            const appDeptName = appDept?.administrative_department || 
+                                appDept?.['Administrative Department'] || 
+                                appDept?.academic_department || 
+                                appDept?.['Academic Department'] || 
+                                appDept?.department_name || 
+                                (appDept as any)?.department || 
+                                departmentName || 
+                                'Unknown Department';
+
+            return {
+                ...app,
+                id: app.registration_id, // Map registration_id to id
+                department_name: appDeptName,
+                department_email: '-',
+                user_email: app.user?.email,
             // Map vehicle information fields to match frontend expectations
             doc_id: (app as any).doc_id || 
                     (app.agreement_form && typeof app.agreement_form === 'string' && app.agreement_form.startsWith('http') ? app.agreement_form : null) || 
@@ -86,7 +123,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             expires_at: typeof app.expires_at === 'string' ? app.expires_at : app.expires_at?.toISOString(),
             revoked_at: typeof app.revoke_at === 'string' ? app.revoke_at : (app.revoke_at?.toISOString() || (typeof app.revoked_at === 'string' ? app.revoked_at : app.revoked_at?.toISOString())),
             rejected_at: typeof app.rejected_at === 'string' ? app.rejected_at : app.rejected_at?.toISOString(),
-        }));
+        };
+    });
 
         console.log('Dean applications fetched:', applications.length);
         console.log('Department ID used:', departmentIdForQuery);
@@ -96,10 +134,11 @@ export const load: PageServerLoad = async ({ locals }) => {
         return {
             applications,
             userEmail,
-            departmentName
+            departmentName,
+            departmentType
         };
     } catch (error) {
         console.error('Error loading dean applications:', error);
-        return { applications: [], userEmail, departmentName: '' };
+        return { applications: [], userEmail, departmentName: '', departmentType: 'academic' };
     }
 };

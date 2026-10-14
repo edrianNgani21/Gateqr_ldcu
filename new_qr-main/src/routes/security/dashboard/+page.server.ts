@@ -256,8 +256,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             { count: unreadComplaints },
             { count: vehicleCount }
         ] = await Promise.all([
-            supabase.from('complaint').select('*', { count: 'exact', head: true }),
-            supabase.from('complaint').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('incident_report').select('*', { count: 'exact', head: true }),
+            supabase.from('incident_report').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'distributed', 'completed', 'security_checked'])
         ]);
 
@@ -276,7 +276,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 const gate = name === 'RNP' ? 'rnp' : (name === 'PASEO' ? 'paseo' : 'main');
                 const [paRes, evRes] = await Promise.all([
                     supabase
-                        .from('parking_availability')
+                        .from('parking_capacity')
                         .select('*')
                         .or(`campus.eq.${name},campus_gate.eq.${gate}`)
                         .order('date_time', { ascending: false })

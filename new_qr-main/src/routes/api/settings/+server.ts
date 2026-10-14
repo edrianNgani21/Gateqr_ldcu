@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     try {
         const { data: row } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('parking_capacity, max_capacity')
             .order('date_time', { ascending: false })
             .limit(1)
@@ -44,7 +44,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 
         // Try updating latest parking_availability record, or insert one
         const { data: latest } = await supabase
-            .from('parking_availability')
+            .from('parking_capacity')
             .select('parking_availability_id')
             .order('date_time', { ascending: false })
             .limit(1)
@@ -52,13 +52,13 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 
         if (latest?.parking_availability_id) {
             const { error: updateError } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .update({ parking_capacity: newCap, max_capacity: newCap })
                 .eq('parking_availability_id', latest.parking_availability_id);
             if (updateError) throw updateError;
         } else {
             const { error: insertError } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .insert({ parking_capacity: newCap, max_capacity: newCap, vehicle_log_id: 1 });
             if (insertError) throw insertError;
         }

@@ -17,37 +17,53 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-applications-realtime',
-            tables: ['registration', 'change_vehicle_request', 'department']
+            tables: ['registration', 'modification_request', 'department']
         });
     });
 
     let tab = $state('validation');
-    const tabs = ['validation', 'distribution', 'release', 'registered', 'rejected', 'revoked', 'overdue'];
+    const tabs = ['validation', 'distribution', 'release', 'registered', 'rejected'];
     const tabLabels: Record<string, string> = {
-        'validation':   'Accept & Schedule Application',
-        'distribution': 'Application Schedules for Hardcopy Compliance',
-        'release':      'Sticker Release',
-        'registered':   'Registered Vehicle',
-        'rejected':     'Rejected Applications',
-        'revoked':      'Revoked Application',
-        'overdue':      'Overdue Application Schedules'
+        'validation':   'Screening of Applications',
+        'distribution': 'Submission of Documents',
+        'release':      'Sticker Releasing',
+        'registered':   'Registered Vehicles',
+        'rejected':     'Rejected or Revoked Accounts & Applications'
     };
+
+    // Sub-filters for Submission of Documents and Rejected or Revoked
+    let docSubmissionFilter = $state<'upcoming' | 'overdue'>('upcoming');
+    let rejectedFilter = $state<'all' | 'rejected' | 'revoked'>('all');
+
+    function isAppOverdue(a: any): boolean {
+        if (a.invalid_reason === 'OVERDUE' || a.rejection_reason === 'OVERDUE') return true;
+        const s = a.schedule || a.dist_sched;
+        if (!s) return false;
+        return new Date(s).getTime() < Date.now();
+    }
 
     function getAppsForTab(t: string) {
         if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
-        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && (!a.schedule && !a.dist_sched || new Date(a.schedule || a.dist_sched) >= new Date() || a.invalid_reason === 'OVERDUE' || a.rejection_reason === 'OVERDUE'));
-        if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && (a.schedule || a.dist_sched) && new Date(a.schedule || a.dist_sched) < new Date() && a.invalid_reason !== 'OVERDUE' && a.rejection_reason !== 'OVERDUE');
+        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at);
+        if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
         if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || (a.status || '').toLowerCase() === 'security_checked');
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
-        if (t === 'rejected') return apps.filter(a => (a.status || '').toLowerCase() === 'rejected');
-        if (t === 'revoked') return apps.filter(a => (a.status || '').toLowerCase() === 'revoked');
+        if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()));
         return [];
     }
 
     $effect(() => {
         const urlTab = $page.url.searchParams.get('tab');
-        if (urlTab && tabs.includes(urlTab)) {
-            tab = urlTab;
+        if (urlTab) {
+            if (urlTab === 'revoked') {
+                tab = 'rejected';
+                rejectedFilter = 'revoked';
+            } else if (urlTab === 'overdue') {
+                tab = 'distribution';
+                docSubmissionFilter = 'overdue';
+            } else if (tabs.includes(urlTab)) {
+                tab = urlTab;
+            }
             selectedDistributionApp = null;
             selectedScheduleDate = null;
         }
@@ -222,7 +238,12 @@
             });
         }
 
-        if (tab === 'distribution' || tab === 'overdue') {
+        if (tab === 'distribution') {
+            if (docSubmissionFilter === 'upcoming') {
+                filtered = filtered.filter(a => !isAppOverdue(a));
+            } else if (docSubmissionFilter === 'overdue') {
+                filtered = filtered.filter(a => isAppOverdue(a));
+            }
             if (selectedScheduleDate) {
                 filtered = filtered.filter(a => {
                     const sched = a.schedule || a.dist_sched;
@@ -231,8 +252,14 @@
                     const selectedDate = new Date(selectedScheduleDate as string).toDateString();
                     return appDate === selectedDate;
                 });
-            } else {
-                filtered = [];
+            }
+        }
+
+        if (tab === 'rejected') {
+            if (rejectedFilter === 'rejected') {
+                filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'rejected');
+            } else if (rejectedFilter === 'revoked') {
+                filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'revoked');
             }
         }
 
@@ -271,10 +298,15 @@
         return filtered;
     });
 
-    // Get unique scheduled dates for distribution / overdue tab
+    // Get unique scheduled dates for distribution tab
     let scheduledDates = $derived.by(() => {
-        if (tab !== 'distribution' && tab !== 'overdue') return [];
-        const distributionApps = getAppsForTab(tab);
+        if (tab !== 'distribution') return [];
+        let distributionApps = getAppsForTab('distribution');
+        if (docSubmissionFilter === 'upcoming') {
+            distributionApps = distributionApps.filter(a => !isAppOverdue(a));
+        } else if (docSubmissionFilter === 'overdue') {
+            distributionApps = distributionApps.filter(a => isAppOverdue(a));
+        }
         const uniqueDates = new Set<string>();
         distributionApps.forEach(app => {
             const sched = app.schedule || app.dist_sched;
@@ -291,13 +323,16 @@
         return {
             validation: getAppsForTab('validation').length,
             distribution: getAppsForTab('distribution').length,
-            overdue: getAppsForTab('overdue').length,
             release: getAppsForTab('release').length,
             registered: getAppsForTab('registered').length,
-            rejected: getAppsForTab('rejected').length,
-            revoked: getAppsForTab('revoked').length
+            rejected: getAppsForTab('rejected').length
         } as Record<string, number>;
     });
+
+    let docSubmissionUpcomingCount = $derived(getAppsForTab('distribution').filter(a => !isAppOverdue(a)).length);
+    let docSubmissionOverdueCount = $derived(getAppsForTab('distribution').filter(a => isAppOverdue(a)).length);
+    let rejectedCountOnly = $derived(getAppsForTab('rejected').filter(a => (a.status || '').toLowerCase() === 'rejected').length);
+    let revokedCountOnly = $derived(getAppsForTab('rejected').filter(a => (a.status || '').toLowerCase() === 'revoked').length);
 
     let scheduleModalOpen = $state(false);
     let selectedSchedule = $state('');
@@ -441,12 +476,59 @@
 
   <div class="applications-container">
 
-    {#if tab === 'overdue'}
-      <div class="overdue-banner">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-        <span><strong>Failed to Appear on Schedule:</strong> These applicants were scheduled to visit OSA for <strong>hardcopy submission</strong> but have <strong>not shown up past their scheduled date</strong>. Use <em>Continue Process</em> if they have since complied, or <em>Reschedule</em> to set them a new visit date.</span>
+    {#if tab === 'distribution'}
+      <!-- Sub-filters bar for Submission of Documents -->
+      <div class="sub-tabs-bar">
+        <button
+          type="button"
+          class="sub-tab-btn"
+          class:active={docSubmissionFilter === 'upcoming'}
+          onclick={() => { docSubmissionFilter = 'upcoming'; selectedScheduleDate = null; }}
+        >
+          <span>Upcoming</span>
+          <span class="sub-tab-badge badge-upcoming">{docSubmissionUpcomingCount}</span>
+        </button>
+        <button
+          type="button"
+          class="sub-tab-btn btn-overdue"
+          class:active={docSubmissionFilter === 'overdue'}
+          onclick={() => { docSubmissionFilter = 'overdue'; selectedScheduleDate = null; }}
+        >
+          <span class="overdue-dot"></span>
+          <span>Overdue / Past Schedule</span>
+          <span class="sub-tab-badge badge-overdue">{docSubmissionOverdueCount}</span>
+        </button>
+      </div>
+    {:else if tab === 'rejected'}
+      <!-- Sub-filters bar for Rejected or Revoked Accounts & Applications -->
+      <div class="sub-tabs-bar">
+        <button
+          type="button"
+          class="sub-tab-btn"
+          class:active={rejectedFilter === 'all'}
+          onclick={() => { rejectedFilter = 'all'; }}
+        >
+          <span>All Records</span>
+          <span class="sub-tab-badge">{tabCounts.rejected || 0}</span>
+        </button>
+        <button
+          type="button"
+          class="sub-tab-btn"
+          class:active={rejectedFilter === 'rejected'}
+          onclick={() => { rejectedFilter = 'rejected'; }}
+        >
+          <span>Rejected Applications</span>
+          <span class="sub-tab-badge badge-rejected">{rejectedCountOnly}</span>
+        </button>
+        <button
+          type="button"
+          class="sub-tab-btn"
+          class:active={rejectedFilter === 'revoked'}
+          onclick={() => { rejectedFilter = 'revoked'; }}
+        >
+          <span>Revoked Privileges</span>
+          <span class="sub-tab-badge badge-revoked">{revokedCountOnly}</span>
+        </button>
       </div>
     {/if}
 
@@ -494,7 +576,7 @@
     </div>
 
     <div class="content-layout">
-      {#if (tab === 'distribution' || tab === 'overdue') && selectedDistributionApp}
+      {#if tab === 'distribution' && selectedDistributionApp}
         {@const app = selectedDistributionApp}
         <div class="full-detail-view">
           <button class="back-btn" onclick={() => selectedDistributionApp = null}>
@@ -557,14 +639,20 @@
           </div>
         </div>
       {:else}
-        {#if tab === 'distribution' || tab === 'overdue'}
-          {@const tabApps = getAppsForTab(tab)}
+        {#if tab === 'distribution'}
+          {@const tabApps = getAppsForTab('distribution')}
           {@const calDates = scheduledDates}
           <div class="schedule-calendar-panel left-panel">
             <div class="table-header">
-              <span class="table-title">📅 {tab === 'overdue' ? 'Missed Schedule Dates' : 'Scheduled Dates'}</span>
+              <span class="table-title">📅 Filter by Date</span>
               <span class="table-count">{calDates.length}</span>
             </div>
+            {#if selectedScheduleDate}
+              <div class="active-date-banner">
+                <span>Filtering: <strong>{new Date(selectedScheduleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong></span>
+                <button type="button" class="btn-clear-date" onclick={() => selectedScheduleDate = null}>Show All</button>
+              </div>
+            {/if}
             <div class="calendar-list">
               {#if calDates.length > 0}
                 {#each calDates as date}
@@ -594,39 +682,27 @@
                       </div>
                     </div>
                     <span class="date-count-badge">
-                      {tabApps.filter(a => (a.schedule || a.dist_sched) && new Date(a.schedule || a.dist_sched).toDateString() === date).length} app(s)
+                      {tabApps.filter(a => (a.schedule || a.dist_sched) && new Date(a.schedule || a.dist_sched).toDateString() === date).length}
                     </span>
                   </div>
                 {/each}
               {:else}
                 <div class="calendar-empty">
-                  <p>No scheduled dates found</p>
+                  <p>No specific dates found</p>
                 </div>
               {/if}
             </div>
             {#if selectedScheduleDate}
               <div class="calendar-actions">
                 <button class="table-btn" onclick={() => selectedScheduleDate = null}>
-                  Clear Date Filter
+                  View All Dates ({tabCounts.distribution})
                 </button>
               </div>
             {/if}
           </div>
         {/if}
 
-        <div class="applications-list" class:right-panel={tab === 'distribution' || tab === 'overdue'}>
-          {#if (tab === 'distribution' || tab === 'overdue') && !selectedScheduleDate}
-            <div class="empty-state">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-              <h3>No applications</h3>
-              <p>Select a date from the schedule on the left to view applicants.</p>
-            </div>
-          {:else}
+        <div class="applications-list" class:right-panel={tab === 'distribution'}>
             {#each displayedApps as app}
               {#if tab === 'distribution' || tab === 'overdue'}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -759,7 +835,6 @@
                 </button>
               </div>
             {/each}
-          {/if}
         </div>
 
         {#if tab === 'validation' && selectedApplicationIds.size > 0}
@@ -1004,20 +1079,117 @@
     gap: 1.5rem;
   }
 
-  .overdue-banner {
+  /* Sub Tabs Bar for Submission of Documents and Rejected/Revoked */
+  .sub-tabs-bar {
     display: flex;
-    align-items: flex-start;
-    gap: 0.625rem;
-    padding: 0.875rem 1rem;
-    background: #fff7ed;
-    border: 1.5px solid #fed7aa;
-    border-radius: 10px;
-    color: #c2410c;
-    font-size: 0.82rem;
-    line-height: 1.55;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 0.35rem;
+    border-radius: 12px;
   }
 
-  .overdue-banner svg { flex-shrink: 0; margin-top: 1px; }
+  .sub-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #475569;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .sub-tab-btn:hover {
+    background: #f1f5f9;
+    color: #1e293b;
+  }
+
+  .sub-tab-btn.active {
+    background: #ffffff;
+    color: var(--maroon);
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    font-weight: 700;
+  }
+
+  .sub-tab-btn.btn-overdue.active {
+    color: #c2410c;
+    border-color: #fdba74;
+    background: #fff7ed;
+  }
+
+  .sub-tab-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 99px;
+    background: #e2e8f0;
+    color: #334155;
+  }
+
+  .badge-upcoming {
+    background: #e0f2fe;
+    color: #0369a1;
+  }
+
+  .badge-overdue {
+    background: #fee2e2;
+    color: #dc2626;
+  }
+
+  .badge-rejected {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+
+  .badge-revoked {
+    background: #ffe4e6;
+    color: #9f1239;
+  }
+
+  .overdue-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    display: inline-block;
+    animation: live-pulse 1.4s infinite;
+  }
+
+  .active-date-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    color: #1e40af;
+    margin-bottom: 0.5rem;
+  }
+
+  .btn-clear-date {
+    background: transparent;
+    border: 1px solid #93c5fd;
+    border-radius: 6px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #1d4ed8;
+    cursor: pointer;
+  }
+
+  .btn-clear-date:hover {
+    background: #dbeafe;
+  }
 
   .page-header {
     display: flex;
@@ -1310,14 +1482,14 @@
 
   .schedule-calendar-panel {
     width: 380px;
-    background: var(--surface);
-    border: 2px solid var(--maroon);
+    background: transparent;
+    border: 1.5px solid var(--border);
     border-radius: 8px;
     padding: 1rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    box-shadow: 0 4px 12px rgba(107, 26, 42, 0.15);
+    box-shadow: none;
     flex-shrink: 0;
   }
 
@@ -1331,31 +1503,34 @@
     padding: 0.75rem;
     border: 1.5px solid var(--border);
     border-radius: 6px;
-    background: var(--card-bg);
+    background: transparent;
     cursor: pointer;
     transition: all 0.2s;
   }
 
   .calendar-item:hover {
     border-color: var(--maroon);
-    background: var(--surface-hover);
+    background: transparent;
   }
 
   .calendar-item.selected {
     border-color: var(--maroon);
-    background: rgba(107, 26, 42, 0.1);
+    background: transparent;
+    box-shadow: 0 0 0 1.5px var(--maroon);
   }
 
   .calendar-date {
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-primary);
+    background: transparent;
   }
 
   .calendar-full-date {
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin-top: 0.25rem;
+    background: transparent;
   }
 
   .calendar-empty {
@@ -1507,11 +1682,12 @@
   }
 
   .schedule-calendar-panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: 1.5px solid var(--border);
     border-radius: 12px;
     padding: 1rem;
     margin-bottom: 1.5rem;
+    box-shadow: none;
   }
 
   .calendar-list {
@@ -1526,7 +1702,7 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1rem;
-    background: var(--background);
+    background: transparent;
     border: 1.5px solid var(--border);
     border-radius: 10px;
     cursor: pointer;
@@ -1536,14 +1712,15 @@
 
   .calendar-item:hover {
     border-color: var(--maroon);
+    background: transparent;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
   }
 
   .calendar-item.selected {
-    background: #fef2f2;
+    background: transparent;
     border-color: var(--maroon);
-    box-shadow: 0 0 0 2px rgba(128,0,0,0.15);
+    box-shadow: 0 0 0 1.5px var(--maroon);
   }
 
   .calendar-icon-box {
@@ -1552,6 +1729,7 @@
     align-items: center;
     justify-content: center;
     color: var(--maroon);
+    background: transparent;
   }
 
   .calendar-day-num {
@@ -1560,42 +1738,47 @@
     font-size: 0.65rem;
     font-weight: 800;
     color: var(--maroon);
+    background: transparent;
   }
 
   .calendar-info {
     display: flex;
     flex-direction: column;
+    background: transparent;
   }
 
   .calendar-date {
     font-weight: 700;
     font-size: 0.9rem;
     color: var(--text-primary);
+    background: transparent;
   }
 
   .calendar-full-date {
     font-size: 0.75rem;
     color: var(--text-secondary);
+    background: transparent;
   }
 
   .date-count-badge {
     margin-left: auto;
     font-size: 0.78rem;
     font-weight: 700;
-    padding: 0.3rem 0.75rem;
-    background: linear-gradient(135deg, #8B1A3C, #6B1A2A);
-    color: #F5D98B;
-    border: 1px solid rgba(212, 166, 42, 0.6);
+    padding: 0.25rem 0.65rem;
+    background: transparent;
+    color: var(--maroon);
+    border: 1.5px solid var(--maroon);
     border-radius: 20px;
     letter-spacing: 0.02em;
     white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(139, 26, 60, 0.25);
+    box-shadow: none;
   }
 
   .calendar-item.selected .date-count-badge {
-    background: linear-gradient(135deg, #F0CF72, #D4A62A);
-    color: #3D0818;
-    border-color: #B8891F;
+    background: transparent;
+    color: var(--maroon);
+    border-color: var(--maroon);
+    font-weight: 800;
   }
 
   .clear-filters-btn {
@@ -2102,10 +2285,6 @@
     .filter-btn {
       flex: 1 1 100%;
       width: 100%;
-    }
-    .overdue-banner {
-      font-size: 0.78rem;
-      padding: 0.75rem;
     }
     .preset-chips-wrap {
       flex-wrap: wrap;

@@ -102,18 +102,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // 2. Resolve department_id (only active departments)
         let department_id = null;
         if (department_name) {
-            const { data: depts, error: deptError } = await supabase
+            const { data: allDepts } = await supabase
                 .from('department')
-                .select('department_id')
-                .ilike('department_name', department_name.trim())
-                .eq('is_active', true)
-                .maybeSingle();
+                .select('*')
+                .eq('is_active', true);
 
-            if (deptError || !depts) {
+            const searchDept = department_name.trim().toLowerCase();
+            const matched = (allDepts || []).find(d => {
+                const acad = (d.academic_department || d['Academic Department'] || '').trim().toLowerCase();
+                const admin = (d.administrative_department || d['Administrative Department'] || '').trim().toLowerCase();
+                const legacy = (d.department_name || '').trim().toLowerCase();
+                return acad === searchDept || admin === searchDept || legacy === searchDept;
+            });
+
+            if (matched) {
+                department_id = matched.department_id;
+            } else {
                 return json({ error: 'Department not found. Please select from the available departments or contact OSA to add your department.' }, { status: 400 });
             }
-
-            department_id = depts.department_id;
         } else {
             // Fallback to first department
             const { data: defaultDept } = await supabase

@@ -37,7 +37,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'security-complaints-realtime',
-            tables: ['complaint'],
+            tables: ['incident_report'],
             onSync: () => loadComplaints()
         });
     });
@@ -54,7 +54,7 @@
                 complaints = complaints.map(c => c.complaint_id === id ? { ...c, status } : c);
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to update complaint');
+                alert(json.error || 'Failed to update incident report');
             }
         } catch (e) {
             alert('Network error');
@@ -95,7 +95,7 @@
             });
 
             if (res.ok) {
-                alert('Schedule confirmation email sent to complainant');
+                alert('Schedule confirmation email sent to reporter');
             } else {
                 const json = await res.json();
                 alert(json.error || 'Failed to send confirmation email');
@@ -130,12 +130,12 @@
 </script>
 
 <svelte:head>
-  <title>Complaints Dashboard — Security | GateQR</title>
-  <meta name="description" content="Security complaints management dashboard for Liceo de Cagayan University." />
+  <title>Incident Reports — Security | GateQR</title>
+  <meta name="description" content="Security incident reports management dashboard for Liceo de Cagayan University." />
 </svelte:head>
 
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
-  <NavBar title="Complaints" />
+  <NavBar title="Incident Report" />
 
   <div class="controls-row">
     <div class="search-wrap">
@@ -144,7 +144,7 @@
       </svg>
       <input
         type="text"
-        placeholder="Search complaints…"
+        placeholder="Search incident reports…"
         bind:value={searchQuery}
         class="search-input"
       />
@@ -167,12 +167,12 @@
       <svg class="loading-spinner" viewBox="0 0 20 20" fill="none">
         <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2.5" stroke-dasharray="35 15" stroke-linecap="round"/>
       </svg>
-      Loading complaints…
+      Loading incident reports…
     </div>
   {:else if filteredComplaints.length === 0}
     <div class="empty-state">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-      <p>No complaints found</p>
+      <p>No incident reports found</p>
     </div>
   {:else}
     <div class="complaints-list">
@@ -239,7 +239,7 @@
                 </button>
               </div>
             {:else}
-              <span class="resolved-note">This complaint has been resolved.</span>
+              <span class="resolved-note">This incident report has been resolved.</span>
             {/if}
           </div>
         </div>

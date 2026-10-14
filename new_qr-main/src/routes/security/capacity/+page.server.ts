@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             const gate = name === 'RNP' ? 'rnp' : (name === 'PASEO' ? 'paseo' : 'main');
 
             const { data: paData, error: paError } = await supabase
-                .from('parking_availability')
+                .from('parking_capacity')
                 .select('*')
                 .or(`campus.eq.${name},campus_gate.eq.${gate}`)
                 .order('date_time', { ascending: false })

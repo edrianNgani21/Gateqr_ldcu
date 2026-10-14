@@ -55,24 +55,23 @@
     let canProceed = $derived((() => {
         if (section === 1) {
             if (!fname || !lname || !contact_number || !vehicle || !vehicle_type || !plate || !color || !role || !campus) return false;
-            if (['student', 'faculty', 'staff', 'employee'].includes(role) && (!dept || !idno)) return false;
+            if (!dept || !idno) return false;
             if (role === 'student' && !year_level) return false;
             return true;
         }
         if (section === 2) {
-            const isVisitorLike = ['visitor', 'concessionaire'].includes(role);
+            const isExternal = ['concessionnaire', 'supplier', 'visitor'].includes(role);
             if (!files.or.file || !files.cr.file) return false;
-            if (!isVisitorLike || owner === 'no') {
+            if (!isExternal || owner === 'no') {
                 if (!files.license.file) return false;
             }
-            if (!isVisitorLike) {
-                if (['student', 'faculty', 'staff', 'employee'].includes(role) && !files.id.file) return false;
+            if (!files.id.file) return false;
+            if (role === 'student') {
                 if (!files.enrollment.file) return false;
-                if (owner === 'yes' && !files.letter.file) return false;
+            } else if (!isExternal) {
+                if (!files.enrollment.file) return false;
             }
-            if (isVisitorLike && owner === 'yes') {
-                if (!files.license.file || !files.letter.file) return false;
-            }
+            if (owner === 'yes' && !files.letter.file) return false;
             return true;
         }
         if (section === 3) {
@@ -376,11 +375,15 @@
               </div>
               <div class="doc-col-fields">
                 <div class="field-item full-width">
-                  <select id="role" bind:value={role} class="doc-select-box" class:placeholder-sel={!role}>
+                  <select id="role" bind:value={role} class="doc-select-box" class:placeholder-sel={!role} onchange={() => { dept = ''; year_level = ''; }}>
                     <option value="" disabled hidden selected>Select role</option>
                     <option value="student">Student</option>
                     <option value="faculty">Faculty</option>
                     <option value="staff">Staff</option>
+                    <option value="administrator">Administrator</option>
+                    <option value="concessionnaire">Concessionnaire</option>
+                    <option value="supplier">Supplier</option>
+                    <option value="vps">Vps</option>
                   </select>
                   <span class="doc-field-hint">Affiliation status</span>
                 </div>
@@ -405,21 +408,31 @@
               </div>
             </div>
 
-            <!-- Department & Year Level (Dropdown selections - remained dropdown) -->
-            {#if ['student', 'faculty', 'staff', 'employee'].includes(role)}
+            <!-- Department (Academic Department for Student, Administrative Department for others) -->
+            {#if role}
+              {@const isStudent = role === 'student'}
+              {@const deptsList = isStudent 
+                ? (data.academicDepartments && data.academicDepartments.length > 0 ? data.academicDepartments : data.departments) 
+                : (data.administrativeDepartments && data.administrativeDepartments.length > 0 ? data.administrativeDepartments : data.departments)}
               <div class="doc-form-row">
                 <div class="doc-col-label">
-                  <label class="doc-row-title" for="dept">Department <span class="req-star">*</span></label>
+                  <label class="doc-row-title" for="dept">
+                    {isStudent ? 'Academic Department' : 'Administrative Department'} <span class="req-star">*</span>
+                  </label>
                 </div>
                 <div class="doc-col-fields">
                   <div class="field-item full-width">
                     <select id="dept" bind:value={dept} class="doc-select-box" class:placeholder-sel={!dept} onchange={() => year_level = ''}>
-                      <option value="" disabled hidden selected>Select department</option>
-                      {#each data.departments as d}
+                      <option value="" disabled hidden selected>
+                        Select {isStudent ? 'academic department' : 'administrative department'}
+                      </option>
+                      {#each deptsList as d}
                         <option value={d}>{d}</option>
                       {/each}
                     </select>
-                    <span class="doc-field-hint">College / Department</span>
+                    <span class="doc-field-hint">
+                      {isStudent ? 'College / Academic Department' : 'Office / Administrative Department'}
+                    </span>
                   </div>
                 </div>
               </div>

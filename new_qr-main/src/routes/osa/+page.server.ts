@@ -37,7 +37,7 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
                 `)
                 .order('created_at', { ascending: false }),
             supabase
-                .from('change_vehicle_request')
+                .from('modification_request')
                 .select('*')
                 .in('status', ['pending', 'approved'])
                 .order('request_at', { ascending: false })

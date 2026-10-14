@@ -22,7 +22,7 @@
   $effect(() => {
     const channel = supabaseClient
         .channel('capacity-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_availability' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_capacity' }, () => {
             invalidateAll();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_event' }, () => {
@@ -128,8 +128,8 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
   <div class="capacity-wrapper">
     <div class="header">
-      <h1>Campus Management</h1>
-      <p>Manage Event and Vehicle Capacity for campuses</p>
+      <h1>Parking Capacity Records</h1>
+      <p>Total Count of Registered Vehicles per Campus and Parking Capacities</p>
     </div>
 
     <div class="campus-grid">

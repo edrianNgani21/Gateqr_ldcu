@@ -25,14 +25,25 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
         const { data: rows } = await query;
 
-        // Map department_name for display
-        const departments = rows?.map(dept => ({
-            ...dept,
-            name: dept.department_name,
-            department: dept.department_name,
-            auto_id: dept.department_id,
-            is_active: dept.is_active ?? true
-        })) || [];
+        // Map department for display (support academic_department, administrative_department, and department_name)
+        const departments = rows?.map(dept => {
+            const administrative = dept.administrative_department || dept['Administrative Department'];
+            const academic = dept.academic_department || dept['Academic Department'] || (!administrative ? dept.department_name : null);
+            const deptType = administrative ? 'administrative' : 'academic';
+            const displayName = (deptType === 'administrative' ? administrative : academic) || dept.department_name || 'Unnamed Department';
+
+            return {
+                ...dept,
+                name: displayName,
+                department: displayName,
+                academic_department: academic,
+                administrative_department: administrative,
+                type: deptType,
+                auto_id: dept.department_id,
+                department_id: dept.department_id,
+                is_active: dept.is_active ?? true
+            };
+        }) || [];
 
         return json({ departments });
     } catch (error) {
@@ -73,25 +84,69 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { name } = await request.json();
+        const { name, type = 'academic' } = await request.json();
 
         if (!name || !name.trim()) {
             return json({ error: 'Department name is required' }, { status: 400 });
         }
 
-        // Insert new department using department_name
-        const { data: newDept, error } = await supabase
+        const isAdministrative = type === 'administrative';
+        let newDept: any = null;
+        let createError: any = null;
+
+        // Attempt 1: snake_case column
+        const primaryPayload: any = { is_active: true };
+        if (isAdministrative) {
+            primaryPayload.administrative_department = name.trim();
+        } else {
+            primaryPayload.academic_department = name.trim();
+        }
+
+        const res1 = await supabase
             .from('department')
-            .insert({ 
-                department_name: name.trim(),
-                is_active: true
-            })
-            .select('department_id, department_name')
+            .insert(primaryPayload)
+            .select('*')
             .single();
 
-        if (error) {
-            console.error('Error creating department:', error);
-            return json({ error: error.message || 'Failed to create department' }, { status: 500 });
+        if (!res1.error) {
+            newDept = res1.data;
+        } else {
+            // Attempt 2: Quoted Title Case column
+            const titleCasePayload: any = { is_active: true };
+            if (isAdministrative) {
+                titleCasePayload['Administrative Department'] = name.trim();
+            } else {
+                titleCasePayload['Academic Department'] = name.trim();
+            }
+
+            const res2 = await supabase
+                .from('department')
+                .insert(titleCasePayload)
+                .select('*')
+                .single();
+
+            if (!res2.error) {
+                newDept = res2.data;
+            } else {
+                // Attempt 3: Legacy department_name fallback
+                const legacyPayload: any = { department_name: name.trim(), is_active: true };
+                const res3 = await supabase
+                    .from('department')
+                    .insert(legacyPayload)
+                    .select('*')
+                    .single();
+
+                if (!res3.error) {
+                    newDept = res3.data;
+                } else {
+                    createError = res1.error;
+                }
+            }
+        }
+
+        if (createError && !newDept) {
+            console.error('Error creating department:', createError);
+            return json({ error: createError.message || 'Failed to create department' }, { status: 500 });
         }
 
         // Notify OSA admin
@@ -99,7 +154,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             await createNotification(
                 locals.user.user_id,
                 'department_added',
-                `Department '${name.trim()}' added successfully.`,
+                `${isAdministrative ? 'Administrative' : 'Academic'} Department '${name.trim()}' added successfully.`,
                 locals.user.user_id,
                 'create_department',
                 'department',
@@ -120,18 +175,49 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { auto_id, name } = await request.json();
+        const { auto_id, name, type } = await request.json();
 
         if (!auto_id || !name || !name.trim()) {
             return json({ error: 'ID and Name are required' }, { status: 400 });
         }
 
-        const { error } = await supabase
+        const isAdministrative = type === 'administrative';
+
+        // Attempt 1: snake_case column
+        const updatePayload: any = {};
+        if (isAdministrative) {
+            updatePayload.administrative_department = name.trim();
+        } else {
+            updatePayload.academic_department = name.trim();
+        }
+
+        let { error } = await supabase
             .from('department')
-            .update({ department_name: name.trim() })
+            .update(updatePayload)
             .eq('department_id', auto_id);
 
-        if (error) throw error;
+        if (error) {
+            // Attempt 2: Title Case
+            const titlePayload: any = {};
+            if (isAdministrative) {
+                titlePayload['Administrative Department'] = name.trim();
+            } else {
+                titlePayload['Academic Department'] = name.trim();
+            }
+            const res2 = await supabase
+                .from('department')
+                .update(titlePayload)
+                .eq('department_id', auto_id);
+
+            if (res2.error) {
+                // Attempt 3: Legacy department_name
+                const res3 = await supabase
+                    .from('department')
+                    .update({ department_name: name.trim() })
+                    .eq('department_id', auto_id);
+                if (res3.error) throw res3.error;
+            }
+        }
 
         return json({ message: 'Department updated successfully' });
     } catch (error) {
