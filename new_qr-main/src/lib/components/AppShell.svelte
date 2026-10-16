@@ -166,6 +166,14 @@
     )).length
   );
 
+  let unreadApplicationsCount = $derived(
+    notifications.filter(n => !n.is_read && (
+      n.target_entity_type === 'registration' ||
+      n.notification_type?.includes('application') ||
+      n.notification_type?.includes('renewal')
+    )).length
+  );
+
   function handleNotificationClick(notif: any) {
     markAsRead(notif.notification_id);
     notificationDropdownOpen = false;
@@ -178,6 +186,23 @@
       } else if (userRole === 'applicant') {
         window.location.href = '/complaints';
       }
+      return;
+    }
+
+    const isApplication = notif.target_entity_type === 'registration' ||
+      notif.notification_type?.includes('application') ||
+      notif.notification_type?.includes('renewal');
+    if (isApplication) {
+      if (userRole === 'osa') {
+        window.location.href = '/osa?tab=validation';
+      } else if (userRole === 'dean') {
+        window.location.href = '/dean';
+      } else if (userRole === 'administrative') {
+        window.location.href = '/administrative';
+      } else if (userRole === 'applicant') {
+        window.location.href = '/status';
+      }
+      return;
     }
   }
 
@@ -199,6 +224,9 @@
 
   function formatNotificationType(type: string | undefined): string {
     if (!type) return 'System Notification';
+    if (type === 'new_application') return 'New Application';
+    if (type === 'renewal_application') return 'Renewal Application';
+    if (type === 'incident_report') return 'Incident Report';
     return type
       .replace(/_/g, ' ')
       .replace(/\b\w/g, l => l.toUpperCase());
@@ -381,6 +409,9 @@
                   </svg>
                 </div>
                 <span class="menu-item-label">Manage Applications</span>
+                {#if unreadApplicationsCount > 0}
+                  <span class="menu-badge-indicator">{unreadApplicationsCount > 99 ? '99+' : unreadApplicationsCount}</span>
+                {/if}
                 <span class="dropdown-chevron" class:rotated={manageAppsOpen}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polyline points="6 9 12 15 18 9"></polyline>
@@ -397,6 +428,9 @@
                       class:active={isAppTabActive(subItem)}
                     >
                       <span class="submenu-text">{subItem.label}</span>
+                      {#if subItem.tab === 'validation' && unreadApplicationsCount > 0}
+                        <span class="sub-badge-indicator">{unreadApplicationsCount > 99 ? '99+' : unreadApplicationsCount}</span>
+                      {/if}
                     </a>
                   {/each}
                 </div>
@@ -905,6 +939,21 @@
     border-radius: 9999px;
     box-shadow: 0 1px 3px rgba(239, 68, 68, 0.4);
     flex-shrink: 0;
+  }
+
+  .sub-badge-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.3rem;
+    border-radius: 9999px;
+    margin-left: auto;
   }
 
   .dropdown-toggle {

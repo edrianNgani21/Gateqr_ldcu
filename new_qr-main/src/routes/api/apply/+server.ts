@@ -5,6 +5,7 @@ import { uploadToStorage } from '$lib/server/storage';
 import { generateStyledQRBuffer } from '$lib/server/qr';
 import { sendEmail } from '$lib/server/email';
 import { isApplicationFormOpen } from '$lib/server/applicationForm';
+import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
@@ -325,13 +326,52 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 throw updateRegError;
             }
 
-            // Send renewal confirmation email
+            // Send renewal confirmation email to applicant
             await sendEmail(
                 locals.user.email,
                 'Registration Renewal Submitted - Liceo GateQR',
                 'Your vehicle sticker renewal has been successfully submitted and is now under review for the new School Year.',
                 '<p>Your vehicle sticker renewal has been successfully submitted and is now under review for the new School Year.</p>'
             );
+
+            // Notify OSA Admins of renewal submission
+            const applicantFullName = `${first_name.trim()} ${last_name.trim()}`;
+            const renewalVehicleInfo = `${vehicle_brand || vehicle_make} [${vehicle_plate.trim()}]`;
+            try {
+                const osaFilters = ['user_type.eq.osa'];
+                if (env.OSA_EMAIL) {
+                    osaFilters.push(`email.eq.${env.OSA_EMAIL}`);
+                }
+                const { data: osaUsers } = await supabase
+                    .from('users')
+                    .select('user_id, email')
+                    .or(osaFilters.join(','));
+
+                if (osaUsers && osaUsers.length > 0) {
+                    const osaRenewalNotifs = osaUsers.map(u => ({
+                        user_id: u.user_id,
+                        activity: `Renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
+                        message: `Vehicle sticker renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
+                        notification_type: 'renewal_application',
+                        actor_id: user_id,
+                        action_type: 'renewal_submitted',
+                        target_entity_type: 'registration',
+                        target_entity_id: renewal_registration_id,
+                        target_id: renewal_registration_id,
+                        reference_id: renewal_registration_id,
+                        metadata: {
+                            registration_id: renewal_registration_id,
+                            applicant_name: applicantFullName,
+                            role: regRole,
+                            plate_number: vehicle_plate.trim()
+                        },
+                        is_read: false
+                    }));
+                    await supabase.from('notification').insert(osaRenewalNotifs);
+                }
+            } catch (notifErr) {
+                console.error('Failed to notify OSA admin of renewal:', notifErr);
+            }
 
             return json({ message: 'Renewal submitted successfully', status: 'pending', registration_id: renewal_registration_id });
         }
@@ -407,16 +447,25 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             regPayload.doc_id = doc_id;
         }
 
-        let { error: insertError } = await supabase
+        let newRegData: any = null;
+        let insertRes = await supabase
             .from('registration')
-            .insert(regPayload);
+            .insert(regPayload)
+            .select('registration_id')
+            .single();
+
+        let insertError = insertRes.error;
+        newRegData = insertRes.data;
 
         if (insertError && insertError.message?.includes('doc_id')) {
             delete regPayload.doc_id;
             const fallbackRes = await supabase
                 .from('registration')
-                .insert(regPayload);
+                .insert(regPayload)
+                .select('registration_id')
+                .single();
             insertError = fallbackRes.error;
+            newRegData = fallbackRes.data;
         }
 
         if (insertError) {
@@ -424,17 +473,106 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             throw insertError;
         }
         
-        console.log('Application submitted successfully with department_id:', department_id);
+        const createdRegId = newRegData?.registration_id;
+        const applicantFullName = `${first_name.trim()} ${last_name.trim()}`;
+        const vehicleSummary = `${vehicle_brand || vehicle_make} [${vehicle_plate.trim()}]`;
+        console.log('Application submitted successfully with registration_id:', createdRegId, 'department_id:', department_id);
 
-        // Send submission email to applicant
+        // 1. Notify OSA Admins via in-app notification
+        let osaAdminEmails: string[] = [];
+        try {
+            const osaFilters = ['user_type.eq.osa'];
+            if (env.OSA_EMAIL) {
+                osaFilters.push(`email.eq.${env.OSA_EMAIL}`);
+            }
+
+            const { data: osaUsers } = await supabase
+                .from('users')
+                .select('user_id, email')
+                .or(osaFilters.join(','));
+
+            if (osaUsers && osaUsers.length > 0) {
+                osaAdminEmails = osaUsers.map(u => u.email).filter(Boolean);
+                const osaNotifications = osaUsers.map(u => ({
+                    user_id: u.user_id,
+                    activity: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) - ${vehicleSummary}`,
+                    message: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) - ${vehicleSummary}`,
+                    notification_type: 'new_application',
+                    actor_id: user_id,
+                    action_type: 'application_submitted',
+                    target_entity_type: 'registration',
+                    target_entity_id: createdRegId,
+                    target_id: createdRegId,
+                    reference_id: createdRegId,
+                    metadata: {
+                        registration_id: createdRegId,
+                        applicant_name: applicantFullName,
+                        applicant_email: locals.user.email,
+                        role: regRole,
+                        plate_number: vehicle_plate.trim(),
+                        department_id: department_id
+                    },
+                    is_read: false
+                }));
+
+                await supabase.from('notification').insert(osaNotifications);
+            }
+        } catch (osaNotifErr) {
+            console.error('Failed to create in-app notification for OSA admin:', osaNotifErr);
+        }
+
+        // 2. Notify Complainant/Applicant via in-app notification
+        try {
+            await supabase.from('notification').insert({
+                user_id: user_id,
+                activity: 'Your vehicle sticker application has been submitted successfully and is currently under review.',
+                message: 'Your vehicle sticker application has been submitted successfully and is currently under review.',
+                notification_type: 'application_submitted',
+                actor_id: user_id,
+                action_type: 'application_submitted',
+                target_entity_type: 'registration',
+                target_entity_id: createdRegId,
+                target_id: createdRegId,
+                reference_id: createdRegId,
+                is_read: false
+            });
+        } catch (appNotifErr) {
+            console.error('Failed to create in-app notification for applicant:', appNotifErr);
+        }
+
+        // 3. Send submission email to applicant
         await sendEmail(
             locals.user.email,
             'Application Submitted - Liceo GateQR',
             'Your vehicle sticker application has been successfully submitted and is now under review.',
-            '<p>Your vehicle sticker application has been successfully submitted and is now under review.</p>'
+            `<p>Hello <strong>${applicantFullName}</strong>,</p>
+             <p>Your vehicle sticker application for <strong>${vehicleSummary}</strong> has been successfully submitted and is now under review.</p>
+             <p>You can check the status of your application anytime by visiting your GateQR Status page.</p>`
         );
 
-        return json({ message: 'Application submitted successfully', status: 'pending' });
+        // 4. Send alert email to OSA Admin
+        const targetOsaEmail = env.OSA_EMAIL || osaAdminEmails[0];
+        if (targetOsaEmail) {
+            try {
+                await sendEmail(
+                    targetOsaEmail,
+                    'New Vehicle Sticker Application Submitted - Liceo GateQR',
+                    `A new vehicle sticker application has been submitted by ${applicantFullName} (${locals.user.email}).\nRole: ${regRole}\nVehicle: ${vehicleSummary}\nID Number: ${cleanSchoolId}\nPhone: ${cleanPhone}\n\nPlease review the application in the OSA Screening portal.`,
+                    `<p>A new vehicle sticker application has been submitted by <strong>${applicantFullName}</strong> (${locals.user.email}).</p>
+                     <div style="background:#f4f4f5;padding:12px;border-radius:6px;margin:12px 0;">
+                       <p style="margin:4px 0;"><strong>Role:</strong> ${regRole}</p>
+                       <p style="margin:4px 0;"><strong>Vehicle:</strong> ${vehicleSummary}</p>
+                       <p style="margin:4px 0;"><strong>ID Number:</strong> ${cleanSchoolId}</p>
+                       <p style="margin:4px 0;"><strong>Phone:</strong> ${cleanPhone}</p>
+                     </div>
+                     <p><a href="${env.PUBLIC_APP_URL || ''}/osa?tab=validation">Click here to open the OSA Screening Portal to review.</a></p>`
+                );
+            } catch (emailErr) {
+                console.error('Failed to send email to OSA admin:', emailErr);
+            }
+        }
+
+        return json({ message: 'Application submitted successfully', status: 'pending', registration_id: createdRegId });
     } catch (error: any) {
         console.error('Failed to submit application:', error);
         return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
