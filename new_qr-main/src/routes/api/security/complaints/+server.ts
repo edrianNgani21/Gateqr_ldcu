@@ -105,23 +105,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         // Notify Security staff
+        let secEmails: string[] = [];
         try {
+            const orFilters = ['user_type.eq.safety_security', 'user_type.eq.security'];
+            if (env.SECURITY_EMAIL) {
+                orFilters.push(`email.eq.${env.SECURITY_EMAIL}`);
+            }
+
             const { data: secUsers } = await supabase
                 .from('users')
-                .select('user_id')
-                .eq('user_type', 'safety_security');
+                .select('user_id, email')
+                .or(orFilters.join(','));
 
             if (secUsers && secUsers.length > 0) {
+                secEmails = secUsers.map(u => u.email).filter(Boolean);
                 const complaintSnippet = message.trim().slice(0, 70) + (message.trim().length > 70 ? '...' : '');
                 const secNotifs = secUsers.map(u => ({
                     user_id: u.user_id,
-                    activity: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
-                    notification_type: 'new_complaint',
-                    message: `New complaint received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
+                    activity: `New Incident Report received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
+                    notification_type: 'incident_report',
+                    message: `New Incident Report received from ${locals.user?.email || 'applicant'}: "${complaintSnippet}"`,
                     actor_id: userData.user_id,
-                    action_type: 'new_complaint',
+                    action_type: 'incident_report_submitted',
                     target_entity_type: 'incident_report',
                     target_entity_id: newComplaint?.complaint_id,
+                    target_id: newComplaint?.complaint_id,
                     is_read: false
                 }));
                 await supabase.from('notification').insert(secNotifs);
@@ -131,16 +139,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         // Notify Security via email
-        await sendEmail(
-            env.SECURITY_EMAIL as string,
-            'New Complaint Received',
-            `A new complaint has been submitted by ${locals.user.email}.\n\nMessage: ${message.trim()}`,
-            `<p>A new complaint has been submitted by <strong>${locals.user.email}</strong>.</p>
-             <p><strong>Message:</strong><br/>${message.trim().replace(/\\n/g, '<br>')}</p>
-             <p>Please log in to the security dashboard to review.</p>`
-        );
+        const targetSecEmail = env.SECURITY_EMAIL || secEmails[0];
+        if (targetSecEmail) {
+            await sendEmail(
+                targetSecEmail,
+                'New Incident Report Received',
+                `A new incident report has been submitted by ${locals.user.email}.\n\nMessage: ${message.trim()}`,
+                `<p>A new incident report has been submitted by <strong>${locals.user.email}</strong>.</p>
+                 <p><strong>Message:</strong><br/>${message.trim().replace(/\n/g, '<br>')}</p>
+                 <p>Please log in to the security dashboard to review.</p>`
+            );
+        }
 
-        return json({ message: 'Complaint submitted successfully' });
+        return json({ message: 'Incident report submitted successfully' });
     } catch (error) {
         console.error('Error creating complaint:', error);
         return json({ error: 'Failed to submit complaint' }, { status: 500 });

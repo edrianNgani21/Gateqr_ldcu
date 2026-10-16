@@ -157,6 +157,30 @@
     }
   }
 
+  let unreadIncidentsCount = $derived(
+    notifications.filter(n => !n.is_read && (
+      n.notification_type === 'incident_report' ||
+      n.notification_type?.includes('incident') ||
+      n.notification_type?.includes('complaint') ||
+      n.target_entity_type === 'incident_report'
+    )).length
+  );
+
+  function handleNotificationClick(notif: any) {
+    markAsRead(notif.notification_id);
+    notificationDropdownOpen = false;
+    const isIncident = notif.target_entity_type === 'incident_report' ||
+      notif.notification_type?.includes('incident') ||
+      notif.notification_type?.includes('complaint');
+    if (isIncident) {
+      if (userRole === 'security') {
+        window.location.href = '/security/complaints';
+      } else if (userRole === 'applicant') {
+        window.location.href = '/complaints';
+      }
+    }
+  }
+
   function formatNotificationTime(timestamp: string) {
     if (!timestamp) return 'Just now';
     const date = new Date(timestamp);
@@ -452,7 +476,6 @@
               <span class="menu-item-label">Settings</span>
             </a>
           {:else}
-            <!-- Non-OSA / Security Actions -->
             {#each securityActions as action}
               <a href={action.href} class="menu-item-btn" class:active={currentPath === action.href}>
                 <div class="menu-item-icon">
@@ -461,6 +484,9 @@
                   </svg>
                 </div>
                 <span class="menu-item-label">{action.label}</span>
+                {#if action.label === 'Incident Report' && unreadIncidentsCount > 0}
+                  <span class="menu-badge-indicator">{unreadIncidentsCount > 99 ? '99+' : unreadIncidentsCount}</span>
+                {/if}
               </a>
             {/each}
           {/if}
@@ -574,8 +600,8 @@
                       class:item-unread={!notif.is_read}
                       role="button"
                       tabindex="0"
-                      onclick={() => markAsRead(notif.notification_id)}
-                      onkeydown={(e) => { if (e.key === 'Enter') markAsRead(notif.notification_id); }}
+                      onclick={() => handleNotificationClick(notif)}
+                      onkeydown={(e) => { if (e.key === 'Enter') handleNotificationClick(notif); }}
                     >
                       <div class="item-text-body">
                         <div class="item-header-row">
@@ -863,6 +889,22 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .menu-badge-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.35rem;
+    border-radius: 9999px;
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.4);
+    flex-shrink: 0;
   }
 
   .dropdown-toggle {

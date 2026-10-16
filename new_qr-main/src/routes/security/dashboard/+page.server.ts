@@ -103,7 +103,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             // 4. Incident report & registration counts
             Promise.all([
                 supabase.from('incident_report').select('*', { count: 'exact', head: true }),
-                supabase.from('incident_report').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+                supabase.from('incident_report').select('*', { count: 'exact', head: true }).or('status.eq.pending,status.eq.Pending'),
                 supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'distributed', 'completed', 'security_checked'])
             ]),
 
