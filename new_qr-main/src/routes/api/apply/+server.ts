@@ -45,6 +45,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
 
+        // Validate required fields
+        if (!first_name || !first_name.trim()) {
+            return json({ error: 'First Name is required.' }, { status: 400 });
+        }
+        if (!last_name || !last_name.trim()) {
+            return json({ error: 'Last Name is required.' }, { status: 400 });
+        }
+        if (!vehicle_make || !vehicle_make.trim()) {
+            return json({ error: 'Vehicle Make / Brand is required.' }, { status: 400 });
+        }
+        if (!vehicle_plate || !vehicle_plate.trim()) {
+            return json({ error: 'Vehicle Plate Number is required.' }, { status: 400 });
+        }
+        if (vehicle_plate.trim().length > 15) {
+            return json({ error: 'Vehicle Plate Number cannot exceed 15 characters.' }, { status: 400 });
+        }
+
         // Validate 11-digit Phone Number and ID Number
         const cleanPhone = (contact_number || '').trim().replace(/\D/g, '');
         if (cleanPhone.length !== 11) {
@@ -71,6 +88,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (foundReg) {
                 existingRegForRenewal = foundReg;
             }
+        }
+
+        if (mode === 'renewal' && !existingRegForRenewal) {
+            return json({ error: 'Existing registration record for renewal was not found.' }, { status: 404 });
         }
 
         // =================================================================
@@ -337,6 +358,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             // Notify OSA Admins of renewal submission
             const applicantFullName = `${first_name.trim()} ${last_name.trim()}`;
             const renewalVehicleInfo = `${vehicle_brand || vehicle_make} [${vehicle_plate.trim()}]`;
+            let osaAdminEmails: string[] = [];
             try {
                 const osaFilters = ['user_type.eq.osa'];
                 if (env.OSA_EMAIL) {
@@ -348,6 +370,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     .or(osaFilters.join(','));
 
                 if (osaUsers && osaUsers.length > 0) {
+                    osaAdminEmails = osaUsers.map(u => u.email).filter(Boolean);
                     const osaRenewalNotifs = osaUsers.map(u => ({
                         user_id: u.user_id,
                         activity: `Renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
@@ -371,6 +394,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }
             } catch (notifErr) {
                 console.error('Failed to notify OSA admin of renewal:', notifErr);
+            }
+
+            // Alert email to OSA Admin for renewal
+            const targetOsaEmail = env.OSA_EMAIL || osaAdminEmails[0];
+            if (targetOsaEmail) {
+                try {
+                    await sendEmail(
+                        targetOsaEmail,
+                        'Vehicle Sticker Renewal Submitted - Liceo GateQR',
+                        `A vehicle sticker renewal has been submitted by ${applicantFullName} (${locals.user.email}).\nRole: ${regRole}\nVehicle: ${renewalVehicleInfo}\nID Number: ${cleanSchoolId}\nPhone: ${cleanPhone}\n\nPlease review the application in the OSA Screening portal.`,
+                        `<p>A vehicle sticker renewal has been submitted by <strong>${applicantFullName}</strong> (${locals.user.email}).</p>
+                         <div style="background:#f4f4f5;padding:12px;border-radius:6px;margin:12px 0;">
+                           <p style="margin:4px 0;"><strong>Role:</strong> ${regRole}</p>
+                           <p style="margin:4px 0;"><strong>Vehicle:</strong> ${renewalVehicleInfo}</p>
+                           <p style="margin:4px 0;"><strong>ID Number:</strong> ${cleanSchoolId}</p>
+                           <p style="margin:4px 0;"><strong>Phone:</strong> ${cleanPhone}</p>
+                         </div>
+                         <p><a href="${env.PUBLIC_APP_URL || ''}/osa?tab=validation">Click here to open the OSA Screening Portal to review.</a></p>`
+                    );
+                } catch (emailErr) {
+                    console.error('Failed to send email to OSA admin for renewal:', emailErr);
+                }
             }
 
             return json({ message: 'Renewal submitted successfully', status: 'pending', registration_id: renewal_registration_id });
