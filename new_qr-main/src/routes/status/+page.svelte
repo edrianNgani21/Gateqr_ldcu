@@ -121,38 +121,38 @@
         
         if (stepNum === 1) { // College Head Approval
             if (['visitor', 'concessionaire'].includes(app.role)) return 'done';
-            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
+            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
             if (s === 'dept_val' || s === 'pending') return 'active';
             return 'pending';
         }
 
         if (stepNum === 2) { // OSA Review and Schedule
-            if (['osa_validated', 'security_checked', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
+            if (['osa_validated', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
             if (s === 'dept_validated' || s === 'osa_val' || (['visitor', 'concessionaire'].includes(app.role) && s === 'pending')) return 'active';
             return 'pending';
         }
 
         if (stepNum === 3) { // OSA Checked Hardcopies
-            if (app.osa_dist_at || ['distributed', 'security_checked', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
+            if (app.osa_dist_at || ['distributed', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
             if (['osa_validated'].includes(s)) return 'active'; 
             return 'pending';
         }
 
         if (stepNum === 4) { // Security Check Hardcopies
-            if (app.security_check_at || app.security_checked_at || ['security_checked', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
+            if (app.security_check_at || app.security_checked_at || ['security_checked', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
             if (s === 'distributed' || app.osa_dist_at) return 'active';
             return 'pending';
         }
 
         if (stepNum === 5) { // OSA Release Sticker
-            if (app.sticker_released_at || ['completed', 'approved'].includes(s)) return 'done';
+            if (app.sticker_released_at || ['sticker_released', 'sticker_installed', 'completed', 'approved'].includes(s)) return 'done';
             if (s === 'security_checked' || app.security_check_at || app.security_checked_at) return 'active';
             return 'pending';
         }
 
         if (stepNum === 6) { // Security Installed Sticker
-            if (app.sticker_installed_at || ['approved'].includes(s)) return 'done';
-            if (s === 'completed' || app.sticker_released_at) return 'active';
+            if (app.sticker_installed_at || ['sticker_installed', 'approved'].includes(s)) return 'done';
+            if (s === 'sticker_released' || s === 'completed' || app.sticker_released_at) return 'active';
             return 'pending';
         }
 
@@ -193,18 +193,29 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         Submit New Application
       </a>
-    {:else if app.status === 'expired'}
+    {:else if app.status === 'expired' || (app.expires_at && new Date(app.expires_at).getTime() < Date.now())}
       <div class="alert-box alert-warning">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         <div>
           <p class="alert-title">Sticker Expired</p>
-          <p class="alert-desc">Your parking sticker has expired. Please submit a new application to renew.</p>
+          <p class="alert-desc">Your parking sticker has expired{app.expires_at ? ` on ${new Date(app.expires_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}` : ''}. Please renew your registration for the new School Year.</p>
         </div>
       </div>
-      <a href="/" class="btn-reapply">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        Submit New Application
-      </a>
+
+      {#if data.applicationOpen === false}
+        <div class="alert-box alert-closed" style="margin-top: 1rem; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 1rem; display: flex; align-items: flex-start; gap: 0.75rem;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#be123c" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <div>
+            <p style="font-weight: 600; color: #9f1239; margin: 0 0 0.25rem 0; font-size: 0.95rem;">Applications are Currently Closed</p>
+            <p style="color: #be123c; margin: 0; font-size: 0.85rem; line-height: 1.4;">The Office of Student Affairs (OSA) has temporarily closed vehicle registrations and renewals. Please check back later or contact OSA.</p>
+          </div>
+        </div>
+      {:else}
+        <a href="/?renew=true" class="btn-renew" style="display: inline-flex; align-items: center; gap: 0.5rem; background: #7A1734; color: white; padding: 0.75rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; text-decoration: none; margin-top: 1rem; transition: background 0.2s;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Renew Registration
+        </a>
+      {/if}
     {:else}
       <!-- Progress Steps -->
       <div class="progress-steps">
@@ -348,8 +359,6 @@
       exp: app.expires_at,
       dlv: app.osa_dist_at,
       rejection_reason: app.invalid_reason || null,
-      qr_code: app.qr_code,
-      qr_unique_code: app.qr_unique_code,
       documents: {
         id: app.doc_id,
         enrollment: app.doc_load,
@@ -359,13 +368,13 @@
         letter: app.doc_letter
       }
     }}
-    showQR={true}
+    showQR={false}
     tab="status"
-    showDocs={false}>
+    showDocs={true}>
     </ApplicationCard>
 
     <!-- ── Vehicle Change Request Section ── -->
-    {#if app && (app.status === 'completed' || app.sticker_installed_at || changeRequest)}
+    {#if app && (['completed', 'approved', 'sticker_installed', 'Sticker_Installed'].includes(app.status) || app.sticker_installed_at || changeRequest)}
       <div class="change-request-section">
         {#if changeRequest && ['pending', 'Pending'].includes(changeRequest.status)}
           <div class="cr-status-box cr-status-pending">

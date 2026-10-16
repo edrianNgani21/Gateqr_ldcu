@@ -88,7 +88,7 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
         borderColor = '#f97316'; // Orange
     } else if (['administrator', 'administrators', 'admin', 'osa'].includes(normalizedRole)) {
         borderColor = '#dc2626'; // Red
-    } else if (['vps', 'vp'].includes(normalizedRole)) {
+    } else if (['vps', 'vp', 'vip'].includes(normalizedRole)) {
         borderColor = '#d4af37'; // Gold
     } else if (normalizedRole === 'visitor') {
         borderColor = '#2563eb'; // Blue

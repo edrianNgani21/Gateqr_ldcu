@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/server/supabase';
-import { sendEmail } from '$lib/server/email';
+import { sendEmail, sendEmailAsync } from '$lib/server/email';
 import { uploadToStorage } from '$lib/server/storage';
 
 async function createNotification(
@@ -182,9 +182,9 @@ export async function POST({ request, locals }: RequestEvent) {
             throw insertError;
         }
 
-        // 3. Notify OSA Admin via email
+        // 3. Notify OSA Admin via email in background
         const applicantName = `${registration.first_name || ''} ${registration.last_name || ''}`.trim() || locals.user.email;
-        await sendEmail(
+        sendEmailAsync(
             'osa@liceo.edu.ph',
             'New Request to Change Registration Details - Liceo GateQR',
             `Applicant ${applicantName} has submitted a request to change their registration details.\n\nReason: ${reason}\nNew Vehicle: ${vehicle_make} (${vehicle_plate})`,

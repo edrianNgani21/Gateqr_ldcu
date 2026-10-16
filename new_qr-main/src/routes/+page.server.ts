@@ -3,7 +3,7 @@ import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { isApplicationFormOpen } from '$lib/server/applicationForm';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) {
         throw redirect(303, '/login');
     }
@@ -14,6 +14,49 @@ export const load: PageServerLoad = async ({ locals }) => {
         throw redirect(303, '/security');
     } else if (locals.user.role === 'dean') {
         throw redirect(303, '/dean');
+    } else if (locals.user.role === 'administrative') {
+        throw redirect(303, '/administrative');
+    }
+
+    // Check if the user already has an active registration to prevent duplicate applications
+    const { data: userRow } = await supabase
+        .from('users')
+        .select('user_id')
+        .ilike('email', locals.user.email)
+        .maybeSingle();
+
+    let isRenewal = false;
+    let existingApplicationData: any = null;
+
+    if (userRow?.user_id) {
+        const { data: existingApp } = await supabase
+            .from('registration')
+            .select(`
+                *,
+                department:department_id(
+                    department_id,
+                    academic_department,
+                    administrative_department
+                ),
+                vehicle_information:vehicle_information_id(*)
+            `)
+            .eq('user_id', userRow.user_id)
+            .not('status', 'in', '("rejected","revoked")')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (existingApp) {
+            const isExpired = existingApp.status === 'expired' || (existingApp.expires_at && new Date(existingApp.expires_at).getTime() < Date.now());
+            const wantsRenewal = url.searchParams.get('renew') === 'true';
+
+            if (wantsRenewal && isExpired) {
+                isRenewal = true;
+                existingApplicationData = existingApp;
+            } else {
+                throw redirect(303, '/status');
+            }
+        }
     }
 
     // Pass the user's email to display in the greeting
@@ -50,11 +93,13 @@ export const load: PageServerLoad = async ({ locals }) => {
         return {
             userEmail,
             applicationOpen,
+            isRenewal,
+            existingApplicationData,
             academicDepartments: sortedAcad,
             administrativeDepartments: sortedAdmin,
             departments: [...sortedAcad, ...sortedAdmin]
         };
     } catch (e) {
-        return { userEmail, applicationOpen, academicDepartments: [], administrativeDepartments: [], departments: [] };
+        return { userEmail, applicationOpen, isRenewal, existingApplicationData, academicDepartments: [], administrativeDepartments: [], departments: [] };
     }
 };

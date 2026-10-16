@@ -4,22 +4,25 @@
 
     let { data } = $props();
 
-    let role = $state('');
+    const existing = data.existingApplicationData;
+    const isRenewal = data.isRenewal;
+
+    let role = $state(existing?.role || '');
     let section = $state(1);
-    let owner = $state('no');
-    let dept = $state('');
-    let campus = $state('');
-    let year_level = $state('');
+    let owner = $state(existing?.vehicle_information?.authorization_letter ? 'yes' : 'no');
+    let dept = $state(existing?.department?.academic_department || existing?.department?.administrative_department || '');
+    let campus = $state(existing?.campus || '');
+    let year_level = $state(existing?.year_level || '');
     
-    let fname = $state('');
-    let lname = $state('');
-    let contact_number = $state('');
-    let facebook = $state('');
-    let vehicle = $state('');
-    let vehicle_type = $state('');
-    let plate = $state('');
-    let color = $state('');
-    let idno = $state('');
+    let fname = $state(existing?.first_name || '');
+    let lname = $state(existing?.last_name || '');
+    let contact_number = $state(existing?.mobile || '');
+    let facebook = $state(existing?.facebook || '');
+    let vehicle = $state(existing?.vehicle_information?.brand || '');
+    let vehicle_type = $state(existing?.vehicle_information?.type || '');
+    let plate = $state(existing?.vehicle_information?.plate_number || '');
+    let color = $state(existing?.vehicle_information?.color || '');
+    let idno = $state(existing?.school_id || '');
     let loading = $state(false);
 
     let agreedToPark = $state(false);
@@ -44,34 +47,41 @@
     type FileState = { file: File | null; url: string | null }
 
     let files = $state({
-        id:         { file: null, url: null } as FileState,
+        id:         { file: null, url: existing?.doc_id || null } as FileState,
         enrollment: { file: null, url: null } as FileState,
-        letter:     { file: null, url: null } as FileState,
-        or:         { file: null, url: null } as FileState,
-        cr:         { file: null, url: null } as FileState,
-        license:    { file: null, url: null } as FileState,
+        letter:     { file: null, url: existing?.vehicle_information?.authorization_letter || null } as FileState,
+        or:         { file: null, url: existing?.vehicle_information?.or || null } as FileState,
+        cr:         { file: null, url: existing?.vehicle_information?.cr || null } as FileState,
+        license:    { file: null, url: existing?.drivers_license || null } as FileState,
     })
 
     let canProceed = $derived((() => {
         if (section === 1) {
             if (!fname || !lname || !contact_number || !vehicle || !vehicle_type || !plate || !color || !role || !campus) return false;
             if (!dept || !idno) return false;
+            if (contact_number.length !== 11 || !/^\d{11}$/.test(contact_number)) return false;
+            if (idno.length !== 11 || !/^\d{11}$/.test(idno)) return false;
             if (role === 'student' && !year_level) return false;
             return true;
         }
         if (section === 2) {
+            const hasOr = !!(files.or.file || files.or.url);
+            const hasCr = !!(files.cr.file || files.cr.url);
+            const hasLicense = !!(files.license.file || files.license.url);
+            const hasId = !!(files.id.file || files.id.url);
+            const hasEnrollment = !!(files.enrollment.file || files.enrollment.url);
+            const hasLetter = !!(files.letter.file || files.letter.url);
+
             const isExternal = ['concessionnaire', 'supplier', 'visitor'].includes(role);
-            if (!files.or.file || !files.cr.file) return false;
+            if (!hasOr || !hasCr) return false;
             if (!isExternal || owner === 'no') {
-                if (!files.license.file) return false;
+                if (!hasLicense) return false;
             }
-            if (!files.id.file) return false;
-            if (role === 'student') {
-                if (!files.enrollment.file) return false;
-            } else if (!isExternal) {
-                if (!files.enrollment.file) return false;
+            if (!hasId) return false;
+            if (role === 'student' || !isExternal) {
+                if (!hasEnrollment) return false;
             }
-            if (owner === 'yes' && !files.letter.file) return false;
+            if (owner === 'yes' && !hasLetter) return false;
             return true;
         }
         if (section === 3) {
@@ -112,6 +122,16 @@
             return;
         }
 
+        if (contact_number.length !== 11 || !/^\d{11}$/.test(contact_number)) {
+            alert('Phone Number must be exactly 11 numbers (e.g. 09123456789).');
+            return;
+        }
+
+        if (idno.length !== 11 || !/^\d{11}$/.test(idno)) {
+            alert('ID Number must be exactly 11 numbers.');
+            return;
+        }
+
         loading = true;
         try {
             const formData = new FormData();
@@ -130,12 +150,28 @@
             formData.append('campus', campus);
             if (year_level) formData.append('year_level', year_level);
             
+            if (isRenewal && existing?.registration_id) {
+                formData.append('mode', 'renewal');
+                formData.append('registration_id', String(existing.registration_id));
+            }
+
             if (files.or.file) formData.append('doc_or', files.or.file);
+            else if (files.or.url) formData.append('existing_doc_or', files.or.url);
+
             if (files.cr.file) formData.append('doc_cr', files.cr.file);
+            else if (files.cr.url) formData.append('existing_doc_cr', files.cr.url);
+
             if (files.license.file) formData.append('doc_license', files.license.file);
+            else if (files.license.url) formData.append('existing_doc_license', files.license.url);
+
             if (files.id.file) formData.append('doc_id', files.id.file);
+            else if (files.id.url) formData.append('existing_doc_id', files.id.url);
+
             if (files.enrollment.file) formData.append('doc_load', files.enrollment.file);
+            else if (files.enrollment.url) formData.append('existing_doc_load', files.enrollment.url);
+
             if (files.letter.file) formData.append('doc_letter', files.letter.file);
+            else if (files.letter.url) formData.append('existing_doc_letter', files.letter.url);
 
             const res = await fetch('/api/apply', {
                 method: 'POST',
@@ -185,9 +221,9 @@
       <!-- ── Header Banner with Angled Chevron ──────────────────────────────── -->
       <div class="doc-header-banner">
         <div class="banner-left-content">
-          <h1 class="banner-main-title">Vehicle Sticker Application</h1>
+          <h1 class="banner-main-title">{isRenewal ? 'Vehicle Sticker Renewal' : 'Vehicle Sticker Application'}</h1>
           <div class="banner-sub-line-wrap">
-            <span class="banner-subtitle-text">Fill out the form to request a sticker</span>
+            <span class="banner-subtitle-text">{isRenewal ? 'Renew your registration for the new School Year' : 'Fill out the form to request a sticker'}</span>
             <div class="banner-ruler-dot">
               <span class="ruler-line"></span>
               <span class="ruler-dot"></span>
@@ -263,15 +299,34 @@
               </div>
             </div>
 
-            <!-- Phone Number Row -->
+            <!-- Phone Number Row (11 numbers only) -->
             <div class="doc-form-row">
               <div class="doc-col-label">
                 <label class="doc-row-title" for="contact">Phone Number <span class="req-star">*</span></label>
               </div>
               <div class="doc-col-fields">
                 <div class="field-item full-width">
-                  <input id="contact" type="text" placeholder="09123456789" bind:value={contact_number} class="doc-input-box" />
-                  <span class="doc-field-hint">Mobile Number (e.g. 09123456789)</span>
+                  <input
+                    id="contact"
+                    type="tel"
+                    inputmode="numeric"
+                    maxlength="11"
+                    pattern="[0-9]{11}"
+                    placeholder="09123456789"
+                    bind:value={contact_number}
+                    oninput={(e) => {
+                      contact_number = e.currentTarget.value.replace(/\D/g, '').slice(0, 11);
+                    }}
+                    class="doc-input-box"
+                  />
+                  <span class="doc-field-hint">
+                    Mobile Number (11 digits only, e.g. 09123456789)
+                    {#if contact_number.length > 0 && contact_number.length < 11}
+                      <span class="field-count-warn">({contact_number.length}/11 digits)</span>
+                    {:else if contact_number.length === 11}
+                      <span class="field-count-ok">(11/11 digits ✓)</span>
+                    {/if}
+                  </span>
                 </div>
               </div>
             </div>
@@ -463,15 +518,34 @@
                 </div>
               {/if}
 
-              <!-- ID Number Row -->
+              <!-- ID Number Row (11 numbers only) -->
               <div class="doc-form-row">
                 <div class="doc-col-label">
                   <label class="doc-row-title" for="idno">ID Number <span class="req-star">*</span></label>
                 </div>
                 <div class="doc-col-fields">
                   <div class="field-item full-width">
-                    <input id="idno" type="text" placeholder="2022-XXXXXXX" bind:value={idno} class="doc-input-box" />
-                    <span class="doc-field-hint">University ID Number</span>
+                    <input
+                      id="idno"
+                      type="text"
+                      inputmode="numeric"
+                      maxlength="11"
+                      pattern="[0-9]{11}"
+                      placeholder="e.g. 20221234567"
+                      bind:value={idno}
+                      oninput={(e) => {
+                        idno = e.currentTarget.value.replace(/\D/g, '').slice(0, 11);
+                      }}
+                      class="doc-input-box"
+                    />
+                    <span class="doc-field-hint">
+                      University ID Number (11 digits only)
+                      {#if idno.length > 0 && idno.length < 11}
+                        <span class="field-count-warn">({idno.length}/11 digits)</span>
+                      {:else if idno.length === 11}
+                        <span class="field-count-ok">(11/11 digits ✓)</span>
+                      {/if}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -496,13 +570,13 @@
             </div>
 
             <div class="doc-format-banner">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="format-banner-icon">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
                 <line x1="16" y1="13" x2="8" y2="13"/>
                 <line x1="16" y1="17" x2="8" y2="17"/>
               </svg>
-              <span>Please upload official PDF or scanned vehicle &amp; institutional records.</span>
+              <span>All submitted documents must be in PDF format. If you use CamScanner or any other scanning application, make sure to export or convert your scanned documents into a PDF file before uploading them to the system.</span>
             </div>
 
             <!-- Liceo Documents -->
@@ -682,7 +756,7 @@
                 Submitting…
               {:else}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                Submit Application
+                {isRenewal ? 'Submit Renewal' : 'Submit Application'}
               {/if}
             </button>
           {/if}
@@ -704,7 +778,7 @@
 {/snippet}
 
 {#snippet uploadLabel(label: string, key: keyof typeof files)}
-  <label class="upload-tile" class:has-file={!!files[key].file}>
+  <label class="upload-tile" class:has-file={!!files[key].file || !!files[key].url}>
     <span class="upload-label-text">{label}</span>
     {#if files[key].file}
       <div class="upload-pdf-preview">
@@ -717,6 +791,16 @@
         <span class="pdf-tag">PDF</span>
       </div>
       <span class="upload-filename">{files[key].file?.name}</span>
+    {:else if files[key].url}
+      <div class="upload-pdf-preview" style="color: #15803d;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <polyline points="9 15 11 17 15 13"/>
+        </svg>
+        <span class="pdf-tag" style="background: #dcfce7; color: #166534;">ON FILE</span>
+      </div>
+      <span class="upload-filename" style="color: #166534; font-size: 0.75rem;">Existing File (Click to replace)</span>
     {:else}
       <div class="upload-placeholder">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -1186,15 +1270,34 @@
 
   .doc-format-banner {
     display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.75rem 1.15rem;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
     background: #fff8eb;
-    border: 1px solid #fed7aa;
+    border: 1.5px solid #fed7aa;
     border-radius: 8px;
     color: #9a3412;
-    font-size: 0.82rem;
+    font-size: 0.84rem;
     font-weight: 600;
+    line-height: 1.55;
+  }
+
+  .format-banner-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: #ea580c;
+  }
+
+  .field-count-warn {
+    color: #dc2626;
+    font-weight: 700;
+    margin-left: 0.35rem;
+  }
+
+  .field-count-ok {
+    color: #16a34a;
+    font-weight: 700;
+    margin-left: 0.35rem;
   }
 
   .upload-section-block {

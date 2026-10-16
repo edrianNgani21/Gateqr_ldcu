@@ -53,7 +53,7 @@ DROP TYPE IF EXISTS campus_gate_enum CASCADE;
 DROP TYPE IF EXISTS change_request_status_enum CASCADE;
 DROP TYPE IF EXISTS form_status_enum CASCADE;
 
-CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'osa', 'dean');
+CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'osa', 'dean', 'Academic Head', 'Office Head');
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
 CREATE TYPE registration_status_enum AS ENUM (
   'pending', 'dept_validated', 'osa_validated', 'distributed',
@@ -137,6 +137,7 @@ CREATE TABLE registration (
   sticker_installed_at   TIMESTAMPTZ,             -- Security QR Code sticker installation timestamp
   schedule               TIMESTAMPTZ,             -- Hardcopy schedule for compliance
   expires_at             TIMESTAMPTZ,             -- Sticker expiration
+  school_year            VARCHAR(20) DEFAULT '2025-2026', -- School Year (e.g. 2025-2026)
   revoke_at              TIMESTAMPTZ,             -- Sticker revocation timestamp
   rejected_at            TIMESTAMPTZ,             -- Rejection timestamp
   rejection_reason       TEXT,                    -- Specific reason why application was rejected
@@ -515,7 +516,9 @@ BEGIN
     RETURN 'osa';
   ELSIF v_user_type = 'safety_security' THEN
     RETURN 'security';
-  ELSIF v_user_type = 'dean' OR v_ident = 'faculty' THEN
+  ELSIF v_user_type = 'Office Head' THEN
+    RETURN 'administrative';
+  ELSIF v_user_type IN ('Academic Head', 'dean') OR v_ident = 'faculty' THEN
     RETURN 'dean';
   ELSE
     RETURN 'applicant';
@@ -968,6 +971,7 @@ ALTER TYPE complaint_status_enum ADD VALUE IF NOT EXISTS 'Resolved';
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS osa_dist_at TIMESTAMPTZ;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_released_at TIMESTAMPTZ;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_installed_at TIMESTAMPTZ;
+ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS school_year VARCHAR(20) DEFAULT '2025-2026';
 
 -- ---------------------------------------------------------------------
 -- 14. TABLE RENAMES MIGRATION (Safe rename for existing databases)
@@ -999,4 +1003,21 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------
+-- 15. DUPLICATE PREVENTION & UNIQUE CONSTRAINTS
+-- ---------------------------------------------------------------------
+-- Prevent duplicate active applications per user account
+CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_unique_active_user 
+  ON public.registration (user_id) 
+  WHERE status NOT IN ('rejected', 'revoked');
+
+-- Prevent duplicate School ID / Employee ID registrations
+CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_unique_active_school_id 
+  ON public.registration (school_id) 
+  WHERE status NOT IN ('rejected', 'revoked');
+
+-- Ensure unique QR Code identifier
+CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_unique_qr_code 
+  ON public.registration (qr_unique_code) 
+  WHERE qr_unique_code IS NOT NULL;
 

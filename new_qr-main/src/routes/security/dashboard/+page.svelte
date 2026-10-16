@@ -19,7 +19,8 @@
     { label: 'Dashboard', href: '/security/dashboard' },
     { label: 'Application Review', href: '/security' },
     { label: 'Vehicle Log', href: '/security/logs' },
-    { label: 'Incident Report', href: '/security/complaints', badge: data.unreadComplaints }
+    { label: 'Incident Report', href: '/security/complaints', badge: data.unreadComplaints },
+    { label: 'Settings', href: '/security/settings' }
   ]);
 
   // Security Statistics
@@ -34,10 +35,62 @@
   });
 
   let roleBreakdownByCampus = $derived((data.roleBreakdownByCampus as Record<string, Record<string, number>>) || {});
-  let showRoleBreakdown = $state<Record<string, boolean>>({});
-  
-  function toggleRoleBreakdown(campusLabel: string) {
-      showRoleBreakdown[campusLabel] = !showRoleBreakdown[campusLabel];
+  const roleColors: Record<string, string> = {
+    student: '#3B82F6',
+    faculty: '#4F46E5',
+    staff: '#10B981',
+    administrator: '#DC2626',
+    concessionaire: '#EA580C',
+    supplier: '#D97706',
+    vps: '#854D0E',
+    vip: '#D4AF37'
+  };
+
+  const roleLabels: Record<string, string> = {
+    student: 'Student',
+    faculty: 'Faculty',
+    staff: 'Staff',
+    administrator: 'Administrator',
+    concessionaire: 'Concessionaire',
+    supplier: 'Supplier',
+    vps: 'VPS',
+    vip: 'VIP'
+  };
+
+  function getCampusRoleStats(campusLabel: string) {
+    const key = campusLabel === 'MAIN CAMPUS' ? 'Main Campus' : campusLabel;
+    const breakdown = roleBreakdownByCampus[key] || {};
+    const roles = [
+      'student',
+      'faculty',
+      'staff',
+      'administrator',
+      'concessionaire',
+      'supplier',
+      'vps',
+      'vip'
+    ];
+    let total = 0;
+    roles.forEach(r => { total += (breakdown[r] || 0); });
+
+    let accumulatedPct = 0;
+    const items = roles.map(r => {
+      const count = breakdown[r] || 0;
+      const pct = total > 0 ? (count / total) * 100 : 0;
+      const offsetPct = accumulatedPct;
+      accumulatedPct += pct;
+      return {
+        role: r,
+        label: roleLabels[r] || r,
+        count,
+        pct,
+        pctFormatted: pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1),
+        color: roleColors[r] || '#718096',
+        offsetPct
+      };
+    });
+
+    return { total, items };
   }
   let hourlyChart = $derived((data.hourlyChart as number[]) || Array(24).fill(0));
   let flaggedAlerts = $derived((data.flaggedAlerts as any[]) || []);
@@ -58,7 +111,7 @@
       value: statsData.rnpCampusPresence || 0,
       desc: `2-Wheels: ${statsData.rnp2W || 0} • 4-Wheels: ${statsData.rnp4W || 0}`,
       capacity: statsData.rnpCapacity,
-      icon: `<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>`,
+      icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
       color: '#D4A62A',
       bg: 'rgba(212,166,42,0.1)',
       event: statsData.rnpEvent
@@ -68,7 +121,7 @@
       value: statsData.paseoCampusPresence || 0,
       desc: `2-Wheels: ${statsData.paseo2W || 0} • 4-Wheels: ${statsData.paseo4W || 0}`,
       capacity: statsData.paseoCapacity,
-      icon: `<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>`,
+      icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
       color: '#A21C46',
       bg: 'rgba(162,28,70,0.08)',
       event: statsData.paseoEvent
@@ -99,17 +152,10 @@
       </div>
     </div>
 
-    <!-- Parking Capacity Records Panel -->
-    <div class="panel-section-header">
-      <div class="panel-title-group">
-        <h2 class="panel-main-title">Parking Capacity Records</h2>
-        <span class="panel-subtext">Total Count of Registered Vehicles per Campus and Parking Capacities</span>
-      </div>
-    </div>
-
-    <!-- Stats Cards Grid -->
+    <!-- Stats Cards Grid with Role Percentage Diagrams -->
     <div class="stats-grid">
       {#each statCards as card}
+        {@const roleStats = getCampusRoleStats(card.label)}
         <div class="stat-card" style="--card-color: {card.color}; --card-bg: {card.bg};">
           {#if card.event}
             <div class="event-badge">
@@ -121,43 +167,99 @@
               </div>
             </div>
           {/if}
-          <div class="stat-icon-box">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              {@html card.icon}
-            </svg>
-          </div>
-          <div class="stat-details">
-            <div class="stat-value">{card.value}</div>
-            <div class="stat-label">{card.label}</div>
-            <div class="stat-desc" style="font-size: 0.75rem; color: #a0aec0; margin-top: 4px;">{card.desc}</div>
-            <div class="capacity-stats">
-                <div class="cap-item"><span>Capacity:</span> {card.capacity?.capacity ?? 0}</div>
-                <div class="cap-item"><span>Occupied:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
-                <div class="cap-item"><span>Unoccupied:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? card.capacity?.unoccupied ?? 0}</strong></div>
+
+          <!-- Top: Campus Header & Active Count -->
+          <div class="stat-card-top">
+            <div class="stat-icon-box">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                {@html card.icon}
+              </svg>
+            </div>
+            <div class="stat-details">
+              <div class="stat-value">{card.value}</div>
+              <div class="stat-label">{card.label}</div>
+              <div class="stat-desc">{card.desc}</div>
             </div>
           </div>
-          <div class="role-breakdown-toggle" onclick={() => toggleRoleBreakdown(card.label)} onkeydown={(e) => e.key === 'Enter' && toggleRoleBreakdown(card.label)} role="button" tabindex="0" aria-label="Toggle role breakdown">
-            <svg class:rotated={showRoleBreakdown[card.label]} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+
+          <!-- Capacity Bar / Stats -->
+          <div class="capacity-stats">
+            <div class="cap-item"><span>Capacity:</span> {card.capacity?.capacity ?? 0}</div>
+            <div class="cap-item"><span>Occupied:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
+            <div class="cap-item"><span>Unoccupied:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? card.capacity?.unoccupied ?? 0}</strong></div>
           </div>
-          {#if showRoleBreakdown[card.label]}
-            <div class="role-breakdown-panel" style="--accent: {card.color}">
-              <div class="breakdown-list">
-                {#each Object.entries(roleBreakdownByCampus[card.label === 'MAIN CAMPUS' ? 'Main Campus' : card.label] || {}) as [role, count]}
-                  {@const maxRoleVal = Math.max(...(Object.values(roleBreakdownByCampus[card.label === 'MAIN CAMPUS' ? 'Main Campus' : card.label] || {}) as number[]), 1)}
-                  {@const pct = Math.round(((count as number) / maxRoleVal) * 100)}
-                  <div class="breakdown-item">
-                    <div class="breakdown-top">
-                      <span class="role-title">{role.charAt(0).toUpperCase() + role.slice(1)}</span>
-                      <span class="role-count">{count}</span>
+
+          <!-- Role Percentage Diagram & Details Section -->
+          <div class="campus-role-section">
+            <div class="role-section-header">
+              <span class="role-section-title">Entries by Role</span>
+              <span class="role-section-total">Total: <strong>{roleStats.total}</strong></span>
+            </div>
+
+            <div class="role-diagram-row">
+              <!-- Mini Donut Chart (Radius 30, Circumference 188.5) -->
+              <div class="role-donut-box">
+                <svg class="role-donut-svg" viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="30" fill="none" stroke="#f1f5f9" stroke-width="8" />
+                  {#if roleStats.total > 0}
+                    {#each roleStats.items as item}
+                      {#if item.count > 0}
+                        <circle
+                          cx="40"
+                          cy="40"
+                          r="30"
+                          fill="none"
+                          stroke={item.color}
+                          stroke-width="8"
+                          stroke-dasharray="{((item.pct / 100) * 188.5)} 188.5"
+                          stroke-dashoffset="-{((item.offsetPct / 100) * 188.5)}"
+                          class="donut-segment"
+                        />
+                      {/if}
+                    {/each}
+                  {/if}
+                </svg>
+                <div class="role-donut-center">
+                  <span class="donut-number">{roleStats.total}</span>
+                  <span class="donut-unit">Entries</span>
+                </div>
+              </div>
+
+              <!-- Role Percentage Breakdown Details -->
+              <div class="role-details-list">
+                {#each roleStats.items as item}
+                  <div class="role-detail-item">
+                    <div class="role-detail-header">
+                      <div class="role-name-wrap">
+                        <span class="role-dot" style="background: {item.color};"></span>
+                        <span class="role-name">{item.label}</span>
+                      </div>
+                      <div class="role-metrics">
+                        <span class="role-pct" style="color: {item.color};">{item.pctFormatted}%</span>
+                        <span class="role-count">({item.count})</span>
+                      </div>
                     </div>
-                    <div class="progress-track">
-                      <div class="progress-fill" style="width: {pct}%"></div>
+                    <div class="role-progress-track">
+                      <div class="role-progress-fill" style="width: {item.pct}%; background: {item.color};"></div>
                     </div>
                   </div>
                 {/each}
               </div>
             </div>
-          {/if}
+
+            <!-- Stacked Proportion Bar -->
+            <div class="role-stacked-bar" title="{roleStats.items.map(i => `${i.label}: ${i.pctFormatted}%`).join(' | ')}">
+              {#if roleStats.total > 0}
+                {#each roleStats.items as item}
+                  {#if item.count > 0}
+                    <div class="stacked-seg" style="width: {item.pct}%; background: {item.color};" title="{item.label}: {item.pctFormatted}% ({item.count})"></div>
+                  {/if}
+                {/each}
+              {:else}
+                <div class="stacked-seg" style="width: 100%; background: #e2e8f0;" title="No entries recorded"></div>
+              {/if}
+            </div>
+          </div>
         </div>
       {/each}
     </div>
@@ -238,7 +340,16 @@
                     </div>
                   </td>
                   <td>
-                    <span class="campus-tag">{alert.campus}</span>
+                    <span
+                      class="campus-tag"
+                      class:rnp={alert.campus?.toLowerCase().includes('rnp')}
+                      class:paseo={alert.campus?.toLowerCase().includes('paseo')}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                      </svg>
+                      {alert.campus || 'Main Campus'}
+                    </span>
                   </td>
                   <td>
                     <span class="status-badge-chip">{alert.status}</span>
@@ -319,60 +430,209 @@
     opacity: 0.85;
   }
 
-  /* Parking Capacity Records Panel Header */
-  .panel-section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.25rem;
-    padding-bottom: 0.25rem;
-  }
-
-  .panel-title-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .panel-main-title {
-    font-size: 1.35rem;
-    font-weight: 800;
-    color: #1a202c;
-    margin: 0;
-    letter-spacing: -0.01em;
-  }
-
-  .panel-subtext {
-    font-size: 0.85rem;
-    color: #64748b;
-    font-weight: 500;
-  }
-
-  /* Stats Grid */
+  /* Stats Grid: Exactly 3 aligned campuses on desktop */
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 1.5rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+    align-items: stretch;
   }
 
   .stat-card {
     background: #ffffff;
-    border-radius: 20px;
-    padding: 1.75rem;
+    border-radius: 18px;
+    padding: 1.25rem 1.15rem;
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 1.5rem;
+    justify-content: space-between;
+    gap: 0.85rem;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
     border: 1px solid rgba(0,0,0,0.03);
     position: relative;
     overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    height: 100%;
   }
 
-  .stat-card > .stat-icon-box {
-    align-self: flex-start;
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+  }
+
+  .stat-card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .stat-desc {
+    font-size: 0.75rem;
+    color: #a0aec0;
+    margin-top: 4px;
+  }
+
+  /* Campus Role Percentage Section */
+  .campus-role-section {
+    margin-top: 0.5rem;
+    padding-top: 0.85rem;
+    border-top: 1px dashed #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .role-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #475569;
+  }
+
+  .role-section-total {
+    font-size: 0.72rem;
+    color: #64748b;
+  }
+
+  .role-section-total strong {
+    color: #1e293b;
+    font-weight: 800;
+  }
+
+  .role-diagram-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .role-donut-box {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .role-donut-svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .donut-segment {
+    transition: stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease;
+  }
+
+  .role-donut-center {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .donut-number {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #1e293b;
+    line-height: 1;
+  }
+
+  .donut-unit {
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .role-details-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .role-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .role-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.72rem;
+  }
+
+  .role-name-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .role-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .role-name {
+    font-weight: 600;
+    color: #334155;
+  }
+
+  .role-metrics {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    font-size: 0.72rem;
+  }
+
+  .role-pct {
+    font-weight: 800;
+  }
+
+  .role-count {
+    font-weight: 600;
+    color: #64748b;
+  }
+
+  .role-progress-track {
+    height: 3px;
+    background: #f1f5f9;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .role-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+
+  .role-stacked-bar {
+    display: flex;
+    height: 5px;
+    background: #f1f5f9;
+    border-radius: 999px;
+    overflow: hidden;
+    gap: 1px;
+    margin-top: 0.25rem;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  .stacked-seg {
+    height: 100%;
+    transition: width 0.4s ease;
   }
 
   .event-badge {
@@ -608,13 +868,30 @@
   }
 
   .campus-tag {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.65rem;
     background: #fdf2f4;
+    border: 1px solid rgba(139, 26, 60, 0.2);
     border-radius: 6px;
     color: #8B1A3C;
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
+
+  .campus-tag.rnp {
+    background: #fefce8;
+    border-color: rgba(212, 166, 42, 0.35);
+    color: #92400e;
+  }
+
+  .campus-tag.paseo {
+    background: #fdf2f8;
+    border-color: rgba(162, 28, 70, 0.25);
+    color: #9d174d;
   }
 
   .status-badge-chip {
@@ -778,33 +1055,7 @@
     margin-right: 2px;
   }
 
-  .role-breakdown-toggle {
-    position: absolute;
-    bottom: 0.75rem;
-    right: 1.75rem;
-    cursor: pointer;
-    color: #a0aec0;
-    transition: color 0.2s;
-    padding: 0.25rem;
-    border-radius: 50%;
-  }
-  .role-breakdown-toggle:hover {
-    color: #4a5568;
-    background: #edf2f7;
-  }
-  .role-breakdown-toggle svg {
-    transition: transform 0.2s;
-  }
-  .role-breakdown-toggle svg.rotated {
-    transform: rotate(180deg);
-  }
 
-  .role-breakdown-panel {
-    width: 100%;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px dashed #e2e8f0;
-  }
 
   @media (max-width: 640px) {
     .dashboard-wrapper {

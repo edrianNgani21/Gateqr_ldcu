@@ -80,7 +80,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         } else if (uType === 'safety_security' || uType === 'safety security' || uType === 'security') {
             role = 'security';
             redirectUrl = '/security';
-        } else if (ident === 'faculty' || uType === 'dean' || uType === 'administrative') {
+        } else if (uType === 'office head' || uType === 'administrative') {
+            role = 'administrative';
+            redirectUrl = '/administrative';
+        } else if (uType === 'academic head' || uType === 'dean' || ident === 'faculty') {
             // Check if department is administrative
             let isAdministrativeDept = false;
             if (user.department_id) {
@@ -94,7 +97,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
                 }
             }
 
-            if (isAdministrativeDept || uType === 'administrative') {
+            if (isAdministrativeDept) {
                 role = 'administrative';
                 redirectUrl = '/administrative';
             } else {

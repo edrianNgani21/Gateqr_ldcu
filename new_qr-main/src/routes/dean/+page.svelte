@@ -1,17 +1,14 @@
 <script lang="ts">
   import AppShell from "$lib/components/AppShell.svelte";
-  import TabBar from "$lib/components/TabBar.svelte";
   import { invalidateAll } from "$app/navigation";
   import { startLiveSync } from "$lib/utils/liveSync";
 
   let { data } = $props();
-  let apps = $derived((data.applications as any[]) || []);
-
-  let tab = $state("agreement");
-  const tabs = ["agreement"];
-  const tabLabels: Record<string, string> = {
-    agreement: "Agreement Form to Park"
-  };
+  let applicationsState = $state<any[]>(data.applications || []);
+  $effect(() => {
+    applicationsState = data.applications || [];
+  });
+  let apps = $derived(applicationsState);
 
   let searchQuery = $state("");
   let approvingId = $state<number | null>(null);
@@ -24,15 +21,11 @@
     });
   });
 
-  // Only applications that are on the screening of applications tab
-  let screeningApps = $derived.by(() => {
-    return apps.filter((a: any) => ['dept_val', 'pending'].includes((a.status || '').toLowerCase()));
-  });
-
-  let screeningCount = $derived(screeningApps.length);
+  let pendingApps = $derived(apps.filter((a: any) => ['dept_val', 'pending'].includes((a.status || '').toLowerCase())));
+  let currentTabApps = $derived(pendingApps);
 
   let displayedApps = $derived.by(() => {
-    let filtered = screeningApps;
+    let filtered = currentTabApps;
 
     if (searchQuery && searchQuery.trim()) {
       const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
@@ -60,6 +53,16 @@
   async function approveApp(registration_id: number) {
     if (approvingId !== null) return;
     approvingId = registration_id;
+    const previous = applicationsState;
+    applicationsState = applicationsState.map((a: any) =>
+      a.registration_id === registration_id || a.id === registration_id
+        ? {
+            ...a,
+            status: "dept_validated",
+            dept_val_at: new Date().toISOString()
+          }
+        : a
+    );
     try {
       const res = await fetch("/api/dean/applications", {
         method: "POST",
@@ -68,12 +71,14 @@
       });
 
       if (res.ok) {
-        await invalidateAll();
+        invalidateAll();
       } else {
+        applicationsState = previous;
         const err = await res.json();
         alert(err.error || "Action failed");
       }
     } catch (e) {
+      applicationsState = previous;
       alert("Network error");
     } finally {
       approvingId = null;
@@ -89,7 +94,7 @@
   />
 </svelte:head>
 
-<AppShell userEmail={data.userEmail} userRole={data.departmentType === 'administrative' ? 'administrative' : 'dean'} showSidebar={false}>
+<AppShell userEmail={data.userEmail} userRole={data.departmentType === 'administrative' ? 'administrative' : 'dean'} showSidebar={true}>
   <!-- Welcome Banner matching Dashboard Aesthetic -->
   <div class="welcome-banner">
     <div class="wb-content">
@@ -105,11 +110,6 @@
         <path d="M6 12v5c3 3 9 3 12 0v-5"/>
       </svg>
     </div>
-  </div>
-
-  <!-- Single Tab: Agreement Form to Park -->
-  <div class="tabs-wrapper">
-    <TabBar {tabs} active={tab} labels={tabLabels} counts={[screeningCount]} onchange={(t) => (tab = t)} />
   </div>
 
   <!-- Search Toolbar (Campus, Vehicle Types, and Roles removed) -->
@@ -152,6 +152,7 @@
       {@const applicantEmail = app.user_email || app.email || app.user?.email || 'No email provided'}
       {@const deptName = app.department_name || app.department?.department_name || app.department?.department || data.departmentName || 'Department'}
       {@const isApproving = approvingId === appId}
+      {@const isPending = ['dept_val', 'pending'].includes((app.status || '').toLowerCase())}
 
       <div class="dean-app-card">
         <div class="card-left-section">
@@ -182,24 +183,33 @@
         </div>
 
         <div class="card-action-section">
-          <button
-            type="button"
-            class="btn-dean-approve"
-            disabled={isApproving || approvingId !== null}
-            onclick={() => approveApp(appId)}
-          >
-            {#if isApproving}
-              <svg class="btn-spinner" viewBox="0 0 20 20" fill="none">
-                <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2.5" stroke-dasharray="35 15" stroke-linecap="round"/>
-              </svg>
-              <span>Approving…</span>
-            {:else}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          {#if isPending}
+            <button
+              type="button"
+              class="btn-dean-approve"
+              disabled={isApproving || approvingId !== null}
+              onclick={() => approveApp(appId)}
+            >
+              {#if isApproving}
+                <svg class="btn-spinner" viewBox="0 0 20 20" fill="none">
+                  <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2.5" stroke-dasharray="35 15" stroke-linecap="round"/>
+                </svg>
+                <span>Approving…</span>
+              {:else}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <span>Approve</span>
+              {/if}
+            </button>
+          {:else}
+            <span class="badge-status-approved">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
-              <span>Approve</span>
-            {/if}
-          </button>
+              {app.status === 'dept_validated' ? 'Validated by Dean' : (app.status === 'approved' ? 'Approved & Registered' : (app.status === 'completed' ? 'Completed' : (app.status === 'rejected' ? 'Rejected' : app.status)))}
+            </span>
+          {/if}
         </div>
       </div>
     {:else}
@@ -516,6 +526,19 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .badge-status-approved {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.55rem 1.15rem;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    color: #065f46;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 700;
   }
 
   /* Empty State Box */

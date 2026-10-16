@@ -44,9 +44,9 @@
 
     function getAppsForTab(t: string) {
         if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
-        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at);
+        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && (!a.security_check_at || !a.osa_dist_at));
         if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
-        if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || (a.status || '').toLowerCase() === 'security_checked');
+        if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || ((a.status || '').toLowerCase() === 'security_checked' && !a.sticker_released_at));
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
         if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()));
         return [];
@@ -152,7 +152,9 @@
                     registration_ids: ids,
                     action: bulkActionType,
                     schedule: bulkActionType === 'accept' ? scheduleDateTime : null,
-                    reason: bulkActionType === 'reject' ? bulkReason : null
+                    reason: bulkActionType === 'reject' ? bulkReason : null,
+                    school_year: bulkActionType === 'accept' ? schoolYearVal : null,
+                    expires_at: bulkActionType === 'accept' ? expiryDateVal : null
                 })
             });
 
@@ -340,6 +342,8 @@
     let confirmLoading = $state(false);
 
     let singleSchedule = $state('');
+    let schoolYearVal = $state('2025-2026');
+    let expiryDateVal = $state('2026-05-31');
 
     // Reject / Revoke Reason Modal State
     let reasonModalOpen = $state(false);
@@ -424,7 +428,7 @@
         if (pendingAction) {
             confirmLoading = true;
             try {
-                await submitAction(pendingAction.id, pendingAction.action, '', scheduleDateTime);
+                await submitAction(pendingAction.id, pendingAction.action, '', scheduleDateTime, schoolYearVal, expiryDateVal);
             } finally {
                 confirmLoading = false;
                 scheduleModalOpen = false;
@@ -445,12 +449,12 @@
         singleSchedule = '';
     }
 
-    async function submitAction(registration_id: number, action: string, reason: string = '', schedule: string = '') {
+    async function submitAction(registration_id: number, action: string, reason: string = '', schedule: string = '', school_year: string = '', expires_at: string = '') {
         try {
             const res = await fetch('/api/osa/applications', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registration_id, action, reason, schedule })
+                body: JSON.stringify({ registration_id, action, reason, schedule, school_year, expires_at })
             });
 
             if (res.ok) {
@@ -888,6 +892,16 @@
               <input type="datetime-local" bind:value={singleSchedule} class="sched-input" disabled={confirmLoading} />
             </div>
           </div>
+          <div class="schedule-row" style="margin-top: 0.85rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+            <div class="schedule-field">
+              <label class="schedule-label">SCHOOL YEAR</label>
+              <input type="text" bind:value={schoolYearVal} placeholder="e.g. 2025-2026" class="sched-input" disabled={confirmLoading} />
+            </div>
+            <div class="schedule-field">
+              <label class="schedule-label">STICKER EXPIRY DATE</label>
+              <input type="date" bind:value={expiryDateVal} class="sched-input" disabled={confirmLoading} />
+            </div>
+          </div>
         </div>
         <div class="modal-actions">
           <button class="btn-cancel" onclick={cancelSchedule} disabled={confirmLoading}>Cancel</button>
@@ -927,6 +941,16 @@
               <div class="schedule-field">
                 <label class="schedule-label">SET SCHEDULE</label>
                 <input type="datetime-local" bind:value={bulkSchedule} class="sched-input" disabled={bulkLoading} />
+              </div>
+            </div>
+            <div class="schedule-row" style="margin-top: 0.85rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="schedule-field">
+                <label class="schedule-label">SCHOOL YEAR</label>
+                <input type="text" bind:value={schoolYearVal} placeholder="e.g. 2025-2026" class="sched-input" disabled={bulkLoading} />
+              </div>
+              <div class="schedule-field">
+                <label class="schedule-label">STICKER EXPIRY DATE</label>
+                <input type="date" bind:value={expiryDateVal} class="sched-input" disabled={bulkLoading} />
               </div>
             </div>
           </div>

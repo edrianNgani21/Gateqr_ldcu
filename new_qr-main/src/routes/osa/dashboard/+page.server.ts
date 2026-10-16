@@ -24,9 +24,9 @@ export const load: PageServerLoad = async ({ locals }) => {
             statusBreakdownResult,
             recentApplicationsResult
         ] = await Promise.all([
+            supabase.from('registration').select('*', { count: 'exact', head: true }),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'security_checked']).is('security_check_at', null),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'security_checked']).not('security_check_at', 'is', null).is('revoke_at', null),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'osa_validated', 'security_checked']).is('sticker_released_at', null),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
             supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
             supabase.from('department').select('*', { count: 'exact', head: true }),

@@ -88,7 +88,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { registration_id, action, reason, schedule } = await request.json();
+        const { registration_id, action, reason, schedule, school_year, expires_at } = await request.json();
 
         const { data: rows } = await supabase
             .from('registration')
@@ -112,26 +112,50 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (!schedule) {
                 return json({ error: 'Schedule is required to accept application' }, { status: 400 });
             }
-            // Generate QR code with unique alphanumeric string
-            const uniqueCode = generateUniqueCode(8);
+            // Generate QR code with guaranteed unique alphanumeric string
+            let uniqueCode = '';
+            let isCodeUnique = false;
+            let attempts = 0;
+            while (!isCodeUnique && attempts < 15) {
+                attempts++;
+                uniqueCode = generateUniqueCode(8);
+                const { data: duplicateCode } = await supabase
+                    .from('registration')
+                    .select('registration_id')
+                    .eq('qr_unique_code', uniqueCode)
+                    .maybeSingle();
+                if (!duplicateCode) {
+                    isCodeUnique = true;
+                }
+            }
             const qrData = uniqueCode;
             const filename = `qr-codes/qr-${registration_id}-${Date.now()}.png`;
             const qrBuffer = await generateStyledQRBuffer(qrData, reg.role);
             const qrUrl = await uploadToStorage(filename, qrBuffer, 'image/png');
 
-            const expiryMonths = parseInt(process.env.QR_EXPIRY_MONTHS || '6', 10);
-            const expiresAt = new Date(new Date(reg.created_at).getTime() + expiryMonths * 30 * 24 * 60 * 60 * 1000);
+            let finalExpiresAt: string;
+            if (expires_at) {
+                finalExpiresAt = new Date(expires_at).toISOString();
+            } else {
+                const expiryMonths = parseInt(process.env.QR_EXPIRY_MONTHS || '6', 10);
+                finalExpiresAt = new Date(new Date(reg.created_at).getTime() + expiryMonths * 30 * 24 * 60 * 60 * 1000).toISOString();
+            }
+
+            const updatePayload: any = {
+                status: 'osa_validated',
+                osa_val_at: new Date().toISOString(),
+                qr_code: qrUrl,
+                qr_unique_code: uniqueCode,
+                schedule: new Date(schedule).toISOString(),
+                expires_at: finalExpiresAt
+            };
+            if (school_year) {
+                updatePayload.school_year = school_year;
+            }
 
             const { error: updateError } = await supabase
                 .from('registration')
-                .update({
-                    status: 'osa_validated',
-                    osa_val_at: new Date().toISOString(),
-                    qr_code: qrUrl,
-                    qr_unique_code: uniqueCode,
-                    schedule: new Date(schedule).toISOString(),
-                    expires_at: expiresAt.toISOString()
-                })
+                .update(updatePayload)
                 .eq('registration_id', registration_id);
 
             if (updateError) throw updateError;

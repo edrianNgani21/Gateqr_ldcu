@@ -12,13 +12,30 @@
   let { data } = $props();
   let userRole = $derived(data.userRole || "security");
 
-  let tab = $state("Document Review");
+  let tab = $state(data.initialTab || "Document Review");
+
+  function switchTab(newTab: string) {
+    tab = newTab;
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", newTab);
+      window.history.replaceState({}, "", u.toString());
+    }
+  }
+
   const tabs = [
     "Document Review",
     "Sticker Installation",
     "Registered Vehicles",
     "Rejected or Revoked Accounts & Applications",
   ];
+
+  const tabLabels: Record<string, string> = {
+    "Document Review": "Document Review",
+    "Sticker Installation": "Sticker Installation",
+    "Registered Vehicles": "Registered Vehicles",
+    "Rejected or Revoked Accounts & Applications": "Rejected or Revoked",
+  };
 
   // ── Vehicle Monitoring ──────────────────────────────────────────────────
   let vehicles = $state(data.vehicles);
@@ -34,7 +51,9 @@
       channelName: "security-realtime",
       tables: ["registration", "vehicle_log", "parking_capacity"],
       onSync: () => {
-        fetchLogs();
+        if (tab === "Vehicle Log") {
+          fetchLogs();
+        }
         fetchParkingStatus();
       }
     });
@@ -63,6 +82,13 @@
     }
     return [];
   }
+
+  let tabCounts = $derived([
+    getAppsForTab("Document Review").length,
+    getAppsForTab("Sticker Installation").length,
+    getAppsForTab("Registered Vehicles").length,
+    getAppsForTab("Rejected or Revoked Accounts & Applications").length,
+  ]);
 
   let searchQuery = $state("");
   let roleFilter = $state("all"); // 'all', 'student', 'faculty', 'staff'
@@ -173,8 +199,6 @@
     "concessionaire",
     "supplier",
     "vps",
-    "visitor",
-    "guest",
     "vip",
   ];
   let selectedRoles = $state<string[]>([]);
@@ -184,6 +208,8 @@
     const lower = (role || "").toLowerCase();
     if (lower === "vps") return "VPS";
     if (lower === "vip") return "VIP";
+    if (lower === "administrator") return "Administrator";
+    if (lower === "concessionaire" || lower === "concecioonaire") return "Concessionaire";
     return role.charAt(0).toUpperCase() + role.slice(1);
   }
 
@@ -336,6 +362,12 @@
       )
     )
       return;
+    const previous = vehicles;
+    vehicles = vehicles.map((v: any) =>
+      v.registration_id === registrationId
+        ? { ...v, status: "revoked" }
+        : v,
+    );
     try {
       const res = await fetch(`/api/monitor/revoke`, {
         method: "POST",
@@ -343,15 +375,13 @@
         body: JSON.stringify({ registration_id: registrationId }),
       });
       if (res.ok) {
-        vehicles = vehicles.map((v: any) =>
-          v.registration_id === registrationId
-            ? { ...v, status: "revoked" }
-            : v,
-        );
+        invalidateAll();
       } else {
+        vehicles = previous;
         alert("Failed to revoke QR code.");
       }
     } catch (e) {
+      vehicles = previous;
       console.error(e);
       alert("Error revoking QR code.");
     }
@@ -364,6 +394,12 @@
       )
     )
       return;
+    const previous = vehicles;
+    vehicles = vehicles.map((v: any) =>
+      v.registration_id === registrationId
+        ? { ...v, status: "approved" }
+        : v,
+    );
     try {
       const res = await fetch(`/api/monitor/revoke`, {
         method: "DELETE",
@@ -371,15 +407,13 @@
         body: JSON.stringify({ registration_id: registrationId }),
       });
       if (res.ok) {
-        vehicles = vehicles.map((v: any) =>
-          v.registration_id === registrationId
-            ? { ...v, status: "distributed" }
-            : v,
-        );
+        invalidateAll();
       } else {
+        vehicles = previous;
         alert("Failed to restore QR code.");
       }
     } catch (e) {
+      vehicles = previous;
       console.error(e);
       alert("Error restoring QR code.");
     }
@@ -390,6 +424,10 @@
       !confirm("Are you sure you want to permanently delete this registration?")
     )
       return;
+    const previous = vehicles;
+    vehicles = vehicles.filter(
+      (v: any) => v.registration_id !== registrationId,
+    );
     try {
       const res = await fetch("/api/osa/applications", {
         method: "POST",
@@ -400,14 +438,13 @@
         }),
       });
       if (res.ok) {
-        vehicles = vehicles.filter(
-          (v: any) => v.registration_id !== registrationId,
-        );
-        alert("Registration deleted successfully.");
+        invalidateAll();
       } else {
+        vehicles = previous;
         alert("Failed to delete registration.");
       }
     } catch (e) {
+      vehicles = previous;
       console.error(e);
       alert("Error deleting registration.");
     }
@@ -535,62 +572,7 @@
                     th { background-color: #f2f2f2; font-weight: bold; }
                     tr:nth-child(even) { background-color: #f9f9f9; }
                     .print-date { text-align: right; margin-bottom: 10px; }
-                
-  /* -- Sticker Installation Tab ------------------------------------------- */
-  .install-info-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.625rem;
-    padding: 0.875rem 1rem;
-    background: #eff6ff;
-    border: 1.5px solid #bfdbfe;
-    border-radius: var(--radius-sm);
-    color: #1d4ed8;
-    font-size: 0.8rem;
-    margin-bottom: 1rem;
-    line-height: 1.5;
-  }
-  .install-info-banner svg { flex-shrink: 0; margin-top: 1px; }
-  .install-action-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .install-meta { display: flex; flex-direction: column; gap: 0.15rem; }
-  .install-date-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
-  .install-date-value { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
-  .btn-install {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    padding: 0.625rem 1.125rem;
-    background: #ecfdf5;
-    color: #047857;
-    border: 1.5px solid #a7f3d0;
-    border-radius: var(--radius-sm);
-    font-size: 0.8rem;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.15s;
-  }
-  .btn-install:not(:disabled):hover { background: #d1fae5; transform: translateY(-1px); }
-  .btn-install:disabled { opacity: 0.6; cursor: not-allowed; }
-  .btn-install.btn-loading { opacity: 1; cursor: wait; }
-  .btn-spinner { width: 14px; height: 14px; animation: spin-install 0.75s linear infinite; flex-shrink: 0; }
-  @keyframes spin-install { to { transform: rotate(360deg); } }
-  .empty-state-install {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 4rem 2rem; background: var(--surface); border: 1.5px dashed var(--border);
-    border-radius: var(--radius-md); text-align: center; gap: 0.75rem; color: var(--text-secondary);
-  }
-  .empty-state-install svg { color: var(--text-dim); }
-  .empty-state-install h3 { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
-  .empty-state-install p { font-size: 0.85rem; max-width: 400px; margin: 0; }
-</style>
+                </style>
             </head>
             <body>
                 <h1>Vehicle Log Report</h1>
@@ -599,12 +581,11 @@
                     <thead>
                         <tr>
                             <th>Log ID</th>
-                            <th>Registration ID</th>
-                            <th>Vehicle Info ID</th>
+                            <th>Plate Number</th>
+                            <th>Driver / Role</th>
                             <th>Check In</th>
                             <th>Check Out</th>
-                            <th>Logged Status</th>
-                            <th>Created At</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -612,13 +593,12 @@
                           .map(
                             (log) => `
                             <tr>
-                                <td>${log.vehicle_log_id}</td>
-                                <td>${log.registration_id}</td>
-                                <td>${log.vehicle_information_id}</td>
-                                <td>${new Date(log.check_in).toLocaleString()}</td>
+                                <td>#${log.vehicle_log_id}</td>
+                                <td>${log.plate || log.vehicle_plate || 'No Plate'}</td>
+                                <td>${log.driver_name || log.name || 'Driver'} (${log.role || 'Visitor'})</td>
+                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
                                 <td>${log.check_out ? new Date(log.check_out).toLocaleString() : "Still Inside"}</td>
-                                <td>${log.logged_status}</td>
-                                <td>${new Date(log.created_at).toLocaleString()}</td>
+                                <td>${log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</td>
                             </tr>
                         `,
                           )
@@ -670,6 +650,12 @@
     )
       return;
     installationLoading = registrationId;
+    const previous = vehicles;
+    vehicles = vehicles.map((v: any) =>
+      v.registration_id === registrationId
+        ? { ...v, sticker_installed_at: new Date().toISOString(), status: "approved" }
+        : v,
+    );
     try {
       const res = await fetch("/api/security/sticker-install", {
         method: "POST",
@@ -677,16 +663,14 @@
         body: JSON.stringify({ registration_id: registrationId }),
       });
       if (res.ok) {
-        vehicles = vehicles.map((v: any) =>
-          v.registration_id === registrationId
-            ? { ...v, sticker_installed_at: new Date().toISOString() }
-            : v,
-        );
+        invalidateAll();
       } else {
+        vehicles = previous;
         const err = await res.json();
         alert(err.error || "Failed to mark sticker as installed.");
       }
     } catch (e) {
+      vehicles = previous;
       alert("Network error. Please try again.");
     } finally {
       installationLoading = null;
@@ -726,7 +710,7 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} {userRole}>
   <NavBar title="Application Review" />
 
-  <TabBar {tabs} active={tab} onchange={(t) => (tab = t)} />
+  <TabBar {tabs} active={tab} counts={tabCounts} labels={tabLabels} onchange={switchTab} />
 
   {#if tab === "Document Review" || tab === "Sticker Installation" || tab === "Registered" || tab === "Registered Vehicles" || tab === "Revoked Registered" || tab === "Rejected or Revoked Accounts & Applications"}
     <!-- Monitoring Tab - Registered Vehicles -->
@@ -769,6 +753,7 @@
           <option value="concessionaire">Concessionaire</option>
           <option value="supplier">Supplier</option>
           <option value="vps">VPS</option>
+          <option value="vip">VIP</option>
         </select>
         <select bind:value={vehicleTypeFilter} class="filter-select">
           <option value="all">All Vehicles</option>
@@ -862,6 +847,30 @@
                   action === "security_check" ||
                   action === "install_sticker"
                 ) {
+                  const previousVehicles = vehicles;
+                  if (action === "security_check") {
+                    vehicles = vehicles.map((v: any) =>
+                      v.registration_id === app.registration_id
+                        ? {
+                            ...v,
+                            security_check_at: new Date().toISOString(),
+                            security_checked_at: new Date().toISOString(),
+                            status: "security_checked"
+                          }
+                        : v,
+                    );
+                  } else if (action === "install_sticker") {
+                    vehicles = vehicles.map((v: any) =>
+                      v.registration_id === app.registration_id
+                        ? {
+                            ...v,
+                            sticker_installed_at: new Date().toISOString(),
+                            status: "approved"
+                          }
+                        : v,
+                    );
+                  }
+
                   try {
                     const res = await fetch(`/api/monitor/actions`, {
                       method: "POST",
@@ -872,29 +881,14 @@
                       }),
                     });
                     if (res.ok) {
-                      if (action === "security_check") {
-                        vehicles = vehicles.map((v: any) =>
-                          v.registration_id === app.registration_id
-                            ? {
-                                ...v,
-                                security_checked_at: new Date().toISOString(),
-                              }
-                            : v,
-                        );
-                      } else if (action === "install_sticker") {
-                        vehicles = vehicles.map((v: any) =>
-                          v.registration_id === app.registration_id
-                            ? {
-                                ...v,
-                                sticker_installed_at: new Date().toISOString(),
-                              }
-                            : v,
-                        );
-                      }
+                      invalidateAll();
                     } else {
-                      alert("Failed to perform action.");
+                      vehicles = previousVehicles;
+                      const errData = await res.json();
+                      alert(errData.error || "Failed to perform action.");
                     }
                   } catch (e) {
+                    vehicles = previousVehicles;
                     alert("Error performing action.");
                   }
                 }
@@ -1044,12 +1038,12 @@
                   </th>
                 {/if}
                 <th>Log ID</th>
-                <th>Registration ID</th>
-                <th>Vehicle Info ID</th>
+                <th>Plate Number</th>
+                <th>Driver / Role</th>
                 <th>Check In</th>
                 <th>Check Out</th>
-                <th>Logged Status</th>
-                <th>Created At</th>
+                <th>Campus</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -1065,17 +1059,20 @@
                     </td>
                   {/if}
                   <td class="td-id">
-                    <span class="id-text">{log.vehicle_log_id}</span>
+                    <span class="id-text">#{log.vehicle_log_id}</span>
                   </td>
-                  <td class="td-id">
-                    <span class="id-text">{log.registration_id}</span>
+                  <td>
+                    <span class="plate-badge">{log.plate || log.vehicle_plate || 'No Plate'}</span>
                   </td>
-                  <td class="td-id">
-                    <span class="id-text">{log.vehicle_information_id}</span>
+                  <td>
+                    <div class="driver-cell">
+                      <span class="driver-name-text">{log.driver_name || log.name || 'Driver'}</span>
+                      <span class="driver-role-chip">{log.role || 'Visitor'}</span>
+                    </div>
                   </td>
                   <td class="td-time">
                     <span class="time-main"
-                      >{new Date(log.check_in).toLocaleString()}</span
+                      >{log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</span
                     >
                   </td>
                   <td class="td-time">
@@ -1086,12 +1083,10 @@
                     >
                   </td>
                   <td>
-                    <span class="chip chip-status">{log.logged_status}</span>
+                    <span class="campus-badge">{log.campus || 'Main Campus'}</span>
                   </td>
-                  <td class="td-time">
-                    <span class="time-main"
-                      >{new Date(log.created_at).toLocaleString()}</span
-                    >
+                  <td>
+                    <span class="chip chip-status">{log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</span>
                   </td>
                 </tr>
               {:else}
@@ -2472,6 +2467,41 @@
     margin-left: 4px;
     font-family: monospace;
     letter-spacing: 0.05em;
+  }
+
+  .driver-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .driver-name-text {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+  .driver-role-chip {
+    display: inline-block;
+    align-self: flex-start;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    background: rgba(139, 26, 60, 0.08);
+    color: var(--maroon);
+    border: 1px solid rgba(139, 26, 60, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .plate-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
   }
 
   .card-qr {

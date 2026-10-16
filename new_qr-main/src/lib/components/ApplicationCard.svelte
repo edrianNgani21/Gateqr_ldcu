@@ -25,6 +25,7 @@
   } = $props();
 
   let expanded = $state(startExpanded);
+  let effectiveShowQR = $derived(tab === 'status' ? false : showQR);
 
   let showDocPopup = $state<string | null>(null);
 
@@ -50,10 +51,10 @@
   }
 
   let statusLabel = $derived(
-    appStatus?.replace("_", " ")?.toUpperCase() || "UNKNOWN",
+    appStatus?.replace(/_/g, " ")?.toUpperCase() || "UNKNOWN",
   );
   let statusVariant = $derived<'default' | 'success' | 'warning' | 'danger'>(
-    appStatus && ["distributed", "osa_val", "dept_val"].includes(appStatus)
+    appStatus && ["approved", "completed", "Sticker_Installed", "sticker_installed", "Sticker_Released", "sticker_released", "security_checked", "osa_validated", "dept_validated", "distributed", "osa_val", "dept_val"].includes(appStatus)
       ? "success"
       : appStatus && ["rejected", "revoked", "expired"].includes(appStatus)
         ? "danger"
@@ -326,7 +327,7 @@
         {/if}
 
         <!-- QR Code -->
-        {#if showQR}
+        {#if effectiveShowQR}
           {@const qrImgUrl = getQRImageUrl(data.qr_code, data.qr_unique_code)}
           <div class="detail-section" class:no-border={tab.toLowerCase() === 'revoked'}>
             <span class="section-label">QR Code</span>

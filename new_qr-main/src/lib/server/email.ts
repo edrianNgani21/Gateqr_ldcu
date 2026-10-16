@@ -26,7 +26,10 @@ if (gmailPass) {
             auth: {
                 user: gmailUser,
                 pass: gmailPass
-            }
+            },
+            connectionTimeout: 4000,
+            greetingTimeout: 3000,
+            socketTimeout: 4000
         });
         console.log(`[Email] Nodemailer Gmail SMTP configured with sender: ${gmailUser}`);
     } catch (e) {
@@ -104,6 +107,22 @@ export async function sendEmail(
         console.error(`[Email Error] Failed to send to ${to}:`, error);
         return { error };
     }
+}
+
+/**
+ * Non-blocking email sender for instant background notification dispatching
+ */
+export function sendEmailAsync(
+    to: string,
+    subject: string,
+    text: string,
+    html?: string,
+    fromOrReplyTo?: string
+) {
+    if (!to) return;
+    sendEmail(to, subject, text, html, fromOrReplyTo).catch(err => {
+        console.error(`[Background Email Error] Failed to send to ${to}:`, err);
+    });
 }
 
 /**

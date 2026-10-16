@@ -2,7 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) {
         throw redirect(303, '/login');
     }
@@ -184,9 +184,21 @@ export const load: PageServerLoad = async ({ locals }) => {
         // Use max_capacity from parkingData already fetched above
         stats.maxCapacity = max_capacity;
 
+        const tabParam = url.searchParams.get('tab');
+        let initialTab = 'Document Review';
+        if (tabParam) {
+            const low = tabParam.toLowerCase();
+            if (low.includes('doc') || low.includes('review')) initialTab = 'Document Review';
+            else if (low.includes('sticker') || low.includes('install')) initialTab = 'Sticker Installation';
+            else if (low.includes('reg') && !low.includes('revok') && !low.includes('reject')) initialTab = 'Registered Vehicles';
+            else if (low.includes('reject') || low.includes('revok')) initialTab = 'Rejected or Revoked Accounts & Applications';
+            else initialTab = tabParam;
+        }
+
         return {
             userEmail,
             userRole: locals.user.role,
+            initialTab,
             vehicles,
             stats,
             roleBreakdown: roleBreakdown as any,
@@ -204,6 +216,8 @@ export const load: PageServerLoad = async ({ locals }) => {
         console.error('Error loading security page data:', e);
         return {
             userEmail,
+            userRole: locals.user.role,
+            initialTab: 'Document Review',
             vehicles: [],
             stats: {
                 currentlyIn: 0,
@@ -230,7 +244,6 @@ export const load: PageServerLoad = async ({ locals }) => {
             hourlyChart: Array(24).fill(0),
             vehicleCount: 0,
             unreadComplaints: 0,
-            userRole: locals.user.role,
             parkingData: {
                 parking_capacity: 0,
                 slot_occupied: 0,

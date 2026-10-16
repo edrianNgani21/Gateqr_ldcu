@@ -73,7 +73,8 @@
 
         if (ut === 'osa') return 'Office of Student Affairs';
         if (ut === 'safety_security' || ut.includes('security')) return 'Safety and Security';
-        if (ut === 'dean' || id === 'faculty' || id === 'staff') {
+        if (ut === 'office head' || ut === 'administrative') return 'Administrative Department';
+        if (ut === 'academic head' || ut === 'dean' || id === 'faculty' || id === 'staff') {
             if (isAdminDept) return 'Administrative Department';
             return 'Academic Department Head';
         }
@@ -96,7 +97,10 @@
 
         if (ut === 'osa') return 'Office of Student Affairs';
         if (ut === 'safety_security' || ut.includes('security')) return 'Safety and Security';
-        if (ut === 'dean' || id === 'faculty' || id === 'staff') {
+        if (ut === 'office head' || ut === 'administrative' || (ut === 'dean' && (id === 'staff' || admin?.department?.administrative_department || admin?.department?.['Administrative Department']))) {
+            return deptName !== '—' ? `Administrative Department (${deptName})` : 'Administrative Department';
+        }
+        if (ut === 'academic head' || ut === 'dean' || id === 'faculty' || id === 'staff') {
             if (id === 'staff' || (admin?.department?.administrative_department || admin?.department?.['Administrative Department'])) {
                 return deptName !== '—' ? `Administrative Department (${deptName})` : 'Administrative Department';
             }

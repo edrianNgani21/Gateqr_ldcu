@@ -31,55 +31,63 @@
     let statusBreakdown = $derived((data.statusBreakdown as Record<string, number>) || {
         pending: 0, dept_val: 0, osa_val: 0, distributed: 0, completed: 0, rejected: 0, revoked: 0
     });
+
+    const groupedStatus = $derived.by(() => {
+        const raw = statusBreakdown || {};
+        let pending = 0;
+        let completed = 0;
+        let rejected = 0;
+
+        for (const [stKey, countVal] of Object.entries(raw)) {
+            const k = stKey.toLowerCase();
+            const count = Number(countVal) || 0;
+            if (['completed', 'approved', 'sticker_installed'].includes(k)) {
+                completed += count;
+            } else if (['rejected', 'revoked'].includes(k)) {
+                rejected += count;
+            } else {
+                pending += count;
+            }
+        }
+
+        const total = pending + completed + rejected;
+        const pendingPct = total > 0 ? (pending / total) * 100 : 0;
+        const completedPct = total > 0 ? (completed / total) * 100 : 0;
+        const rejectedPct = total > 0 ? (rejected / total) * 100 : 0;
+
+        return {
+            pending,
+            completed,
+            rejected,
+            total,
+            pendingPct,
+            completedPct,
+            rejectedPct,
+            pendingPctFormatted: pendingPct % 1 === 0 ? pendingPct.toFixed(0) : pendingPct.toFixed(1),
+            completedPctFormatted: completedPct % 1 === 0 ? completedPct.toFixed(0) : completedPct.toFixed(1),
+            rejectedPctFormatted: rejectedPct % 1 === 0 ? rejectedPct.toFixed(0) : rejectedPct.toFixed(1)
+        };
+    });
     let recentApplications = $derived(data.recentApplications || []);
 
-    const statCards = $derived([
-        {
-            label: 'Total Applications',
-            value: statsData.totalApplications,
-            desc: 'Screening of Applications tab',
-            icon: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>`,
-            color: 'var(--maroon)',
-            bg: 'var(--maroon-muted)',
-            border: 'var(--maroon-tint)'
-        },
-        {
-            label: 'Pending Application',
-            value: statsData.pendingValidation,
-            desc: 'Submission of Documents and Review',
-            icon: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`,
-            color: 'var(--gold)',
-            bg: 'var(--gold-muted)',
-            border: 'var(--gold-shimmer)'
-        },
-        {
-            label: 'Pending Sticker Releasing',
-            value: statsData.pendingDistribution,
-            desc: 'Applications ready for Sticker Releasing',
-            icon: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
-            color: 'var(--gold)',
-            bg: 'var(--gold-muted)',
-            border: 'var(--gold-shimmer)'
-        },
-        {
-            label: 'Registered Vehicles',
-            value: statsData.completedToday,
-            desc: 'Total registered vehicles in system',
-            icon: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`,
-            color: 'var(--maroon)',
-            bg: 'var(--maroon-muted)',
-            border: 'var(--maroon-tint)'
-        }
-    ]);
 
     const statusLabels: Record<string, string> = {
         pending: 'Pending',
         dept_val: 'Dept Validated',
+        dept_validated: 'Dept Validated',
         osa_val: 'OSA Validated',
-        distributed: 'Distributed',
+        osa_validated: 'OSA Validated',
+        security_checked: 'Security Checked',
+        Sticker_Released: 'Sticker Released',
+        sticker_released: 'Sticker Released',
+        Sticker_Installed: 'Sticker Installed',
+        sticker_installed: 'Sticker Installed',
         completed: 'Completed',
+        approved: 'Approved',
         rejected: 'Rejected',
-        revoked: 'Revoked'
+        expired: 'Expired',
+        revoked: 'Revoked',
+        distributed: 'Distributed'
     };
 
     const maxStatusCount = $derived(Math.max(...Object.values(statusBreakdown), 1));
@@ -148,47 +156,153 @@
             </button>
         </div>
         
-        <!-- Stats Grid -->
-        <div class="stats-grid">
-            {#each statCards as card}
-                <div class="stat-card">
-                    <div class="stat-left">
-                        <div class="stat-icon-circle" style="color: {card.color}; background: {card.bg};">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                {@html card.icon}
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="stat-content">
-                        <div class="stat-value">{card.value}</div>
-                        <div class="stat-label">{card.label}</div>
-                    </div>
-                    <div class="stat-more">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#cbd5e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
-                        </svg>
-                    </div>
-                </div>
-            {/each}
-        </div>
-
         <div class="dashboard-grid">
-            <!-- Application Status Breakdown -->
+            <!-- Application Status Breakdown Diagram -->
             <div class="breakdown-section">
                 <div class="section-header">
-                    <h2>Application Status</h2>
-                    <span class="section-badge">Overview</span>
+                    <div class="section-title-wrap">
+                        <h2>Application Status</h2>
+                        <span class="section-total-badge">Total Applications: <strong>{groupedStatus.total}</strong></span>
+                    </div>
                 </div>
-                <div class="breakdown-grid">
-                    {#each Object.entries(statusBreakdown) as [status, count]}
-                        <div class="breakdown-item">
-                            <div class="breakdown-label">{statusLabels[status] || status}</div>
-                            <div class="breakdown-bar">
-                                <div class="breakdown-fill" style="width: {((count as number) / (maxStatusCount as number)) * 100}%"></div>
-                            </div>
-                            <div class="breakdown-value">{count}</div>
+
+                <div class="diagram-container">
+                    <!-- Donut Chart -->
+                    <div class="donut-chart-box">
+                        <svg class="donut-svg" viewBox="0 0 140 140">
+                            <!-- Background Track -->
+                            <circle
+                                cx="70"
+                                cy="70"
+                                r="54"
+                                fill="none"
+                                stroke="#f1f5f9"
+                                stroke-width="12"
+                            />
+
+                            {#if groupedStatus.total > 0}
+                                <!-- Pending Segment (Amber / Gold) -->
+                                {#if groupedStatus.pending > 0}
+                                    <circle
+                                        cx="70"
+                                        cy="70"
+                                        r="54"
+                                        fill="none"
+                                        stroke="#f59e0b"
+                                        stroke-width="12"
+                                        stroke-dasharray="{((groupedStatus.pendingPct / 100) * 339.29)} 339.29"
+                                        stroke-dashoffset="0"
+                                        class="donut-segment"
+                                    />
+                                {/if}
+
+                                <!-- Completed Segment (Emerald Green) -->
+                                {#if groupedStatus.completed > 0}
+                                    <circle
+                                        cx="70"
+                                        cy="70"
+                                        r="54"
+                                        fill="none"
+                                        stroke="#10b981"
+                                        stroke-width="12"
+                                        stroke-dasharray="{((groupedStatus.completedPct / 100) * 339.29)} 339.29"
+                                        stroke-dashoffset="-{((groupedStatus.pendingPct / 100) * 339.29)}"
+                                        class="donut-segment"
+                                    />
+                                {/if}
+
+                                <!-- Rejected Segment (Rose / Red) -->
+                                {#if groupedStatus.rejected > 0}
+                                    <circle
+                                        cx="70"
+                                        cy="70"
+                                        r="54"
+                                        fill="none"
+                                        stroke="#ef4444"
+                                        stroke-width="12"
+                                        stroke-dasharray="{((groupedStatus.rejectedPct / 100) * 339.29)} 339.29"
+                                        stroke-dashoffset="-{(((groupedStatus.pendingPct + groupedStatus.completedPct) / 100) * 339.29)}"
+                                        class="donut-segment"
+                                    />
+                                {/if}
+                            {/if}
+                        </svg>
+
+                        <div class="donut-center-text">
+                            <span class="donut-total">{groupedStatus.total}</span>
+                            <span class="donut-sub">Total</span>
                         </div>
-                    {/each}
+                    </div>
+
+                    <!-- Status Items Legend with Percentages -->
+                    <div class="status-legend-cards">
+                        <!-- Pending -->
+                        <div class="legend-card legend-pending">
+                            <div class="legend-top">
+                                <div class="legend-title-row">
+                                    <span class="indicator-dot dot-pending"></span>
+                                    <span class="legend-title">Pending</span>
+                                </div>
+                                <div class="legend-stats">
+                                    <span class="legend-pct pct-pending">{groupedStatus.pendingPctFormatted}%</span>
+                                    <span class="legend-count">({groupedStatus.pending})</span>
+                                </div>
+                            </div>
+                            <div class="legend-progress-bar">
+                                <div class="progress-fill fill-pending" style="width: {groupedStatus.pendingPct}%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Completed -->
+                        <div class="legend-card legend-completed">
+                            <div class="legend-top">
+                                <div class="legend-title-row">
+                                    <span class="indicator-dot dot-completed"></span>
+                                    <span class="legend-title">Completed</span>
+                                </div>
+                                <div class="legend-stats">
+                                    <span class="legend-pct pct-completed">{groupedStatus.completedPctFormatted}%</span>
+                                    <span class="legend-count">({groupedStatus.completed})</span>
+                                </div>
+                            </div>
+                            <div class="legend-progress-bar">
+                                <div class="progress-fill fill-completed" style="width: {groupedStatus.completedPct}%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Rejected -->
+                        <div class="legend-card legend-rejected">
+                            <div class="legend-top">
+                                <div class="legend-title-row">
+                                    <span class="indicator-dot dot-rejected"></span>
+                                    <span class="legend-title">Rejected</span>
+                                </div>
+                                <div class="legend-stats">
+                                    <span class="legend-pct pct-rejected">{groupedStatus.rejectedPctFormatted}%</span>
+                                    <span class="legend-count">({groupedStatus.rejected})</span>
+                                </div>
+                            </div>
+                            <div class="legend-progress-bar">
+                                <div class="progress-fill fill-rejected" style="width: {groupedStatus.rejectedPct}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Combined Proportional Ratio Bar at bottom -->
+                <div class="stacked-ratio-track" title="Overall Distribution: {groupedStatus.pendingPctFormatted}% Pending | {groupedStatus.completedPctFormatted}% Completed | {groupedStatus.rejectedPctFormatted}% Rejected">
+                    {#if groupedStatus.pending > 0}
+                        <div class="ratio-segment ratio-pending" style="width: {groupedStatus.pendingPct}%"></div>
+                    {/if}
+                    {#if groupedStatus.completed > 0}
+                        <div class="ratio-segment ratio-completed" style="width: {groupedStatus.completedPct}%"></div>
+                    {/if}
+                    {#if groupedStatus.rejected > 0}
+                        <div class="ratio-segment ratio-rejected" style="width: {groupedStatus.rejectedPct}%"></div>
+                    {/if}
+                    {#if groupedStatus.total === 0}
+                        <div class="ratio-segment ratio-empty" style="width: 100%"></div>
+                    {/if}
                 </div>
             </div>
 
@@ -467,70 +581,249 @@
         margin: 0;
     }
 
-    .section-badge {
-        font-size: 0.8rem;
-        color: #718096;
-        cursor: pointer;
-    }
-
-    .section-badge::after {
-        content: ' ▾';
-        font-size: 0.7rem;
-        vertical-align: middle;
-    }
-
-    .breakdown-grid {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-md);
-    }
-
-    .breakdown-item {
+    .section-title-wrap {
         display: flex;
         align-items: center;
-        gap: var(--space-md);
+        justify-content: space-between;
+        width: 100%;
+        gap: 1rem;
+        flex-wrap: wrap;
     }
 
-    .breakdown-label {
-        min-width: 120px;
+    .section-total-badge {
         font-size: 0.85rem;
-        font-weight: 500;
-        color: var(--text-secondary);
+        color: #64748b;
+        background: #f8fafc;
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        border: 1px solid #e2e8f0;
     }
 
-    .breakdown-bar {
-        flex: 1;
-        height: 6px;
-        background: #f1f5f9;
-        border-radius: 6px;
-        overflow: hidden;
+    .section-total-badge strong {
+        color: #7A1734;
+        font-weight: 800;
+        margin-left: 0.25rem;
+    }
+
+    .diagram-container {
+        display: flex;
+        align-items: center;
+        gap: 1.75rem;
+        margin-bottom: 1.25rem;
+    }
+
+    @media (max-width: 640px) {
+        .diagram-container {
+            flex-direction: column;
+            text-align: center;
+        }
+    }
+
+    .donut-chart-box {
         position: relative;
+        width: 130px;
+        height: 130px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
-    .breakdown-fill {
+    .donut-svg {
+        width: 100%;
         height: 100%;
-        background: var(--gradient-maroon);
-        border-radius: 6px;
-        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
+        overflow: visible;
+        transform: rotate(-90deg);
     }
 
-    .breakdown-fill::after {
-        content: '';
+    .donut-segment {
+        transition: stroke-dasharray 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .donut-center-text {
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
     }
 
-    .breakdown-value {
-        min-width: 30px;
-        text-align: right;
-        font-size: 0.85rem;
+    .donut-total {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: #1e293b;
+        line-height: 1.1;
+    }
+
+    .donut-sub {
+        font-size: 0.68rem;
         font-weight: 700;
-        color: #1a202c;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .status-legend-cards {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        min-width: 0;
+    }
+
+    .legend-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 0.65rem 0.85rem;
+        transition: all 0.2s ease;
+    }
+
+    .legend-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+
+    .legend-card.legend-pending:hover {
+        border-color: #fde68a;
+        background: #fffdf5;
+    }
+
+    .legend-card.legend-completed:hover {
+        border-color: #a7f3d0;
+        background: #f0fdf4;
+    }
+
+    .legend-card.legend-rejected:hover {
+        border-color: #fca5a5;
+        background: #fef2f2;
+    }
+
+    .legend-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.4rem;
+    }
+
+    .legend-title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .indicator-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .dot-pending {
+        background: #f59e0b;
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+    }
+
+    .dot-completed {
+        background: #10b981;
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    }
+
+    .dot-rejected {
+        background: #ef4444;
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+    }
+
+    .legend-title {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .legend-stats {
+        display: flex;
+        align-items: baseline;
+        gap: 0.35rem;
+    }
+
+    .legend-pct {
+        font-size: 0.9rem;
+        font-weight: 800;
+    }
+
+    .pct-pending {
+        color: #b45309;
+    }
+
+    .pct-completed {
+        color: #047857;
+    }
+
+    .pct-rejected {
+        color: #b91c1c;
+    }
+
+    .legend-count {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #64748b;
+    }
+
+    .legend-progress-bar {
+        height: 5px;
+        background: #e2e8f0;
+        border-radius: 999px;
+        overflow: hidden;
+    }
+
+    .progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .fill-pending {
+        background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    }
+
+    .fill-completed {
+        background: linear-gradient(90deg, #10b981, #34d399);
+    }
+
+    .fill-rejected {
+        background: linear-gradient(90deg, #ef4444, #f87171);
+    }
+
+    .stacked-ratio-track {
+        display: flex;
+        height: 7px;
+        background: #f1f5f9;
+        border-radius: 999px;
+        overflow: hidden;
+        gap: 2px;
+        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .ratio-segment {
+        height: 100%;
+        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .ratio-pending {
+        background: #f59e0b;
+    }
+
+    .ratio-completed {
+        background: #10b981;
+    }
+
+    .ratio-rejected {
+        background: #ef4444;
+    }
+
+    .ratio-empty {
+        background: #e2e8f0;
     }
 
     .recent-list {

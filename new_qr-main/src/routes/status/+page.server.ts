@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { isApplicationFormOpen } from '$lib/server/applicationForm';
 
 export const load: PageServerLoad = async ({ locals }) => {
     if (!locals.user) {
@@ -86,6 +87,11 @@ export const load: PageServerLoad = async ({ locals }) => {
             vehicle_type: applications.vehicle_information?.type || '-'
         } : null;
 
+        if (application) {
+            delete (application as any).qr_code;
+            delete (application as any).qr_unique_code;
+        }
+
         // Fetch most recent change vehicle request for this user
         const { data: changeRequest } = await supabase
             .from('modification_request')
@@ -95,11 +101,14 @@ export const load: PageServerLoad = async ({ locals }) => {
             .limit(1)
             .maybeSingle();
 
+        const applicationOpen = await isApplicationFormOpen();
+
         return {
             userEmail: locals.user.email,
             scheduledCount: scheduledCount || 0,
             application,
-            changeRequest: changeRequest || null
+            changeRequest: changeRequest || null,
+            applicationOpen
         };
     } catch (error) {
         console.error('Error loading status:', error);
@@ -107,7 +116,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             userEmail: locals.user.email,
             scheduledCount: 0,
             application: null,
-            changeRequest: null
+            changeRequest: null,
+            applicationOpen: true
         };
     }
 };

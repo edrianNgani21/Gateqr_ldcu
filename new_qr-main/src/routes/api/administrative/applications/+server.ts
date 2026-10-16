@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { sendEmail } from '$lib/server/email';
+import { sendEmail, sendEmailAsync } from '$lib/server/email';
 
 async function createNotification(
     userId: number,
@@ -85,7 +85,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (updateError) throw updateError;
 
-            await sendEmail(
+            sendEmailAsync(
                 reg.user.email,
                 'Application Approved by Department Head - Liceo GateQR',
                 'Your vehicle sticker application has been approved by your Administrative Department Head and is now pending final validation by the Office of Student Affairs (OSA).',
@@ -121,7 +121,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (updateError) throw updateError;
 
-            await sendEmail(
+            sendEmailAsync(
                 reg.user.email,
                 'Application Rejected by Department Head - Liceo GateQR',
                 `Your vehicle sticker application has been rejected by your Administrative Department Head. Reason: ${reason}`,

@@ -59,8 +59,6 @@
     'concessionaire',
     'supplier',
     'vps',
-    'visitor',
-    'guest',
     'vip'
   ];
   let selectedRoles = $state<string[]>([]);
@@ -70,6 +68,8 @@
     const lower = (role || '').toLowerCase();
     if (lower === 'vps') return 'VPS';
     if (lower === 'vip') return 'VIP';
+    if (lower === 'administrator') return 'Administrator';
+    if (lower === 'concessionaire' || lower === 'concecioonaire') return 'Concessionaire';
     return role.charAt(0).toUpperCase() + role.slice(1);
   }
 
@@ -569,7 +569,7 @@
                           <span class="badge-role badge-employee">Staff</span>
                         {:else if log.role?.toLowerCase() === 'administrator'}
                           <span class="badge-role badge-admin">Administrator</span>
-                        {:else if log.role?.toLowerCase() === 'concessionaire'}
+                        {:else if log.role?.toLowerCase() === 'concessionaire' || log.role?.toLowerCase() === 'concecioonaire'}
                           <span class="badge-role badge-concessionaire">Concessionaire</span>
                         {:else if log.role?.toLowerCase() === 'supplier'}
                           <span class="badge-role badge-supplier">Supplier</span>

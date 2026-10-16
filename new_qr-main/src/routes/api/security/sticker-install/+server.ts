@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { sendEmail } from '$lib/server/email';
+import { sendEmail, sendEmailAsync } from '$lib/server/email';
 
 async function createNotification(
     userId: number,
@@ -99,10 +99,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 registration_id
             );
 
-            // Send email
+            // Send email in background
             const targetEmail = (reg.users as any)?.email;
             if (targetEmail) {
-                await sendEmail(
+                sendEmailAsync(
                     targetEmail,
                     'Application Update: QR Code Sticker Installed & Registration Complete',
                     notifMsg

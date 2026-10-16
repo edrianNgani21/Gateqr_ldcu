@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { sendEmail } from '$lib/server/email';
+import { sendEmail, sendEmailAsync } from '$lib/server/email';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     // Only Security can revoke
@@ -48,7 +48,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             const email = (reg.users as any)?.email;
             if (email) {
-                await sendEmail(
+                sendEmailAsync(
                     email,
                     'Application Update: Vehicle Registration Revoked',
                     'Your vehicle registration status has been changed to REVOKED by Safety & Security Admin.'
@@ -109,7 +109,7 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 
             const email = (reg.users as any)?.email;
             if (email) {
-                await sendEmail(
+                sendEmailAsync(
                     email,
                     'Application Update: Registration Restored',
                     'Your vehicle registration status has been restored to active status by Safety & Security Admin.'

@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { registration_ids, action, schedule, reason } = await request.json();
+        const { registration_ids, action, schedule, reason, school_year, expires_at } = await request.json();
 
         if (!registration_ids || !Array.isArray(registration_ids) || registration_ids.length === 0) {
             return json({ error: 'Invalid registration IDs' }, { status: 400 });
@@ -52,16 +52,42 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                         osa_val_at: new Date().toISOString()
                     };
 
+                    if (school_year) {
+                        updateData.school_year = school_year;
+                    }
+
+                    if (expires_at) {
+                        updateData.expires_at = new Date(expires_at).toISOString();
+                    }
+
                     if (!reg?.qr_code) {
-                        const uniqueCode = reg?.qr_unique_code || generateUniqueCode(8);
+                        let uniqueCode = reg?.qr_unique_code;
+                        if (!uniqueCode) {
+                            let isCodeUnique = false;
+                            let attempts = 0;
+                            while (!isCodeUnique && attempts < 15) {
+                                attempts++;
+                                uniqueCode = generateUniqueCode(8);
+                                const { data: duplicateCode } = await supabase
+                                    .from('registration')
+                                    .select('registration_id')
+                                    .eq('qr_unique_code', uniqueCode)
+                                    .maybeSingle();
+                                if (!duplicateCode) {
+                                    isCodeUnique = true;
+                                }
+                            }
+                        }
                         const filename = `qr-codes/qr-${registration_id}-${Date.now()}.png`;
-                        const qrBuffer = await generateStyledQRBuffer(uniqueCode, reg?.role || 'student');
+                        const qrBuffer = await generateStyledQRBuffer(uniqueCode as string, reg?.role || 'student');
                         const qrUrl = await uploadToStorage(filename, qrBuffer, 'image/png');
                         updateData.qr_code = qrUrl;
                         updateData.qr_unique_code = uniqueCode;
 
-                        const expiryMonths = parseInt(process.env.QR_EXPIRY_MONTHS || '6', 10);
-                        updateData.expires_at = new Date(new Date(reg?.created_at || Date.now()).getTime() + expiryMonths * 30 * 24 * 60 * 60 * 1000).toISOString();
+                        if (!expires_at) {
+                            const expiryMonths = parseInt(process.env.QR_EXPIRY_MONTHS || '6', 10);
+                            updateData.expires_at = new Date(new Date(reg?.created_at || Date.now()).getTime() + expiryMonths * 30 * 24 * 60 * 60 * 1000).toISOString();
+                        }
                     }
 
                     const { error } = await supabase
