@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { invalidateCapacityServerCache } from '$lib/server/capacityCache';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'security') {
@@ -8,7 +9,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { campus, parking_capacity, event_name, start_date, end_date, remove_event } = await request.json();
+        const { campus, parking_capacity, event_name, start_date, end_date, remove_event, check_expired } = await request.json();
+
+        if (check_expired) {
+            invalidateCapacityServerCache();
+            const nowIso = new Date().toISOString();
+            await supabase
+                .from('campus_event')
+                .update({ is_active: false })
+                .eq('is_active', true)
+                .lt('end_date', nowIso);
+            return json({ success: true });
+        }
 
         if (!campus) {
             return json({ error: 'Invalid input data' }, { status: 400 });
@@ -36,6 +48,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (latestPa) {
                 await supabase.from('parking_capacity').update({ event_name: null }).eq('parking_availability_id', latestPa.parking_availability_id);
             }
+            invalidateCapacityServerCache();
             return json({ success: true });
         }
 
@@ -43,6 +56,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (typeof parking_capacity !== 'number') {
             return json({ error: 'Invalid capacity' }, { status: 400 });
         }
+
+        const isEventEnded = Boolean(event_name && end_date && new Date(end_date).getTime() <= Date.now());
+        const effectiveEventName = (!isEventEnded && event_name) ? event_name : null;
 
         // Deactivate old active events for this campus if we're setting a new one
         if (event_name && start_date && end_date) {
@@ -52,7 +68,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .eq('campus_gate', gate)
                 .eq('is_active', true);
             
-            // Insert the new event
+            // Insert the new event (if end_date has already passed, save directly to history as is_active: false)
             await supabase
                 .from('campus_event')
                 .insert([{
@@ -61,7 +77,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     event_name,
                     start_date,
                     end_date,
-                    is_active: true
+                    is_active: !isEventEnded
                 }]);
         }
 
@@ -92,7 +108,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     available: available,
                     campus: campus,
                     campus_gate: gate,
-                    event_name: event_name || null,
+                    event_name: effectiveEventName,
                     date_time: nowIso,
                     recorded_at: nowIso
                 })
@@ -141,7 +157,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     occupied: occupied,
                     slot_unoccupied: available,
                     available: available,
-                    event_name: event_name || null,
+                    event_name: effectiveEventName,
                     date_time: nowIso,
                     recorded_at: nowIso
                 }]);
@@ -164,7 +180,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                             parking_capacity,
                             slot_occupied: occupied,
                             slot_unoccupied: available,
-                            event_name: event_name || null
+                            event_name: effectiveEventName
                         }]);
                         
                     if (updateError) {
@@ -182,6 +198,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
 
+        invalidateCapacityServerCache();
         return json({ success: true });
     } catch (error: any) {
         console.error('Error updating capacity:', error);

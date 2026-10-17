@@ -76,10 +76,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         if (uType === 'osa') {
             role = 'osa';
-            redirectUrl = '/osa';
+            redirectUrl = '/osa/dashboard';
         } else if (uType === 'safety_security' || uType === 'safety security' || uType === 'security') {
             role = 'security';
-            redirectUrl = '/security';
+            redirectUrl = '/security/dashboard';
         } else if (uType === 'office head' || uType === 'administrative') {
             role = 'administrative';
             redirectUrl = '/administrative';

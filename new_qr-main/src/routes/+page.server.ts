@@ -9,9 +9,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     }
 
     if (locals.user.role === 'osa') {
-        throw redirect(303, '/osa');
+        throw redirect(303, '/osa/dashboard');
     } else if (locals.user.role === 'security') {
-        throw redirect(303, '/security');
+        throw redirect(303, '/security/dashboard');
     } else if (locals.user.role === 'dean') {
         throw redirect(303, '/dean');
     } else if (locals.user.role === 'administrative') {

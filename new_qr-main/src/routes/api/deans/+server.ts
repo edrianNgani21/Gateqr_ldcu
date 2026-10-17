@@ -29,6 +29,49 @@ async function createNotification(
     }
 }
 
+const PRIMARY_OSA_EMAIL = 'aluban98304@liceo.edu.ph';
+
+async function notifyAllOsa(
+    notificationType: string,
+    message: string,
+    actorId?: number,
+    actionType?: string,
+    targetEntityType?: string,
+    targetEntityId?: number,
+    metadata?: any
+) {
+    try {
+        const osaFilters = ['user_type.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
+        const { data: osaUsers } = await supabase
+            .from('users')
+            .select('user_id, email')
+            .or(osaFilters.join(','));
+
+        const uniqueOsaUsers = Array.from(
+            new Map((osaUsers || []).map(u => [u.user_id, u])).values()
+        );
+
+        if (uniqueOsaUsers.length > 0) {
+            const notifs = uniqueOsaUsers.map(u => ({
+                user_id: u.user_id,
+                activity: message,
+                notification_type: notificationType,
+                message: message,
+                actor_id: actorId || null,
+                action_type: actionType || null,
+                target_entity_type: targetEntityType || null,
+                target_entity_id: targetEntityId || null,
+                reference_id: targetEntityId || null,
+                metadata: metadata || null,
+                is_read: false
+            }));
+            await supabase.from('notification').insert(notifs);
+        }
+    } catch (error) {
+        console.error('Failed to notify OSA of dean event:', error);
+    }
+}
+
 export const GET: RequestHandler = async ({ locals }) => {
     // Only OSA can manage deans
     if (!locals.user || locals.user.role !== 'osa') {
@@ -117,18 +160,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             userId = newUser.user_id;
         }
 
-        // Notify OSA admin
-        if (locals.user?.user_id) {
-            await createNotification(
-                locals.user.user_id,
-                'dean_added',
-                `Dean account assigned successfully for ${email.toLowerCase()}.`,
-                locals.user.user_id,
-                'create_dean',
-                'users',
-                userId
-            );
-        }
+        // Notify all OSA admins
+        await notifyAllOsa(
+            'dean_added',
+            `Dean account assigned successfully for ${email.toLowerCase()}.`,
+            locals.user?.user_id,
+            'create_dean',
+            'users',
+            userId
+        );
 
         return json({ message: 'Dean account created successfully' }, { status: 201 });
     } catch (error: any) {
@@ -202,6 +242,13 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User ID is required' }, { status: 400 });
         }
 
+        // Fetch dean info before deletion for notification
+        const { data: deanToDelete } = await supabase
+            .from('users')
+            .select('user_id, email')
+            .eq('user_id', user_id)
+            .maybeSingle();
+
         // Delete from users table
         const { error: deleteUserError } = await supabase
             .from('users')
@@ -209,6 +256,16 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             .eq('user_id', user_id);
 
         if (deleteUserError) throw deleteUserError;
+
+        // Notify all OSA admins
+        await notifyAllOsa(
+            'dean_deleted',
+            `Dean account (${deanToDelete?.email || 'User ID ' + user_id}) was deleted successfully.`,
+            locals.user?.user_id,
+            'delete_dean',
+            'users',
+            user_id
+        );
 
         return json({ message: 'Dean account deleted successfully' });
     } catch (error: any) {

@@ -174,6 +174,66 @@
     )).length
   );
 
+  // Track opened application tabs so badge indicator disappears once opened
+  let openedAppTabs = $state<Record<string, boolean>>({});
+
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('gateqr_opened_app_tabs');
+      if (stored) {
+        openedAppTabs = JSON.parse(stored);
+      }
+    } catch (e) {}
+  }
+
+  function markAppTabOpened(tabKey: string) {
+    if (!tabKey) return;
+    if (!openedAppTabs[tabKey]) {
+      openedAppTabs = { ...openedAppTabs, [tabKey]: true };
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('gateqr_opened_app_tabs', JSON.stringify(openedAppTabs));
+        } catch (e) {}
+      }
+    }
+  }
+
+  async function markApplicationNotificationsAsRead() {
+    const appNotifs = notifications.filter(n => !n.is_read && (
+      n.target_entity_type === 'registration' ||
+      n.notification_type?.includes('application') ||
+      n.notification_type?.includes('renewal')
+    ));
+    if (appNotifs.length === 0) return;
+
+    notifications = notifications.map(n => 
+      (!n.is_read && (
+        n.target_entity_type === 'registration' ||
+        n.notification_type?.includes('application') ||
+        n.notification_type?.includes('renewal')
+      )) ? { ...n, is_read: true, read_at: new Date().toISOString() } : n
+    );
+    unreadCount = notifications.filter((n: any) => !n.is_read).length;
+
+    for (const n of appNotifs) {
+      try {
+        await fetch(`/api/notifications/${n.notification_id}/read`, { method: 'POST' });
+      } catch (e) {}
+    }
+  }
+
+  $effect(() => {
+    if (currentPath === '/osa') {
+      const activeTab = currentSearchTab || 'validation';
+      markAppTabOpened(activeTab);
+      if (activeTab === 'validation' && unreadApplicationsCount > 0) {
+        markApplicationNotificationsAsRead();
+      }
+    } else if (currentPath === '/osa/change-requests') {
+      markAppTabOpened('/osa/change-requests');
+    }
+  });
+
   function handleNotificationClick(notif: any) {
     markAsRead(notif.notification_id);
     notificationDropdownOpen = false;
@@ -201,6 +261,29 @@
         window.location.href = '/administrative';
       } else if (userRole === 'applicant') {
         window.location.href = '/status';
+      }
+      return;
+    }
+
+    const isDepartment = notif.target_entity_type === 'department' ||
+      notif.notification_type?.includes('department');
+    if (isDepartment) {
+      if (userRole === 'osa') {
+        window.location.href = '/osa/departments';
+      }
+      return;
+    }
+
+    const isAccount = notif.target_entity_type === 'users' ||
+      notif.notification_type?.includes('admin') ||
+      notif.notification_type?.includes('dean');
+    if (isAccount) {
+      if (userRole === 'osa') {
+        if (notif.notification_type?.includes('dean')) {
+          window.location.href = '/osa/deans';
+        } else {
+          window.location.href = '/osa/admin';
+        }
       }
       return;
     }
@@ -409,7 +492,7 @@
                   </svg>
                 </div>
                 <span class="menu-item-label">Manage Applications</span>
-                {#if unreadApplicationsCount > 0}
+                {#if currentPath !== '/osa' && !openedAppTabs['validation'] && unreadApplicationsCount > 0}
                   <span class="menu-badge-indicator">{unreadApplicationsCount > 99 ? '99+' : unreadApplicationsCount}</span>
                 {/if}
                 <span class="dropdown-chevron" class:rotated={manageAppsOpen}>
@@ -426,9 +509,19 @@
                       href={subItem.href}
                       class="submenu-link"
                       class:active={isAppTabActive(subItem)}
+                      onclick={() => {
+                        if (subItem.tab) {
+                          markAppTabOpened(subItem.tab);
+                          if (subItem.tab === 'validation') {
+                            markApplicationNotificationsAsRead();
+                          }
+                        } else if (subItem.path) {
+                          markAppTabOpened(subItem.path);
+                        }
+                      }}
                     >
                       <span class="submenu-text">{subItem.label}</span>
-                      {#if subItem.tab === 'validation' && unreadApplicationsCount > 0}
+                      {#if subItem.tab === 'validation' && !openedAppTabs['validation'] && !isAppTabActive(subItem) && unreadApplicationsCount > 0}
                         <span class="sub-badge-indicator">{unreadApplicationsCount > 99 ? '99+' : unreadApplicationsCount}</span>
                       {/if}
                     </a>

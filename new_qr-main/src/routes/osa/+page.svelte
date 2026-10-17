@@ -44,7 +44,7 @@
 
     function getAppsForTab(t: string) {
         if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
-        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && (!a.security_check_at || !a.osa_dist_at));
+        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && !a.osa_dist_at);
         if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
         if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || ((a.status || '').toLowerCase() === 'security_checked' && !a.sticker_released_at));
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
@@ -241,20 +241,21 @@
         }
 
         if (tab === 'distribution') {
+            if (!selectedScheduleDate) {
+                return [];
+            }
             if (docSubmissionFilter === 'upcoming') {
                 filtered = filtered.filter(a => !isAppOverdue(a));
             } else if (docSubmissionFilter === 'overdue') {
                 filtered = filtered.filter(a => isAppOverdue(a));
             }
-            if (selectedScheduleDate) {
-                filtered = filtered.filter(a => {
-                    const sched = a.schedule || a.dist_sched;
-                    if (!sched) return false;
-                    const appDate = new Date(sched).toDateString();
-                    const selectedDate = new Date(selectedScheduleDate as string).toDateString();
-                    return appDate === selectedDate;
-                });
-            }
+            filtered = filtered.filter(a => {
+                const sched = a.schedule || a.dist_sched;
+                if (!sched) return false;
+                const appDate = new Date(sched).toDateString();
+                const selectedDate = new Date(selectedScheduleDate as string).toDateString();
+                return appDate === selectedDate;
+            });
         }
 
         if (tab === 'rejected') {
@@ -654,7 +655,7 @@
             {#if selectedScheduleDate}
               <div class="active-date-banner">
                 <span>Filtering: <strong>{new Date(selectedScheduleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong></span>
-                <button type="button" class="btn-clear-date" onclick={() => selectedScheduleDate = null}>Show All</button>
+                <button type="button" class="btn-clear-date" onclick={() => selectedScheduleDate = null}>Clear Date</button>
               </div>
             {/if}
             <div class="calendar-list">
@@ -699,7 +700,7 @@
             {#if selectedScheduleDate}
               <div class="calendar-actions">
                 <button class="table-btn" onclick={() => selectedScheduleDate = null}>
-                  View All Dates ({tabCounts.distribution})
+                  Clear Date Filter
                 </button>
               </div>
             {/if}
@@ -820,23 +821,34 @@
               {/if}
             {:else}
               <div class="empty-state">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="12" y1="18" x2="12" y2="12"/>
-                  <line x1="9" y1="15" x2="15" y2="15"/>
-                </svg>
-                <h3>No applications found</h3>
-                <p>There are no applications matching your current filters.</p>
-                <button class="clear-filters-btn" onclick={() => { 
-                  searchQuery = ''; 
-                  roleFilter = 'all';
-                  vehicleTypeFilter = 'all';
-                  selectedCampus = 'all'; 
-                  selectedScheduleDate = null; 
-                }}>
-                  Clear all filters
-                </button>
+                {#if tab === 'distribution' && !selectedScheduleDate}
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  <h3>Select a Date to View Applications</h3>
+                  <p>Please click on a date from the calendar on the left to display scheduled applications.</p>
+                {:else}
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                  <h3>No applications found</h3>
+                  <p>There are no applications matching your current filters.</p>
+                  <button class="clear-filters-btn" onclick={() => { 
+                    searchQuery = ''; 
+                    roleFilter = 'all';
+                    vehicleTypeFilter = 'all';
+                    selectedCampus = 'all'; 
+                    selectedScheduleDate = null; 
+                  }}>
+                    Clear all filters
+                  </button>
+                {/if}
               </div>
             {/each}
         </div>

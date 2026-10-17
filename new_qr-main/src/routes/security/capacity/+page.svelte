@@ -2,6 +2,9 @@
   import AppShell from '$lib/components/AppShell.svelte';
   import { invalidateAll } from '$app/navigation';
   import { supabaseClient } from '$lib/supabaseClient';
+  import { untrack } from 'svelte';
+
+  import { startLiveSync } from '$lib/utils/liveSync';
 
   let { data } = $props();
   let userRole = $derived(data.userRole || 'security');
@@ -13,29 +16,74 @@
   // Sync state when data changes via invalidateAll
   $effect(() => {
     // Only update if we are not currently editing to avoid overriding user input
-    if (!editingCampus) {
+    if (!editingCampus && data.campuses) {
+      untrack(() => {
         campuses = data.campuses;
+      });
     }
   });
 
-  // Realtime subscription
+  // Standard live sync with WebSocket push and unmount cleanup
   $effect(() => {
-    const channel = supabaseClient
-        .channel('capacity-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_capacity' }, () => {
-            invalidateAll();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_event' }, () => {
-            invalidateAll();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_log' }, () => {
-            invalidateAll();
-        })
-        .subscribe();
+    return startLiveSync({
+      channelName: 'security-capacity-realtime',
+      tables: ['parking_capacity', 'campus_event', 'vehicle_log'],
+      onSync: () => {
+        if (!editingCampus) {
+          invalidateAll();
+        }
+      }
+    });
+  });
 
-    return () => {
-        supabaseClient.removeChannel(channel);
+  function toLocalDatetimeString(dateInput: string | Date | null | undefined): string {
+    if (!dateInput) return '';
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // Auto-expire events in UI when end date has passed without triggering recursive network loops
+  $effect(() => {
+    const checkExpiredEvents = () => {
+      const now = Date.now();
+      let hasExpired = false;
+
+      const currentCampuses = untrack(() => campuses);
+      if (!currentCampuses) return;
+
+      const updated = (currentCampuses as any[]).map((campus: any) => {
+        if (campus.event_name && campus.event_end) {
+          const endTime = new Date(campus.event_end).getTime();
+          if (!isNaN(endTime) && endTime <= now) {
+            hasExpired = true;
+            const pastEvent = {
+              event_name: campus.event_name,
+              start_date: campus.event_start,
+              end_date: campus.event_end,
+              is_active: false
+            };
+            return {
+              ...campus,
+              event_name: '',
+              event_start: '',
+              event_end: '',
+              history: [pastEvent, ...(campus.history || [])]
+            };
+          }
+        }
+        return campus;
+      });
+
+      if (hasExpired) {
+        campuses = updated;
+      }
     };
+
+    checkExpiredEvents();
+    const interval = setInterval(checkExpiredEvents, 10000);
+    return () => clearInterval(interval);
   });
 
   // Temp state for editing
@@ -55,8 +103,8 @@
     editCapacity = campus.capacity;
     editEventName = campus.event_name;
     // Format timestamp to datetime-local expected format (YYYY-MM-DDThh:mm)
-    editStartDate = campus.event_start ? new Date(campus.event_start).toISOString().slice(0,16) : '';
-    editEndDate = campus.event_end ? new Date(campus.event_end).toISOString().slice(0,16) : '';
+    editStartDate = toLocalDatetimeString(campus.event_start);
+    editEndDate = toLocalDatetimeString(campus.event_end);
   }
 
   function cancelEdit() {
@@ -95,6 +143,13 @@
         return;
     }
 
+    if (editEventName && editStartDate && editEndDate) {
+        if (new Date(editEndDate).getTime() < new Date(editStartDate).getTime()) {
+            alert('End date cannot be earlier than start date');
+            return;
+        }
+    }
+
     loadingCampus = campusName;
     try {
         const res = await fetch('/api/security/capacity', {
@@ -104,8 +159,8 @@
                 campus: campusName,
                 parking_capacity: editCapacity,
                 event_name: editEventName,
-                start_date: editStartDate || undefined,
-                end_date: editEndDate || undefined
+                start_date: editStartDate ? new Date(editStartDate).toISOString() : undefined,
+                end_date: editEndDate ? new Date(editEndDate).toISOString() : undefined
             })
         });
 

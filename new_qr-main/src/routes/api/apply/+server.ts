@@ -359,8 +359,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const applicantFullName = `${first_name.trim()} ${last_name.trim()}`;
             const renewalVehicleInfo = `${vehicle_brand || vehicle_make} [${vehicle_plate.trim()}]`;
             let osaAdminEmails: string[] = [];
+            const effectiveDeptId = department_id || existingRegForRenewal.department_id || 1;
+
+            // 1. Notify OSA Admins of renewal submission
             try {
-                const osaFilters = ['user_type.eq.osa'];
+                const osaFilters = ['user_type.eq.osa', 'email.eq.aluban98304@liceo.edu.ph'];
                 if (env.OSA_EMAIL) {
                     osaFilters.push(`email.eq.${env.OSA_EMAIL}`);
                 }
@@ -369,9 +372,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     .select('user_id, email')
                     .or(osaFilters.join(','));
 
-                if (osaUsers && osaUsers.length > 0) {
-                    osaAdminEmails = osaUsers.map(u => u.email).filter(Boolean);
-                    const osaRenewalNotifs = osaUsers.map(u => ({
+                const uniqueOsaUsers = Array.from(
+                    new Map((osaUsers || []).map(u => [u.user_id, u])).values()
+                );
+
+                if (uniqueOsaUsers.length > 0) {
+                    osaAdminEmails = uniqueOsaUsers.map(u => u.email).filter(Boolean);
+                    const osaRenewalNotifs = uniqueOsaUsers.map(u => ({
                         user_id: u.user_id,
                         activity: `Renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
                         message: `Vehicle sticker renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
@@ -386,7 +393,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                             registration_id: renewal_registration_id,
                             applicant_name: applicantFullName,
                             role: regRole,
-                            plate_number: vehicle_plate.trim()
+                            plate_number: vehicle_plate.trim(),
+                            department_id: effectiveDeptId
                         },
                         is_read: false
                     }));
@@ -394,6 +402,66 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }
             } catch (notifErr) {
                 console.error('Failed to notify OSA admin of renewal:', notifErr);
+            }
+
+            // 2. Notify Department Head(s) of renewal application
+            if (effectiveDeptId) {
+                try {
+                    const { data: deptHeads } = await supabase
+                        .from('users')
+                        .select('user_id, email, user_type')
+                        .eq('department_id', effectiveDeptId);
+
+                    if (deptHeads && deptHeads.length > 0) {
+                        const headNotifs = deptHeads
+                            .filter(h => (h.user_type || '').toLowerCase() !== 'applicant')
+                            .map(h => ({
+                                user_id: h.user_id,
+                                activity: `Vehicle sticker renewal application submitted by ${applicantFullName} (${regRole}) - ${renewalVehicleInfo}`,
+                                message: `Vehicle sticker renewal application submitted by ${applicantFullName} (${regRole}) for your department - ${renewalVehicleInfo}`,
+                                notification_type: 'renewal_application',
+                                actor_id: user_id,
+                                action_type: 'renewal_submitted',
+                                target_entity_type: 'registration',
+                                target_entity_id: renewal_registration_id,
+                                target_id: renewal_registration_id,
+                                reference_id: renewal_registration_id,
+                                metadata: {
+                                    registration_id: renewal_registration_id,
+                                    applicant_name: applicantFullName,
+                                    role: regRole,
+                                    plate_number: vehicle_plate.trim(),
+                                    department_id: effectiveDeptId
+                                },
+                                is_read: false
+                            }));
+
+                        if (headNotifs.length > 0) {
+                            await supabase.from('notification').insert(headNotifs);
+                        }
+                    }
+                } catch (headErr) {
+                    console.error('Failed to notify department head(s) of renewal:', headErr);
+                }
+            }
+
+            // 3. Notify Applicant of renewal submission via in-app notification
+            try {
+                await supabase.from('notification').insert({
+                    user_id: user_id,
+                    activity: 'Your vehicle sticker renewal application has been submitted successfully and is currently under review.',
+                    message: 'Your vehicle sticker renewal application has been submitted successfully and is currently under review.',
+                    notification_type: 'renewal_application',
+                    actor_id: user_id,
+                    action_type: 'renewal_submitted',
+                    target_entity_type: 'registration',
+                    target_entity_id: renewal_registration_id,
+                    target_id: renewal_registration_id,
+                    reference_id: renewal_registration_id,
+                    is_read: false
+                });
+            } catch (appNotifErr) {
+                console.error('Failed to create in-app notification for renewal applicant:', appNotifErr);
             }
 
             // Alert email to OSA Admin for renewal
@@ -526,7 +594,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // 1. Notify OSA Admins via in-app notification
         let osaAdminEmails: string[] = [];
         try {
-            const osaFilters = ['user_type.eq.osa'];
+            const osaFilters = ['user_type.eq.osa', 'email.eq.aluban98304@liceo.edu.ph'];
             if (env.OSA_EMAIL) {
                 osaFilters.push(`email.eq.${env.OSA_EMAIL}`);
             }
@@ -536,9 +604,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .select('user_id, email')
                 .or(osaFilters.join(','));
 
-            if (osaUsers && osaUsers.length > 0) {
-                osaAdminEmails = osaUsers.map(u => u.email).filter(Boolean);
-                const osaNotifications = osaUsers.map(u => ({
+            const uniqueOsaUsers = Array.from(
+                new Map((osaUsers || []).map(u => [u.user_id, u])).values()
+            );
+
+            if (uniqueOsaUsers.length > 0) {
+                osaAdminEmails = uniqueOsaUsers.map(u => u.email).filter(Boolean);
+                const osaNotifications = uniqueOsaUsers.map(u => ({
                     user_id: u.user_id,
                     activity: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) - ${vehicleSummary}`,
                     message: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) - ${vehicleSummary}`,
@@ -552,7 +624,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     metadata: {
                         registration_id: createdRegId,
                         applicant_name: applicantFullName,
-                        applicant_email: locals.user.email,
+                        applicant_email: locals.user?.email || '',
                         role: regRole,
                         plate_number: vehicle_plate.trim(),
                         department_id: department_id
@@ -566,7 +638,49 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             console.error('Failed to create in-app notification for OSA admin:', osaNotifErr);
         }
 
-        // 2. Notify Complainant/Applicant via in-app notification
+        // 2. Notify Department Head(s) via in-app notification
+        if (department_id) {
+            try {
+                const { data: deptHeads } = await supabase
+                    .from('users')
+                    .select('user_id, email, user_type')
+                    .eq('department_id', department_id);
+
+                if (deptHeads && deptHeads.length > 0) {
+                    const headNotifs = deptHeads
+                        .filter(h => (h.user_type || '').toLowerCase() !== 'applicant')
+                        .map(h => ({
+                            user_id: h.user_id,
+                            activity: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) - ${vehicleSummary}`,
+                            message: `New vehicle sticker application submitted by ${applicantFullName} (${regRole}) for your department - ${vehicleSummary}`,
+                            notification_type: 'new_application',
+                            actor_id: user_id,
+                            action_type: 'application_submitted',
+                            target_entity_type: 'registration',
+                            target_entity_id: createdRegId,
+                            target_id: createdRegId,
+                            reference_id: createdRegId,
+                            metadata: {
+                                registration_id: createdRegId,
+                                applicant_name: applicantFullName,
+                                applicant_email: locals.user?.email || '',
+                                role: regRole,
+                                plate_number: vehicle_plate.trim(),
+                                department_id: department_id
+                            },
+                            is_read: false
+                        }));
+
+                    if (headNotifs.length > 0) {
+                        await supabase.from('notification').insert(headNotifs);
+                    }
+                }
+            } catch (deptHeadNotifErr) {
+                console.error('Failed to create in-app notification for department head(s):', deptHeadNotifErr);
+            }
+        }
+
+        // 3. Notify Complainant/Applicant via in-app notification
         try {
             await supabase.from('notification').insert({
                 user_id: user_id,

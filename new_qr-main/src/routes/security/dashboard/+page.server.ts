@@ -2,9 +2,16 @@ import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
 
+let cachedDashboard: { data: any; timestamp: number } | null = null;
+
 export const load: PageServerLoad = async ({ locals }) => {
     if (!locals.user || locals.user.role !== 'security') {
         throw redirect(303, '/login');
+    }
+
+    const now = Date.now();
+    if (cachedDashboard && (now - cachedDashboard.timestamp < 4000)) {
+        return cachedDashboard.data;
     }
 
     const userEmail = locals.user.email;
@@ -110,6 +117,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             // 5. Parking capacity & active events for all 3 campuses
             Promise.all(campusesList.map(async (name) => {
                 const gate = name === 'RNP' ? 'rnp' : (name === 'PASEO' ? 'paseo' : 'main');
+                const nowIso = new Date().toISOString();
                 const [paRes, evRes] = await Promise.all([
                     supabase
                         .from('parking_capacity')
@@ -123,6 +131,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         .select('*')
                         .eq('campus_gate', gate)
                         .eq('is_active', true)
+                        .gt('end_date', nowIso)
                         .order('created_at', { ascending: false })
                         .limit(1)
                         .maybeSingle()
@@ -284,7 +293,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             }
         }
 
-        return {
+        const returnData = {
             userEmail,
             userRole: locals.user.role,
             stats: {
@@ -310,6 +319,9 @@ export const load: PageServerLoad = async ({ locals }) => {
             flaggedAlerts,
             latestInsideLog: activeInsideLogs && activeInsideLogs.length > 0 ? activeInsideLogs[0] : null
         };
+
+        cachedDashboard = { data: returnData, timestamp: now };
+        return returnData;
     } catch (e) {
         console.error('Error loading security dashboard data:', e);
         return {

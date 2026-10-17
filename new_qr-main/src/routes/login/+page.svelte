@@ -39,7 +39,7 @@
 
       const data = await res.json();
       if (res.ok) {
-        goto(data.redirectUrl || "/osa");
+        goto(data.redirectUrl || "/osa/dashboard");
       } else {
         error = data.error || "Invalid credentials. Please try again.";
       }

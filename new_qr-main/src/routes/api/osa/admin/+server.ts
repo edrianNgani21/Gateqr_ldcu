@@ -36,6 +36,47 @@ async function createNotification(
     }
 }
 
+async function notifyAllOsa(
+    notificationType: string,
+    message: string,
+    actorId?: number,
+    actionType?: string,
+    targetEntityType?: string,
+    targetEntityId?: number,
+    metadata?: any
+) {
+    try {
+        const osaFilters = ['user_type.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
+        const { data: osaUsers } = await supabase
+            .from('users')
+            .select('user_id, email')
+            .or(osaFilters.join(','));
+
+        const uniqueOsaUsers = Array.from(
+            new Map((osaUsers || []).map(u => [u.user_id, u])).values()
+        );
+
+        if (uniqueOsaUsers.length > 0) {
+            const notifs = uniqueOsaUsers.map(u => ({
+                user_id: u.user_id,
+                activity: message,
+                notification_type: notificationType,
+                message: message,
+                actor_id: actorId || null,
+                action_type: actionType || null,
+                target_entity_type: targetEntityType || null,
+                target_entity_id: targetEntityId || null,
+                reference_id: targetEntityId || null,
+                metadata: metadata || null,
+                is_read: false
+            }));
+            await supabase.from('notification').insert(notifs);
+        }
+    } catch (error) {
+        console.error('Failed to notify OSA admins:', error);
+    }
+}
+
 function getAdminRoleDetails(cleanType: string, departmentData: any) {
     const deptName = departmentData?.academic_department || 
                      departmentData?.administrative_department || 
@@ -281,22 +322,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: `Database error: ${createError.message}` }, { status: 500 });
         }
 
-        // Create notification for OSA admin and the new admin
+        // Create notification for all OSA admins and dispatch welcome email
         if (newUser) {
             const actorId = locals.user?.user_id;
-            if (actorId) {
-                await createNotification(
-                    actorId,
-                    'admin_created',
-                    `Admin account (${newUser.email}) added successfully.`,
-                    actorId,
-                    'create_admin',
-                    'users',
-                    newUser.user_id,
-                    newUser.user_id,
-                    { user_type: dbUserType, identification: dbIdentification, department_id }
-                );
-            }
+            await notifyAllOsa(
+                'admin_created',
+                `Admin account (${newUser.email}) added successfully.`,
+                actorId,
+                'create_admin',
+                'users',
+                newUser.user_id,
+                { user_type: dbUserType, identification: dbIdentification, department_id }
+            );
 
             // Dispatch welcome email with role-specific message, login email, password and Admin Type
             sendAdminWelcomeEmail(newUser, rawPassword, cleanType);
@@ -435,22 +472,18 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 
         if (error) throw error;
 
-        // Create notification for the deleting admin
+        // Create notification for all OSA admins
         if (userToDelete) {
             const actorId = locals.user?.user_id;
-            if (actorId) {
-                await createNotification(
-                    actorId,
-                    'admin_deleted',
-                    `Admin account (${userToDelete.email}) was deleted successfully.`,
-                    actorId,
-                    'delete_admin',
-                    'users',
-                    actorId,
-                    actorId,
-                    { user_type: userToDelete.user_type }
-                );
-            }
+            await notifyAllOsa(
+                'admin_deleted',
+                `Admin account (${userToDelete.email}) was deleted successfully.`,
+                actorId,
+                'delete_admin',
+                'users',
+                user_id,
+                { user_type: userToDelete.user_type }
+            );
         }
 
         return json({ message: 'Admin deleted successfully' });

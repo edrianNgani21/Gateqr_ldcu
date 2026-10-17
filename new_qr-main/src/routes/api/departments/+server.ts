@@ -78,6 +78,49 @@ async function createNotification(
     }
 }
 
+const PRIMARY_OSA_EMAIL = 'aluban98304@liceo.edu.ph';
+
+async function notifyAllOsa(
+    notificationType: string,
+    message: string,
+    actorId?: number,
+    actionType?: string,
+    targetEntityType?: string,
+    targetEntityId?: number,
+    metadata?: any
+) {
+    try {
+        const osaFilters = ['user_type.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
+        const { data: osaUsers } = await supabase
+            .from('users')
+            .select('user_id, email')
+            .or(osaFilters.join(','));
+
+        const uniqueOsaUsers = Array.from(
+            new Map((osaUsers || []).map(u => [u.user_id, u])).values()
+        );
+
+        if (uniqueOsaUsers.length > 0) {
+            const notifs = uniqueOsaUsers.map(u => ({
+                user_id: u.user_id,
+                activity: message,
+                notification_type: notificationType,
+                message: message,
+                actor_id: actorId || null,
+                action_type: actionType || null,
+                target_entity_type: targetEntityType || null,
+                target_entity_id: targetEntityId || null,
+                reference_id: targetEntityId || null,
+                metadata: metadata || null,
+                is_read: false
+            }));
+            await supabase.from('notification').insert(notifs);
+        }
+    } catch (error) {
+        console.error('Failed to notify OSA of department event:', error);
+    }
+}
+
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
         return json({ error: 'Unauthorized' }, { status: 403 });
@@ -149,18 +192,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: createError.message || 'Failed to create department' }, { status: 500 });
         }
 
-        // Notify OSA admin
-        if (locals.user?.user_id) {
-            await createNotification(
-                locals.user.user_id,
-                'department_added',
-                `${isAdministrative ? 'Administrative' : 'Academic'} Department '${name.trim()}' added successfully.`,
-                locals.user.user_id,
-                'create_department',
-                'department',
-                newDept?.department_id
-            );
-        }
+        // Notify all OSA admins
+        await notifyAllOsa(
+            'department_added',
+            `${isAdministrative ? 'Administrative' : 'Academic'} Department '${name.trim()}' added successfully.`,
+            locals.user?.user_id,
+            'create_department',
+            'department',
+            newDept?.department_id
+        );
 
         return json({ message: 'Department created successfully', department: newDept }, { status: 201 });
     } catch (error: any) {
@@ -238,6 +278,18 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Department ID is required' }, { status: 400 });
         }
 
+        // Fetch department details before deactivation
+        const { data: deptToDelete } = await supabase
+            .from('department')
+            .select('*')
+            .eq('department_id', auto_id)
+            .maybeSingle();
+
+        const deptName = deptToDelete?.academic_department || 
+                         deptToDelete?.administrative_department || 
+                         (deptToDelete as any)?.department_name || 
+                         `Department ID ${auto_id}`;
+
         // Soft delete - set is_active to false instead of permanent deletion
         const { error } = await supabase
             .from('department')
@@ -245,6 +297,16 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
             .eq('department_id', auto_id);
 
         if (error) throw error;
+
+        // Notify all OSA admins
+        await notifyAllOsa(
+            'department_deleted',
+            `Department '${deptName}' was deleted/deactivated successfully.`,
+            locals.user?.user_id,
+            'delete_department',
+            'department',
+            auto_id
+        );
 
         return json({ message: 'Department deactivated successfully' });
     } catch (error) {
@@ -265,6 +327,18 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Department ID is required' }, { status: 400 });
         }
 
+        // Fetch department details before reactivation
+        const { data: deptToActivate } = await supabase
+            .from('department')
+            .select('*')
+            .eq('department_id', auto_id)
+            .maybeSingle();
+
+        const deptName = deptToActivate?.academic_department || 
+                         deptToActivate?.administrative_department || 
+                         (deptToActivate as any)?.department_name || 
+                         `Department ID ${auto_id}`;
+
         // Reactivate department - set is_active to true
         const { error } = await supabase
             .from('department')
@@ -272,6 +346,16 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
             .eq('department_id', auto_id);
 
         if (error) throw error;
+
+        // Notify all OSA admins
+        await notifyAllOsa(
+            'department_reactivated',
+            `Department '${deptName}' was reactivated successfully.`,
+            locals.user?.user_id,
+            'reactivate_department',
+            'department',
+            auto_id
+        );
 
         return json({ message: 'Department activated successfully' });
     } catch (error) {
