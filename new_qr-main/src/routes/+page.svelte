@@ -78,7 +78,7 @@
                 if (!hasLicense) return false;
             }
             if (!hasId) return false;
-            if (role === 'student' || !isExternal) {
+            if (['student', 'faculty'].includes(role)) {
                 if (!hasEnrollment) return false;
             }
             if (owner === 'yes' && !hasLetter) return false;
@@ -581,18 +581,25 @@
 
             <!-- Liceo Documents -->
             {#if !['visitor', 'concessionaire'].includes(role)}
+              {@const showEnrollment = ['student', 'faculty'].includes(role)}
+              {@const showId = ['student', 'faculty', 'staff', 'employee'].includes(role)}
+              {@const tileCount = (showId ? 1 : 0) + (showEnrollment ? 1 : 0) + (owner === 'yes' ? 1 : 0)}
+              {#if tileCount > 0}
               <div class="upload-section-block">
                 <h3 class="upload-section-heading">Liceo Institutional Documents</h3>
-                <div class="upload-tiles-grid" style="--cols: {owner === 'no' ? 3 : 2}">
-                  {#if ['student', 'faculty', 'staff', 'employee'].includes(role)}
+                <div class="upload-tiles-grid" style="--cols: {Math.min(tileCount, 3)}">
+                  {#if showId}
                     {@render uploadLabel(`${role === 'student' ? 'Student' : 'Employee'} ID`, 'id')}
                   {/if}
-                  {@render uploadLabel(role === 'student' ? 'Enrollment Form' : 'Load Sheet / DTR', 'enrollment')}
+                  {#if showEnrollment}
+                    {@render uploadLabel(role === 'student' ? 'Enrollment Form' : 'Teaching Load', 'enrollment')}
+                  {/if}
                   {#if owner === 'yes'}
                     {@render uploadLabel('Signed Letter / DOAS', 'letter')}
                   {/if}
                 </div>
               </div>
+              {/if}
             {/if}
 
             {#if ['visitor', 'concessionaire'].includes(role) && owner === 'yes'}
@@ -606,7 +613,7 @@
             {/if}
 
             <div class="upload-section-block">
-              <h3 class="upload-section-heading">LTO Vehicle Documents</h3>
+              <h3 class="upload-section-heading">Vehicle Documents</h3>
               <div class="upload-tiles-grid" style="--cols: {['visitor', 'concessionaire'].includes(role) && owner === 'yes' ? 2 : 3}">
                 {@render uploadLabel('Vehicle OR', 'or')}
                 {@render uploadLabel('Vehicle CR', 'cr')}

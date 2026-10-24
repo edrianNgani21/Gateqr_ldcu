@@ -43,7 +43,8 @@
     concessionaire: '#EA580C',
     supplier: '#D97706',
     vps: '#854D0E',
-    vip: '#D4AF37'
+    vip: '#D4AF37',
+    guest: '#0EA5E9'
   };
 
   const roleLabels: Record<string, string> = {
@@ -54,7 +55,8 @@
     concessionaire: 'Concessionaire',
     supplier: 'Supplier',
     vps: 'VPS',
-    vip: 'VIP'
+    vip: 'VIP',
+    guest: 'Guest'
   };
 
   function getCampusRoleStats(campusLabel: string) {
@@ -68,7 +70,8 @@
       'concessionaire',
       'supplier',
       'vps',
-      'vip'
+      'vip',
+      'guest'
     ];
     let total = 0;
     roles.forEach(r => { total += (breakdown[r] || 0); });

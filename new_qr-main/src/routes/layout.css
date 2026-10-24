@@ -947,3 +947,71 @@ select {
 .dropdown-item.danger:hover {
   background: #FEF2F2;
 }
+
+/* ─── Global Responsive Layer (CSS only) ──────────────────────────────── */
+html { -moz-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { min-height: 100vh; min-height: 100dvh; word-wrap: break-word; overflow-wrap: anywhere; }
+img, svg, video, canvas { height: auto; }
+svg { flex-shrink: 0; }
+pre, code { max-width: 100%; overflow-x: auto; }
+table { max-width: 100%; }
+
+/* Fluid typography */
+.heading-xl { font-size: clamp(1.75rem, 5vw, 2.5rem); }
+.heading-lg { font-size: clamp(1.4rem, 4vw, 2rem); }
+.heading-md { font-size: clamp(1.15rem, 3vw, 1.5rem); }
+
+/* Large screens / TVs */
+@media (min-width: 1920px) {
+  html { font-size: 17px; }
+  .container { max-width: 1680px; }
+}
+@media (min-width: 2560px) {
+  html { font-size: 19px; }
+  .container { max-width: 2000px; }
+}
+
+/* Tablets */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .table th, .table td { padding: var(--space-sm) var(--space-md); }
+}
+
+/* Phones & small tablets */
+@media (max-width: 768px) {
+  .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; flex-shrink: 0; }
+  .modal-backdrop { padding: var(--space-sm); overflow-y: auto; }
+  .dropdown-menu { max-width: calc(100vw - 1.5rem); }
+  .alert { padding: var(--space-sm) var(--space-md); }
+
+  /* Prevent iOS zoom-on-focus and improve touch targets */
+  input[type="text"], input[type="email"], input[type="datetime-local"],
+  input[type="password"], input[type="tel"], input[type="number"],
+  input[type="search"], input[type="date"], input[type="time"],
+  select, textarea { font-size: 16px; }
+  .btn, .tab { min-height: 40px; }
+}
+
+@media (max-width: 480px) {
+  .btn { padding: var(--space-sm) var(--space-md); }
+  .tooltip::after { white-space: normal; max-width: 70vw; }
+  .space-x-lg > * + * { margin-left: var(--space-md); }
+}
+
+/* Short landscape phones */
+@media (max-height: 480px) and (orientation: landscape) {
+  .modal-backdrop { align-items: flex-start; overflow-y: auto; }
+}
+
+/* Touch devices: avoid sticky hover transforms */
+@media (hover: none) {
+  .card:hover, .card-hover-effect:hover, .btn-primary:hover,
+  .btn-gold:hover, .btn-outline:hover { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

@@ -64,6 +64,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                     created_at,
                     logged_status,
                     reason,
+                    guest_id,
+                    vip_access,
                     campus,
                     vehicle_information:vehicle_information_id(
                         brand,
@@ -201,9 +203,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         const hourlyChart = Array(24).fill(0);
         const roleBreakdownByCampus: Record<string, Record<string, number>> = {
-            'Main Campus': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0 },
-            'RNP': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0 },
-            'PASEO': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0 }
+            'Main Campus': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
+            'RNP': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
+            'PASEO': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 }
         };
 
         todayLogs.forEach((log: any) => {
@@ -217,7 +219,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 
             const rawRole = (log.registration?.role || log.role || (log.vip_access ? 'vip' : '')).toLowerCase();
             let role = 'student';
-            if (rawRole.includes('faculty')) role = 'faculty';
+            if (log.guest_id && !log.registration) role = 'guest';
+            else if (rawRole.includes('faculty')) role = 'faculty';
             else if (rawRole.includes('admin')) role = 'administrator';
             else if (rawRole.includes('staff') || rawRole.includes('employee')) role = 'staff';
             else if (rawRole.includes('concessionaire') || rawRole.includes('concecioonaire') || rawRole.includes('concession')) role = 'concessionaire';

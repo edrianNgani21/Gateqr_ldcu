@@ -10,6 +10,7 @@ import time
 import base64
 import threading
 import numpy as np
+# pyrefly: ignore [missing-import]
 from gpiozero import AngularServo, Device
 from collections import deque
 import re
@@ -205,7 +206,7 @@ class CameraStreamHandler(BaseHTTPRequestHandler):
         # Silence console log spam for HTTP streaming requests
         return
 
-    def do_OPTIONS(self):
+    def do_OPTIONS(self):   
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -1611,21 +1612,6 @@ def render_side(img, side, offset_x=0):
                         vehicle_data = side.vehicle_data
             except:
                 pass
-        
-        draw_text(img, f"Role: {side.data.get('role', 'N/A')}", (25, 80), 0.8)
-        draw_text(img, f"Campus: {side.data.get('campus', 'N/A')}", (25, 110), 0.8)
-        
-        vehicle_plate = vehicle_data.get('plate_number', 'N/A') if vehicle_data else 'N/A'
-        vehicle_color = vehicle_data.get('color', 'N/A') if vehicle_data else 'N/A'
-        vehicle_brand = vehicle_data.get('brand', 'N/A') if vehicle_data else 'N/A'
-        
-        draw_text(img, f"Plate: {vehicle_plate}", (25, 140), 0.8)
-        draw_text(img, f"Color: {vehicle_color}", (25, 170), 0.8)
-        draw_text(img, f"Brand: {vehicle_brand}", (25, 200), 0.8)
-        
-        status_text = getattr(side, 'logged_status', 'UNKNOWN')
-        status_col = (0, 255, 0) if status_text == "REGISTERED" else (0, 165, 255)
-        draw_text(img, f"STATUS: {status_text}", (25, 230), 0.8, status_col, 2)
         
         btn_text = "LET IN" if side.type == 'in' else "LET OUT"
         draw_btn(img, (25, H//2 - 65, 140, 48), btn_text)
