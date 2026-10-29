@@ -8,10 +8,12 @@
   let userRole = $derived(data.userRole || 'security');
 
   // Pure realtime WebSocket sync for instant automatic updates without background polling
+  let isLive = $state(false);
   $effect(() => {
     return startLiveSync({
       channelName: 'security-dashboard-realtime',
-      tables: ['vehicle_log', 'incident_report', 'parking_capacity', 'registration', 'blocklist']
+      tables: ['vehicle_log', 'incident_report', 'parking_capacity', 'registration', 'blocklist'],
+      onStatus: (live) => (isLive = live)
     });
   });
 
@@ -100,6 +102,25 @@
   }
   let hourlyChart = $derived((data.hourlyChart as number[]) || Array(24).fill(0));
   let flaggedAlerts = $derived((data.flaggedAlerts as any[]) || []);
+
+  // Alerts that arrive live (not in the first load) are marked NEW for a few seconds
+  const NEW_ALERT_MS = 10000;
+  let seenAlertIds: Set<string> | null = null;
+  let newAlertIds = $state<Set<string>>(new Set());
+  $effect(() => {
+    const ids = flaggedAlerts.map((a: any) => String(a.id));
+    if (seenAlertIds === null) {
+      seenAlertIds = new Set(ids);
+      return;
+    }
+    const fresh = ids.filter((id) => !seenAlertIds!.has(id));
+    for (const id of fresh) seenAlertIds.add(id);
+    if (fresh.length === 0) return;
+    newAlertIds = new Set([...newAlertIds, ...fresh]);
+    setTimeout(() => {
+      newAlertIds = new Set([...newAlertIds].filter((id) => !fresh.includes(id)));
+    }, NEW_ALERT_MS);
+  });
 
   const statCards = $derived([
     {
@@ -302,6 +323,9 @@
       <div class="card-header">
         <div class="header-left">
           <h2>Flagged Alerts</h2>
+          <span class="live-indicator" class:on={isLive} title={isLive ? 'Realtime updates are on' : 'Connecting to realtime updates'}>
+            <span class="live-dot"></span>{isLive ? 'Live' : 'Connecting'}
+          </span>
         </div>
         <span class="alerts-count-badge" class:has-alerts={flaggedAlerts.length > 0}>
           {flaggedAlerts.length} Recorded
@@ -322,19 +346,20 @@
               </tr>
             </thead>
             <tbody>
-              {#each flaggedAlerts as alert}
-                <tr>
+              {#each flaggedAlerts as alert (alert.id)}
+                <tr class:new-alert={newAlertIds.has(String(alert.id))}>
                   <td class="td-datetime">
                     <span class="date-text">{new Date(alert.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     <span class="time-text">{new Date(alert.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </td>
                   <td>
-                    <span
-                      class="reason-tag"
-                      class:danger={/not recognized|duplicate|double access|denied|blocked|revoked|not registered|wrong campus|expired/i.test(alert.reason)}
-                    >
-                      {alert.reason}
-                    </span>
+                    <div class="alert-cell">
+                      <span class="alert-name-row">
+                        <span class="reason-tag" class:danger={alert.alert !== 'Violation'}>{alert.alert}</span>
+                        {#if newAlertIds.has(String(alert.id))}<span class="new-badge">NEW</span>{/if}
+                      </span>
+                      <span class="alert-detail">{alert.reason}</span>
+                    </div>
                   </td>
                   <td>
                     <span class="plate-code">{alert.plate}</span>
@@ -844,6 +869,83 @@
   .reason-tag.danger {
     background: #fef2f2;
     color: #c53030;
+  }
+
+  .alert-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    max-width: 22rem;
+  }
+
+  .alert-name-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .alert-detail {
+    font-size: 0.75rem;
+    color: #64748b;
+    line-height: 1.35;
+  }
+
+  .new-badge {
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    background: #dc2626;
+    color: #fff;
+  }
+
+  .flagged-table tr.new-alert td {
+    animation: new-alert-flash 1.2s ease-in-out 3;
+  }
+
+  @keyframes new-alert-flash {
+    0%, 100% { background: transparent; }
+    50% { background: #fee2e2; }
+  }
+
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #94a3b8;
+  }
+
+  .live-indicator.on {
+    color: #15803d;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .live-indicator.on .live-dot {
+    animation: live-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flagged-table tr.new-alert td,
+    .live-indicator.on .live-dot {
+      animation: none;
+    }
+    .flagged-table tr.new-alert td {
+      background: #fee2e2;
+    }
   }
 
   .plate-code {

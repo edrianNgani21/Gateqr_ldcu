@@ -279,6 +279,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             return {
                 id: `violation-${v.blocklist_id}`,
                 time: v.recorded_at,
+                alert: 'Violation',
                 reason: `Violation (${by}): ${v.reason}${blockedUntil ? ` - blocked until ${blockedUntil.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' })}` : ''}`,
                 plate: v.vehicle_information?.plate_number || 'No Plate',
                 name: `${v.registration?.first_name || ''} ${v.registration?.last_name || ''}`.trim() || 'Unknown',
@@ -300,6 +301,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             .map((r: any) => ({
                 id: r.vehicle_log_id,
                 time: r.check_in || r.created_at || new Date().toISOString(),
+                // vehicle_log.flagged_alert, shown as the alert name
+                alert: alertLabels[r.flagged_alert] || 'Denied',
                 reason: r.reason || (r.logged_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.logged_status) || 'Flagged Alert',
                 plate: r.vehicle_information?.plate_number || 'No Plate',
                 name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || 'Guest / Unregistered',

@@ -710,7 +710,7 @@
         </svg>
         <input
           type="text"
-          placeholder="Search name, plate, vehicle…"
+          placeholder="Search name, plate, vehicle"
           bind:value={searchQuery}
           class="search-input"
         />
@@ -1352,7 +1352,7 @@
           </select>
           <input
             type="text"
-            placeholder="Search name, plate, vehicle…"
+            placeholder="Search name, plate, vehicle"
             bind:value={searchQuery}
             oninput={onSearchInput}
             class="search-box"

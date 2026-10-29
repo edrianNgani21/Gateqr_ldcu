@@ -8,6 +8,8 @@ export interface LiveSyncOptions {
     onSync?: () => void;
     /** Set to false when onSync decides itself whether to reload (e.g. skip while a form is being edited). */
     invalidate?: boolean;
+    /** Called with true once the realtime connection is up, false when it drops. */
+    onStatus?: (live: boolean) => void;
 }
 
 /** Broadcast topic/event fed by the `gateqr_broadcast_change` trigger in supabase-schema-complete.sql */
@@ -46,7 +48,7 @@ function addBroadcastListener(listener: ChangeListener) {
  * Bursts of changes (one action touching several tables) are coalesced into a single reload.
  */
 export function startLiveSync(options: LiveSyncOptions) {
-    const { channelName, tables, onSync, invalidate = true } = options;
+    const { channelName, tables, onSync, invalidate = true, onStatus } = options;
 
     let isDestroyed = false;
     let pending: ReturnType<typeof setTimeout> | null = null;
@@ -72,7 +74,9 @@ export function startLiveSync(options: LiveSyncOptions) {
     for (const table of tables) {
         channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, triggerSync);
     }
-    channel.subscribe();
+    channel.subscribe((status) => {
+        if (!isDestroyed) onStatus?.(status === 'SUBSCRIBED');
+    });
 
     const removeBroadcastListener = addBroadcastListener((table) => {
         if (!table || watched.has(table)) triggerSync();

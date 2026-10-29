@@ -173,6 +173,8 @@ class SideState:
         self.logged_status = None
         self.vehicle_data = {} # Holds vehicle information from separate table
         self.block_info = None # Active blocklist row when state is BLOCKED
+        self.processing_label = ""  # What is being processed, e.g. "QR: HVTX7FCD" (shown in the card)
+        self.processing_step = ""   # Current processing step (shown in the card)
         self.prolong_ready_time = 0.0 # Cooldown timer for PROLONG scans (5s delay)
         self.scan_cooldown_end = 0.0  # Cooldown timer for Exit scanner (5s delay between scans)
         
@@ -656,6 +658,7 @@ def force_close_gate(side):
     side.state = GateState.SCANNING
     side.data = None
     side.logged_status = None
+    side.processing_label = side.processing_step = ""
     side.timeout_end = 0
     global latest_scanned_details
     latest_scanned_details = None
@@ -676,6 +679,7 @@ def close_gate(side):
     side.state = GateState.SCANNING
     side.data = None
     side.logged_status = None
+    side.processing_label = side.processing_step = ""
     global latest_scanned_details
     latest_scanned_details = None
     print(f"DEBUG: Gate closed successfully")
@@ -858,6 +862,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     side.block_info = None
 
     # Get vehicle information from separate table (the manual plate lookup may already have it)
+    side.processing_step = "Loading vehicle details..."
     try:
         print(f"DEBUG: Registration data: {reg}")
         vehicle_info_id = reg.get('vehicle_information_id')
@@ -890,6 +895,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 
     # Registration status (all campuses): only active registered stickers may enter
     if side.type == 'in':
+        side.processing_step = "Checking registration status..."
         allowed, kind, title, detail = registration_access(reg)
         if not allowed:
             show_status_denied(side, reg, kind, title, detail)
@@ -897,12 +903,14 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 
     # Blocklist check (all campuses). Applies to the entrance; a blocked vehicle already inside may still leave.
     if side.type == 'in':
+        side.processing_step = "Checking blocklist..."
         block = get_active_block(reg.get('registration_id'), side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'))
         if block:
             show_blocked(side, reg, block)
             return
 
         # Separate 2-wheel / 4-wheel limits: stop this vehicle only if its own type is full
+        side.processing_step = "Checking parking limits..."
         two_wheel = is_two_wheeler(side.vehicle_data.get('type') or reg.get('type'))
         type_cap = global_stats.get('cap2') if two_wheel else global_stats.get('cap4')
         type_in = global_stats.get('in2', 0) if two_wheel else global_stats.get('in4', 0)
@@ -929,6 +937,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     # Multi-campus duplicate entry check:
     # Query recent logs for this registration across ALL campuses to detect if vehicle is currently inside
     open_cross_log = None
+    side.processing_step = "Checking entry logs..."
     try:
         all_logs_res = supabase.table('vehicle_log').select('*')\
             .eq('registration_id', reg['registration_id'])\
@@ -1083,11 +1092,10 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 def process_qr(side, qr_text, frame):
     global latest_scanned_details
     try:
-        # Wait 1 second before capturing snapshot so the QR is fully in frame
-        time.sleep(1)
         side.snapshot = frame.copy()
         
         # Look up registration by qr_code or qr_unique_code in Supabase
+        side.processing_step = "Checking registration..."
         try:
             response = supabase.table('registration').select('*').eq('qr_code', qr_text).execute()
             if not response.data:
@@ -1189,6 +1197,7 @@ def submit_entry_exit(side):
         side.api_error = "Missing registration ID"
         return
     
+    side.processing_step = "Logging entry..." if side.type == 'in' else "Logging exit..."
     side.state = GateState.PROCESSING
     
     def _run():
@@ -1292,6 +1301,7 @@ def get_placeholder_ids():
     return None
 
 def submit_vip(side):
+    side.processing_label, side.processing_step = "VIP access", "Logging VIP access..."
     side.state = GateState.PROCESSING
     def _run():
         current_time = datetime.now().isoformat()
@@ -1385,6 +1395,7 @@ def check_and_submit_guest(side):
     submit_manual_guest(side)
 
 def submit_manual_guest(side):
+    side.processing_label, side.processing_step = "Guest access", "Logging guest..."
     side.state = GateState.PROCESSING
     
     def _run():
@@ -1763,7 +1774,8 @@ def get_card_status(side):
     now = time.time()
 
     if st == GateState.PROCESSING:
-        return "PROCESSING...", (170, 90, 20), ["Looking up the vehicle record, please wait."]
+        lines = [l for l in (side.processing_label, side.processing_step or "Looking up the vehicle record, please wait.") if l]
+        return "PROCESSING...", (170, 90, 20), lines
     if st == GateState.SCANNING:
         if side.type == 'out' and now < getattr(side, 'scan_cooldown_end', 0):
             wait_s = max(1, int(side.scan_cooldown_end - now) + 1)
@@ -2203,6 +2215,8 @@ def mouse_callback(event, x, y, flags, param):
         if in_rect(x, y, (25, H//2 - 65, 120, 48)): # LOOKUP
             plate_input = side.form_data[0].strip()
             if plate_input:
+                side.processing_label = f"Manual lookup: {plate_input}"
+                side.processing_step = "Searching plate / Reg. No..."
                 side.state = GateState.PROCESSING
                 threading.Thread(target=lookup_registered_plate, args=(side, plate_input), daemon=True).start()
         elif in_rect(x, y, (160, H//2 - 65, 100, 48)):
@@ -2371,6 +2385,8 @@ while True:
                     if side.type == 'out':
                         side.scan_cooldown_end = time.time() + 5.0
                         side.prolong_ready_time = time.time() + 5.0
+                    side.processing_label = f"QR detected: {data[:40]}"
+                    side.processing_step = "Reading QR code..."
                     side.state = GateState.PROCESSING  # Block re-trigger immediately
                     crop_copy = crop.copy()
                     threading.Thread(target=process_qr, args=(side, data, crop_copy), daemon=True).start()

@@ -1,35 +1,17 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import QRCode from 'qrcode';
-import { join } from 'path';
 import fs from 'fs';
+// Bundled into the server code: on Vercel the static/ folder is served by the CDN and is not on the function's disk
+import logoDataUrl from './liceo-logo.png?inline';
 
 // Cache for the cleaned logo with transparent outer background
 let cachedCleanLogoCanvas: any = null;
 
-function resolveLogoPath(): string | null {
-    const candidates = [
-        join(process.cwd(), 'static', 'liceo-logo.png'),
-        join(process.cwd(), 'new_qr-main', 'static', 'liceo-logo.png'),
-        'C:\\Users\\Leonardo Luban\\Desktop\\new_qr-main\\new_qr-main\\static\\liceo-logo.png',
-        'C:\\Users\\Leonardo Luban\\Desktop\\new_qr-main\\static\\liceo-logo.png',
-    ];
-    for (const p of candidates) {
-        if (fs.existsSync(p)) return p;
-    }
-    return null;
-}
-
 async function getCleanLogoCanvas(): Promise<any | null> {
     if (cachedCleanLogoCanvas) return cachedCleanLogoCanvas;
 
-    const logoPath = resolveLogoPath();
-    if (!logoPath) {
-        console.warn('[QR] liceo-logo.png not found in any candidate path');
-        return null;
-    }
-
     try {
-        const rawLogo = await loadImage(logoPath);
+        const rawLogo = await loadImage(Buffer.from(logoDataUrl.split(',')[1], 'base64'));
         const w = rawLogo.width;
         const h = rawLogo.height;
         const logoCanvas = createCanvas(w, h);
