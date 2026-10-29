@@ -25,14 +25,12 @@
 
   const tabs = [
     "Document Review",
-    "Sticker Installation",
     "Registered Vehicles",
     "Rejected or Revoked Accounts & Applications",
   ];
 
   const tabLabels: Record<string, string> = {
     "Document Review": "Document Review",
-    "Sticker Installation": "Sticker Installation",
     "Registered Vehicles": "Registered Vehicles",
     "Rejected or Revoked Accounts & Applications": "Rejected or Revoked",
   };
@@ -66,15 +64,9 @@
           ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
       );
     }
-    if (t === "Sticker Installation") {
-      return vehicles.filter(
-        (v: any) =>
-          (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
-      );
-    }
     if (t === "Registered Vehicles" || t === "Registered") {
       return vehicles.filter(
-        (v: any) => (v.status || "").toLowerCase() === "approved"
+        (v: any) => ["approved", "completed"].includes((v.status || "").toLowerCase())
       );
     }
     if (t === "Rejected or Revoked Accounts & Applications" || t === "Revoked Registered") {
@@ -85,7 +77,6 @@
 
   let tabCounts = $derived([
     getAppsForTab("Document Review").length,
-    getAppsForTab("Sticker Installation").length,
     getAppsForTab("Registered Vehicles").length,
     getAppsForTab("Rejected or Revoked Accounts & Applications").length,
   ]);
@@ -259,8 +250,12 @@
         ) ||
         (v.id || "").toLowerCase().includes(searchQuery.toLowerCase());
 
+      const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase().trim();
       const matchesType =
-        vehicleTypeFilter === "all" || v.vehicle_type === vehicleTypeFilter;
+        vehicleTypeFilter === "all" ||
+        ((vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") && (rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike"))) ||
+        ((vehicleTypeFilter === "4 wheelers" || vehicleTypeFilter === "4-wheelers" || vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") && (rawType.includes("4") || rawType.includes("car"))) ||
+        rawType === vehicleTypeFilter.toLowerCase();
 
       return matchesSearch && matchesType;
     }),
@@ -274,14 +269,9 @@
         (v: any) =>
           ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
       );
-    } else if (tab === "Sticker Installation") {
-      filtered = filtered.filter(
-        (v: any) =>
-          (v.status || "").toLowerCase() === "completed" || (v.sticker_released_at && (v.status || "").toLowerCase() !== "approved")
-      );
     } else if (tab === "Registered Vehicles" || tab === "Registered") {
       filtered = filtered.filter(
-        (v: any) => (v.status || "").toLowerCase() === "approved"
+        (v: any) => ["approved", "completed"].includes((v.status || "").toLowerCase())
       );
     } else if (tab === "Rejected or Revoked Accounts & Applications" || tab === "Revoked Registered") {
       filtered = filtered.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()));
@@ -291,11 +281,11 @@
       filtered = filtered.filter((v: any) => {
         const r = (v.role || "").toLowerCase().trim();
         if (roleFilter === "student") return r === "student";
-        if (roleFilter === "faculty") return r === "faculty";
         if (roleFilter === "staff") return r === "staff" || r === "employee";
-        if (roleFilter === "administrator") return r === "administrator" || r === "admin";
-        if (roleFilter === "concessionaire") return r === "concessionaire" || r === "concessionnaire";
+        if (roleFilter === "faculty") return r === "faculty";
+        if (roleFilter === "concessionnare" || roleFilter === "concessionaire") return r === "concessionaire" || r === "concessionnare" || r === "concecioonaire";
         if (roleFilter === "supplier") return r === "supplier";
+        if (roleFilter === "administrator") return r === "administrator" || r === "admin";
         if (roleFilter === "vps") return r === "vps";
         return r === roleFilter.toLowerCase();
       });
@@ -303,11 +293,11 @@
 
     if (vehicleTypeFilter !== "all") {
       filtered = filtered.filter((v: any) => {
-        const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase();
-        if (vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
+        const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase().trim();
+        if (vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
           return rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike");
         }
-        if (vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") {
+        if (vehicleTypeFilter === "4 wheelers" || vehicleTypeFilter === "4-wheelers" || vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") {
           return rawType.includes("4") || rawType.includes("car");
         }
         return rawType === vehicleTypeFilter.toLowerCase();
@@ -317,6 +307,15 @@
     if (selectedCampus !== "all") {
       filtered = filtered.filter((v: any) => {
         const c = (v.campus || "").toLowerCase().trim();
+        if (selectedCampus === 'Main campus' || selectedCampus === 'main') {
+          return c.includes('main');
+        }
+        if (selectedCampus === 'rnp campus' || selectedCampus === 'rnp') {
+          return c.includes('rnp');
+        }
+        if (selectedCampus === 'Paseo' || selectedCampus === 'paseo') {
+          return c.includes('paseo');
+        }
         return c === selectedCampus.toLowerCase().trim();
       });
     }
@@ -613,69 +612,6 @@
     printWindow.document.close();
     printWindow.print();
   }
-  // ── Sticker Installation ─────────────────────────────────────────────────
-  let installationSearch = $state("");
-  let installationLoading = $state<number | null>(null);
-
-  // Vehicles that have had stickers released by OSA (sticker_released_at is set) but not yet marked as installed
-  let installationVehicles = $derived(
-    vehicles.filter(
-      (v: any) =>
-        v.status === "completed" &&
-        v.sticker_released_at &&
-        !v.sticker_installed_at,
-    ),
-  );
-
-  let filteredInstallationVehicles = $derived(
-    installationVehicles.filter((v: any) => {
-      if (!installationSearch) return true;
-      const terms = installationSearch
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(Boolean);
-      const fullString = Object.values(v)
-        .filter((val) => val !== null && val !== undefined)
-        .map((val) => String(val).toLowerCase())
-        .join(" ");
-      return terms.every((term: string) => fullString.includes(term));
-    }),
-  );
-
-  async function markStickerInstalled(registrationId: number) {
-    if (
-      !confirm(
-        "Confirm that the sticker has been physically installed on the vehicle?",
-      )
-    )
-      return;
-    installationLoading = registrationId;
-    const previous = vehicles;
-    vehicles = vehicles.map((v: any) =>
-      v.registration_id === registrationId
-        ? { ...v, sticker_installed_at: new Date().toISOString(), status: "approved" }
-        : v,
-    );
-    try {
-      const res = await fetch("/api/security/sticker-install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ registration_id: registrationId }),
-      });
-      if (res.ok) {
-        invalidateAll();
-      } else {
-        vehicles = previous;
-        const err = await res.json();
-        alert(err.error || "Failed to mark sticker as installed.");
-      }
-    } catch (e) {
-      vehicles = previous;
-      alert("Network error. Please try again.");
-    } finally {
-      installationLoading = null;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -712,7 +648,7 @@
 
   <TabBar {tabs} active={tab} counts={tabCounts} labels={tabLabels} onchange={switchTab} />
 
-  {#if tab === "Document Review" || tab === "Sticker Installation" || tab === "Registered" || tab === "Registered Vehicles" || tab === "Revoked Registered" || tab === "Rejected or Revoked Accounts & Applications"}
+  {#if tab === "Document Review" || tab === "Registered" || tab === "Registered Vehicles" || tab === "Revoked Registered" || tab === "Rejected or Revoked Accounts & Applications"}
     <!-- Monitoring Tab - Registered Vehicles -->
     <div class="controls-row">
       <div class="search-wrap">
@@ -747,24 +683,23 @@
         <select bind:value={roleFilter} class="filter-select">
           <option value="all">All Roles</option>
           <option value="student">Student</option>
-          <option value="faculty">Faculty</option>
           <option value="staff">Staff</option>
-          <option value="administrator">Administrator</option>
-          <option value="concessionaire">Concessionaire</option>
+          <option value="faculty">Faculty</option>
+          <option value="concessionnare">Concessionaire</option>
           <option value="supplier">Supplier</option>
+          <option value="administrator">Administrator</option>
           <option value="vps">VPS</option>
-          <option value="vip">VIP</option>
         </select>
         <select bind:value={vehicleTypeFilter} class="filter-select">
           <option value="all">All Vehicles</option>
-          <option value="2-Wheeler / Motorcycle">2-Wheelers</option>
-          <option value="4-Wheeler / Car">4-Wheelers</option>
+          <option value="2 wheelers">2 Wheelers</option>
+          <option value="4 wheelers">4 Wheelers</option>
         </select>
         <select bind:value={selectedCampus} class="filter-select">
           <option value="all">All Campuses</option>
-          <option value="Liceo Main">Liceo Main</option>
-          <option value="RNP">RNP</option>
-          <option value="PASEO">PASEO</option>
+          <option value="Main campus">Main campus</option>
+          <option value="rnp campus">rnp campus</option>
+          <option value="Paseo">Paseo</option>
         </select>
       </div>
     </div>
@@ -803,7 +738,6 @@
             hdc: app.osa_dist_at,
             sec: app.security_checked_at,
             rel: app.sticker_released_at,
-            ins: app.sticker_installed_at,
             exp: app.expires_at,
             rejection_reason: app.invalid_reason || null,
             is_change_vehicle: app.is_change_vehicle,
@@ -843,33 +777,18 @@
                   await unrevokeQR(app.registration_id);
                 } else if (action === "delete") {
                   await deleteApp(app.registration_id);
-                } else if (
-                  action === "security_check" ||
-                  action === "install_sticker"
-                ) {
+                } else if (action === "security_check") {
                   const previousVehicles = vehicles;
-                  if (action === "security_check") {
-                    vehicles = vehicles.map((v: any) =>
-                      v.registration_id === app.registration_id
-                        ? {
-                            ...v,
-                            security_check_at: new Date().toISOString(),
-                            security_checked_at: new Date().toISOString(),
-                            status: "security_checked"
-                          }
-                        : v,
-                    );
-                  } else if (action === "install_sticker") {
-                    vehicles = vehicles.map((v: any) =>
-                      v.registration_id === app.registration_id
-                        ? {
-                            ...v,
-                            sticker_installed_at: new Date().toISOString(),
-                            status: "approved"
-                          }
-                        : v,
-                    );
-                  }
+                  vehicles = vehicles.map((v: any) =>
+                    v.registration_id === app.registration_id
+                      ? {
+                          ...v,
+                          security_check_at: new Date().toISOString(),
+                          security_checked_at: new Date().toISOString(),
+                          status: "security_checked"
+                        }
+                      : v,
+                  );
 
                   try {
                     const res = await fetch(`/api/monitor/actions`, {
@@ -1417,218 +1336,6 @@
           </div>
         {/if}
       {/if}
-    </div>
-  {:else if tab === "Sticker Installation"}
-    <!-- Sticker Installation Tab - Security marks sticker as physically installed on vehicle -->
-    <div class="controls-row">
-      <div class="search-wrap">
-        <svg
-          class="search-icon"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-        </svg>
-        <input
-          type="text"
-          placeholder="Search name, plate, vehicle…"
-          bind:value={installationSearch}
-          class="search-input"
-        />
-        {#if installationSearch}
-          <button
-            class="search-clear"
-            onclick={() => {
-              installationSearch = "";
-            }}>×</button
-          >
-        {/if}
-      </div>
-    </div>
-
-    <div class="install-info-banner">
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <circle cx="12" cy="12" r="10" /><line
-          x1="12"
-          y1="8"
-          x2="12"
-          y2="12"
-        /><line x1="12" y1="16" x2="12.01" y2="16" />
-      </svg>
-      <span
-        >This tab lists applicants whose sticker has been released by OSA and is
-        ready for physical installation on the vehicle. Click <strong
-          >Mark as Installed</strong
-        > once the sticker has been placed on the vehicle.</span
-      >
-    </div>
-
-    <div class="cards-list">
-      {#each filteredInstallationVehicles as app}
-        <ApplicationCard
-          data={{
-            id: app.registration_id || "-",
-            name: `${app.first_name} ${app.last_name}`,
-            role: app.role,
-            campus: app.campus || "-",
-            "year level": app.year_level || "-",
-            email: app.user_email || "-",
-            contact: app.mobile || "-",
-            department: app.department_name || "-",
-            "dept. email": app.department_email || "-",
-            vehicle: app.vehicle_information?.brand || "-",
-            "vehicle type": app.vehicle_information?.type || "-",
-            color: app.vehicle_information?.color || "-",
-            plate: app.vehicle_information?.plate_number || "-",
-            owner: app.is_owner ? "Yes" : "No",
-            status: app.status,
-            crd: app.created_at,
-            dpt: app.dept_val_at,
-            osa: app.osa_val_at,
-            sch: app.dist_sched,
-            hdc: app.osa_dist_at,
-            sec: app.security_checked_at,
-            rel: app.sticker_released_at,
-            ins: app.sticker_installed_at,
-            exp: app.expires_at,
-            rejection_reason: app.invalid_reason || null,
-            is_change_vehicle: app.is_change_vehicle,
-            qr_code: app.qr_code,
-            qr_unique_code: app.qr_unique_code,
-            documents: {
-              id:
-                toDocUrl(app.doc_id) ||
-                toDocUrl(app.vehicle_information?.school_id),
-              enrollment:
-                toDocUrl(app.doc_load) || toDocUrl(app.enrollment_form),
-              or:
-                toDocUrl(app.doc_or) ||
-                toDocUrl(app.vehicle_information?.or_document),
-              cr:
-                toDocUrl(app.doc_cr) ||
-                toDocUrl(app.vehicle_information?.cr_document),
-              license:
-                toDocUrl(app.doc_license) ||
-                toDocUrl(app.vehicle_information?.drivers_license),
-              letter:
-                toDocUrl(app.doc_letter) ||
-                toDocUrl(app.vehicle_information?.authorization_letter),
-            },
-          }}
-          showQR={true}
-        >
-          {#snippet children()}
-            <div class="install-action-row">
-              <div class="install-meta">
-                {#if app.sticker_released_at}
-                  {@const releasedDate = new Date(app.sticker_released_at)}
-                  {@const today = new Date()}
-                  {@const isOverdue =
-                    releasedDate.getDate() !== today.getDate() ||
-                    releasedDate.getMonth() !== today.getMonth() ||
-                    releasedDate.getFullYear() !== today.getFullYear()}
-                  <span class="install-date-label">Sticker Released:</span>
-                  <span class="install-date-value"
-                    >{releasedDate.toLocaleString("en-US", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}</span
-                  >
-                  {#if isOverdue && releasedDate < today}
-                    <div
-                      class="overdue-warning"
-                      style="color: #b91c1c; font-size: 0.8rem; font-weight: 600; margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; background: #fef2f2; padding: 0.4rem 0.6rem; border-radius: 4px; border: 1px solid #fca5a5; width: fit-content;"
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path
-                          d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
-                        /><line x1="12" y1="9" x2="12" y2="13" /><line
-                          x1="12"
-                          y1="17"
-                          x2="12.01"
-                          y2="17"
-                        />
-                      </svg>
-                      WARNING: Applicant did not visit for installation
-                    </div>
-                  {/if}
-                {/if}
-              </div>
-              <button
-                class="action-btn btn-install"
-                onclick={() => markStickerInstalled(app.registration_id)}
-                disabled={installationLoading === app.registration_id}
-                class:btn-loading={installationLoading === app.registration_id}
-              >
-                {#if installationLoading === app.registration_id}
-                  <svg class="btn-spinner" viewBox="0 0 20 20" fill="none">
-                    <circle
-                      cx="10"
-                      cy="10"
-                      r="7"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                      stroke-dasharray="35 15"
-                      stroke-linecap="round"
-                    />
-                  </svg>
-                  Installing…
-                {:else}
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  Mark as Installed
-                {/if}
-              </button>
-            </div>
-          {/snippet}
-        </ApplicationCard>
-      {:else}
-        <div class="empty-state-install">
-          <svg
-            width="64"
-            height="64"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-          >
-            <path d="M9 11l3 3L22 4" /><path
-              d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
-            />
-          </svg>
-          <h3>No Pending Installations</h3>
-          <p>
-            All stickers that have been released by OSA have been installed, or
-            no stickers have been released yet.
-          </p>
-        </div>
-      {/each}
     </div>
   {/if}
 </AppShell>

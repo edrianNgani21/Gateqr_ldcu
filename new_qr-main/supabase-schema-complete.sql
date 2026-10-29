@@ -57,7 +57,7 @@ CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'os
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
 CREATE TYPE registration_status_enum AS ENUM (
   'pending', 'dept_validated', 'osa_validated', 'distributed',
-  'security_checked', 'completed', 'approved', 'rejected', 'expired', 'revoked'
+  'security_checked', 'receipt_submitted', 'completed', 'approved', 'rejected', 'expired', 'revoked'
 );
 CREATE TYPE registration_role_enum  AS ENUM ('student', 'staff', 'faculty');
 CREATE TYPE vehicle_type_enum       AS ENUM ('2_wheels', '4_wheels');
@@ -126,6 +126,7 @@ CREATE TABLE registration (
   doc_id                 VARCHAR(500),                            -- Student / Employee ID document URL
   drivers_license        VARCHAR(255) NOT NULL,
   enrollment_form        VARCHAR(255) NOT NULL,   -- White Form / Enrollment Form
+  year_level             VARCHAR(50),             -- Applicant year level (e.g. 1st Year, 2nd Year)
   role                   registration_role_enum NOT NULL DEFAULT 'student',
   qr_code                VARCHAR(255) NOT NULL,
   qr_unique_code         VARCHAR(255),                            -- Compatibility column
@@ -133,8 +134,8 @@ CREATE TABLE registration (
   osa_val_at             TIMESTAMPTZ,             -- OSA validated timestamp
   osa_dist_at            TIMESTAMPTZ,             -- OSA hardcopy documents compliance timestamp
   security_check_at      TIMESTAMPTZ,             -- Security inspection / document review timestamp
+  receipt                TEXT,                    -- Payment receipt image URL uploaded by applicant
   sticker_released_at    TIMESTAMPTZ,             -- OSA sticker released timestamp
-  sticker_installed_at   TIMESTAMPTZ,             -- Security QR Code sticker installation timestamp
   schedule               TIMESTAMPTZ,             -- Hardcopy schedule for compliance
   expires_at             TIMESTAMPTZ,             -- Sticker expiration
   school_year            VARCHAR(20) DEFAULT '2025-2026', -- School Year (e.g. 2025-2026)
@@ -958,6 +959,7 @@ ON CONFLICT DO NOTHING;
 -- ---------------------------------------------------------------------
 -- Adds the missing 6-step lifecycle statuses and timestamp columns
 ALTER TYPE registration_status_enum ADD VALUE IF NOT EXISTS 'distributed';
+ALTER TYPE registration_status_enum ADD VALUE IF NOT EXISTS 'receipt_submitted';
 ALTER TYPE registration_status_enum ADD VALUE IF NOT EXISTS 'completed';
 
 -- Adds uppercase fallbacks to prevent enum type mismatch errors
@@ -969,9 +971,11 @@ ALTER TYPE complaint_status_enum ADD VALUE IF NOT EXISTS 'Pending';
 ALTER TYPE complaint_status_enum ADD VALUE IF NOT EXISTS 'Resolved';
 
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS osa_dist_at TIMESTAMPTZ;
+ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS receipt TEXT;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_released_at TIMESTAMPTZ;
-ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS sticker_installed_at TIMESTAMPTZ;
+ALTER TABLE public.registration DROP COLUMN IF EXISTS sticker_installed_at;
 ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS school_year VARCHAR(20) DEFAULT '2025-2026';
+ALTER TABLE public.registration ADD COLUMN IF NOT EXISTS year_level VARCHAR(50);
 
 -- ---------------------------------------------------------------------
 -- 14. TABLE RENAMES MIGRATION (Safe rename for existing databases)

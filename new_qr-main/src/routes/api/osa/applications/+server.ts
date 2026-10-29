@@ -245,22 +245,38 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
         else if (action === 'check_hardcopy' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
+            const isVps = (reg.role || '').toLowerCase().trim() === 'vps';
+            const nowHardcopyIso = new Date().toISOString();
             const { error: updateError } = await supabase
                 .from('registration')
-                .update({ 
+                .update(isVps ? {
+                    // VPS applications skip the Security document review
+                    status: 'security_checked',
+                    osa_dist_at: nowHardcopyIso,
+                    security_check_at: nowHardcopyIso
+                } : { 
                     status: 'distributed',
-                    osa_dist_at: new Date().toISOString()
+                    osa_dist_at: nowHardcopyIso
                 })
                 .eq('registration_id', registration_id);
 
             if (updateError) throw updateError;
 
-            await sendEmail(
-                reg.user.email,
-                'Hardcopy Documents Received - Liceo GateQR',
-                'Your hardcopy documents have been received by OSA and are now under review by Safety and Security.',
-                '<p>Your hardcopy documents have been <strong>received by OSA</strong> and are now under review by Safety and Security.</p>'
-            );
+            if (isVps) {
+                await sendEmail(
+                    reg.user.email,
+                    'Payment Required - Liceo GateQR',
+                    'You can now pay at the cashier and upload your payment receipt.',
+                    '<p>You can now pay at the cashier and upload your payment receipt.</p>'
+                );
+            } else {
+                await sendEmail(
+                    reg.user.email,
+                    'Hardcopy Documents Received - Liceo GateQR',
+                    'Your hardcopy documents have been received by OSA and are now under review by Safety and Security.',
+                    '<p>Your hardcopy documents have been <strong>received by OSA</strong> and are now under review by Safety and Security.</p>'
+                );
+            }
 
             // Create notification for the applicant and OSA admin
             const actorId = locals.user?.user_id;
@@ -289,7 +305,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 );
             }
         }
-        else if (action === 'release_sticker' && ['distributed', 'osa_validated', 'security_checked'].includes((reg.status || '').toLowerCase())) {
+        else if (action === 'release_sticker' && ['receipt_submitted'].includes((reg.status || '').toLowerCase())) {
             // Check if this application was undergoing a Request to Change Registration Details
             const { data: changeReq } = await supabase
                 .from('modification_request')
@@ -305,8 +321,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             const updateData: any = {
                 status: isChangeRequest ? 'approved' : 'completed',
-                sticker_released_at: nowIso,
-                ...(isChangeRequest ? { sticker_installed_at: nowIso } : {})
+                sticker_released_at: nowIso
             };
 
             const { error: updateError } = await supabase
@@ -338,9 +353,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
                 await sendEmail(
                     reg.user.email,
-                    'Registration Change Completed — Liceo GateQR',
-                    'Your vehicle sticker has been released by OSA and your registration change has been finalized. Your vehicle is now officially registered.',
-                    '<h3>Registration Change Completed</h3><p>Your vehicle sticker has been released by OSA and your registration change has been finalized.</p><p>Your updated vehicle is now officially registered with GateQR.</p>'
+                    'Application Completed - Liceo GateQR',
+                    'Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.',
+                    '<p>Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.</p>'
                 );
 
                 if (reg.user?.user_id) {
@@ -359,10 +374,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             } else {
                 await sendEmail(
                     reg.user.email,
-                    'Sticker Released - Liceo GateQR',
-                    'Your vehicle sticker has been released by OSA. Please proceed to Safety and Security for sticker installation.',
-                    '<p>Your vehicle sticker has been <strong>released by OSA</strong>. Please proceed to Safety and Security for sticker installation.</p>'
-                );                if (reg.user?.user_id) {
+                    'Application Completed - Liceo GateQR',
+                    'Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.',
+                    '<p>Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.</p>'
+                );
+                if (reg.user?.user_id) {
                     const actorId = locals.user?.user_id;
                     await createNotification(
                         reg.user.user_id,

@@ -15,7 +15,7 @@ export interface LiveSyncOptions {
  * 3. Optional polling heartbeat (disabled by default, only runs if intervalMs > 0 is provided)
  */
 export function startLiveSync(options: LiveSyncOptions) {
-    const { channelName, tables, intervalMs, onSync } = options;
+    const { channelName, tables, intervalMs = 5000, onSync } = options;
 
     let isDestroyed = false;
 

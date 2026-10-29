@@ -328,7 +328,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 osa_dist_at: null,
                 security_check_at: null,
                 sticker_released_at: null,
-                sticker_installed_at: null,
+                receipt: null,
                 schedule: null,
                 rejection_reason: null,
                 rejected_at: null,
@@ -512,33 +512,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const vehicle_information_id = vehicleData.vehicle_information_id;
 
         // 6. Generate QR code with guaranteed uniqueness
-        let uniqueCode = '';
-        let isCodeUnique = false;
-        let attempts = 0;
-        while (!isCodeUnique && attempts < 10) {
-            attempts++;
-            const randHex = Math.random().toString(36).substring(2, 8).toUpperCase();
-            uniqueCode = `QR-${Date.now()}-${randHex}`;
-            const { data: duplicateCode } = await supabase
-                .from('registration')
-                .select('registration_id')
-                .eq('qr_unique_code', uniqueCode)
-                .maybeSingle();
-
-            if (!duplicateCode) {
-                isCodeUnique = true;
-            }
-        }
-        let qrUrl = `/api/qr?code=${encodeURIComponent(uniqueCode)}&role=${encodeURIComponent(regRole)}`;
-        try {
-            const qrBuffer = await generateStyledQRBuffer(uniqueCode, regRole);
-            const qrFilename = `qr-codes/qr-${Date.now()}-${uniqueCode}.png`;
-            qrUrl = await uploadToStorage(qrFilename, qrBuffer, 'image/png');
-        } catch (qrErr) {
-            console.warn('[Apply] Note: Generating dynamic QR endpoint URL:', qrErr);
-        }
-
-        // 7. Insert into registration table
+        // 7. Insert into registration table (QR code is generated when OSA schedules/accepts application)
         const regPayload: any = {
             vehicle_information_id,
             status: 'pending',
@@ -552,9 +526,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             drivers_license: doc_license || 'pending_license',
             enrollment_form: doc_load || 'pending_enrollment',
             role: regRole,
-            qr_code: qrUrl,
-            qr_unique_code: uniqueCode
+            qr_code: 'PENDING',
+            qr_unique_code: null
         };
+
+        if (year_level) {
+            regPayload.year_level = year_level.trim();
+        }
 
         if (doc_id) {
             regPayload.doc_id = doc_id;
@@ -570,8 +548,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         let insertError = insertRes.error;
         newRegData = insertRes.data;
 
-        if (insertError && insertError.message?.includes('doc_id')) {
-            delete regPayload.doc_id;
+        if (insertError && (insertError.message?.includes('doc_id') || insertError.message?.includes('year_level'))) {
+            if (insertError.message?.includes('doc_id')) delete regPayload.doc_id;
+            if (insertError.message?.includes('year_level')) delete regPayload.year_level;
             const fallbackRes = await supabase
                 .from('registration')
                 .insert(regPayload)

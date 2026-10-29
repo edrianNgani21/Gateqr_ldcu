@@ -67,16 +67,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 status: 'security_checked'
             };
             notifType = 'security_checked';
-            notifMessage = 'Campus Security has inspected and verified your vehicle documents. Please proceed to OSA for sticker release.';
-            emailSubject = 'Application Update: Security Documents Verified';
-        } else if (action === 'install_sticker') {
-            updateData = { 
-                status: 'approved',
-                sticker_installed_at: new Date().toISOString()
-            };
-            notifType = 'sticker_installed';
-            notifMessage = 'Campus Security has successfully installed your vehicle QR code Sticker. Congratulations! You have completed the vehicle registration process and your vehicle is now officially registered.';
-            emailSubject = 'Application Update: QR Code Sticker Installed & Registration Complete';
+            notifMessage = 'You can now pay at the cashier and upload your payment receipt.';
+            emailSubject = 'Payment Required - Liceo GateQR';
         } else {
             return json({ error: 'Invalid action' }, { status: 400 });
         }
@@ -112,9 +104,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Notify Security officer
         if (locals.user?.user_id) {
-            const officerMsg = action === 'security_check'
-                ? `Successfully verified vehicle documents for ${(reg.users as any)?.email || 'applicant'}.`
-                : `Successfully installed QR code Sticker for ${(reg.users as any)?.email || 'applicant'}. Registration finalized.`;
+            const officerMsg = `Successfully verified vehicle documents for ${(reg.users as any)?.email || 'applicant'}.`;
             await createNotification(
                 locals.user.user_id,
                 notifType,

@@ -46,7 +46,7 @@
         if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
         if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && !a.osa_dist_at);
         if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
-        if (t === 'release') return apps.filter(a => (['distributed', 'osa_validated', 'security_checked'].includes((a.status || '').toLowerCase()) && (a.security_check_at || a.security_checked_at) && !a.sticker_released_at) || ((a.status || '').toLowerCase() === 'security_checked' && !a.sticker_released_at));
+        if (t === 'release') return apps.filter(a => (a.status || '').toLowerCase() === 'receipt_submitted' && !a.sticker_released_at);
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
         if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()));
         return [];
@@ -214,19 +214,23 @@
             filtered = filtered.filter(a => {
                 const r = (a.role || '').toLowerCase().trim();
                 if (roleFilter === 'student') return r === 'student';
-                if (roleFilter === 'faculty') return r === 'faculty';
                 if (roleFilter === 'staff') return r === 'staff' || r === 'employee';
+                if (roleFilter === 'faculty') return r === 'faculty';
+                if (roleFilter === 'concessionnare' || roleFilter === 'concessionaire') return r === 'concessionaire' || r === 'concessionnare' || r === 'concecioonaire';
+                if (roleFilter === 'supplier') return r === 'supplier';
+                if (roleFilter === 'administrator') return r === 'administrator' || r === 'admin';
+                if (roleFilter === 'vps') return r === 'vps';
                 return r === roleFilter.toLowerCase();
             });
         }
 
         if (vehicleTypeFilter !== 'all') {
             filtered = filtered.filter(a => {
-                const rawType = (a.vehicle_type || a.vehicle_information?.type || '').toLowerCase();
-                if (vehicleTypeFilter === '2-Wheeler / Motorcycle' || vehicleTypeFilter === '2-wheeler') {
+                const rawType = (a.vehicle_type || a.vehicle_information?.type || '').toLowerCase().trim();
+                if (vehicleTypeFilter === '2 wheelers' || vehicleTypeFilter === '2-wheelers' || vehicleTypeFilter === '2-Wheeler / Motorcycle' || vehicleTypeFilter === '2-wheeler') {
                     return rawType.includes('2') || rawType.includes('motor') || rawType.includes('bike');
                 }
-                if (vehicleTypeFilter === '4-Wheeler / Car' || vehicleTypeFilter === '4-wheeler') {
+                if (vehicleTypeFilter === '4 wheelers' || vehicleTypeFilter === '4-wheelers' || vehicleTypeFilter === '4-Wheeler / Car' || vehicleTypeFilter === '4-wheeler') {
                     return rawType.includes('4') || rawType.includes('car');
                 }
                 return rawType === vehicleTypeFilter.toLowerCase();
@@ -236,6 +240,15 @@
         if (selectedCampus !== 'all') {
             filtered = filtered.filter(a => {
                 const c = (a.campus || '').toLowerCase().trim();
+                if (selectedCampus === 'Main campus' || selectedCampus === 'main') {
+                    return c.includes('main');
+                }
+                if (selectedCampus === 'rnp campus' || selectedCampus === 'rnp') {
+                    return c.includes('rnp');
+                }
+                if (selectedCampus === 'Paseo' || selectedCampus === 'paseo') {
+                    return c.includes('paseo');
+                }
                 return c === selectedCampus.toLowerCase().trim();
             });
         }
@@ -561,21 +574,25 @@
         <select bind:value={roleFilter} class="filter-btn">
           <option value="all">All Roles</option>
           <option value="student">Student</option>
-          <option value="faculty">Faculty</option>
           <option value="staff">Staff</option>
+          <option value="faculty">Faculty</option>
+          <option value="concessionnare">Concessionaire</option>
+          <option value="supplier">Supplier</option>
+          <option value="administrator">Administrator</option>
+          <option value="vps">VPS</option>
         </select>
 
         <select bind:value={vehicleTypeFilter} class="filter-btn">
           <option value="all">All Vehicles</option>
-          <option value="2-Wheeler / Motorcycle">2-Wheelers</option>
-          <option value="4-Wheeler / Car">4-Wheelers</option>
+          <option value="2 wheelers">2 Wheelers</option>
+          <option value="4 wheelers">4 Wheelers</option>
         </select>
 
         <select bind:value={selectedCampus} class="filter-btn">
           <option value="all">All Campuses</option>
-          <option value="Liceo Main">Liceo Main</option>
-          <option value="RNP">RNP</option>
-          <option value="PASEO">PASEO</option>
+          <option value="Main campus">Main campus</option>
+          <option value="rnp campus">rnp campus</option>
+          <option value="Paseo">Paseo</option>
         </select>
       </div>
     </div>
@@ -618,7 +635,7 @@
               hdc: app.osa_dist_at,
               sec: app.security_checked_at,
               rel: app.sticker_released_at,
-              ins: app.sticker_installed_at,
+              receipt: app.receipt,
               exp: app.expires_at,
               change_vehicle_request: app.change_vehicle_request,
               is_change_vehicle: app.is_change_vehicle,
@@ -740,7 +757,7 @@
                       hdc: app.osa_dist_at,
                       sec: app.security_checked_at,
                       rel: app.sticker_released_at,
-                      ins: app.sticker_installed_at,
+                      receipt: app.receipt,
                       exp: app.expires_at,
                       change_vehicle_request: app.change_vehicle_request,
                       is_change_vehicle: app.is_change_vehicle,
@@ -793,7 +810,7 @@
                   hdc: app.osa_dist_at,
                   sec: app.security_checked_at,
                   rel: app.sticker_released_at,
-                  ins: app.sticker_installed_at,
+                  receipt: app.receipt,
                   exp: app.expires_at,
                   change_vehicle_request: app.change_vehicle_request,
                   is_change_vehicle: app.is_change_vehicle,

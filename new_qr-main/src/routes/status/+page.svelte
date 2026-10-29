@@ -24,6 +24,62 @@
     let app = $derived((data.application as any) || null);
     let changeRequest = $derived((data.changeRequest as any) || null);
     let skipDean = $derived(app ? ['visitor', 'concessionaire'].includes(app.role) : false);
+    // VPS applications skip the Security document review
+    let skipSec = $derived(app ? (app.role || '').toLowerCase() === 'vps' : false);
+    let stepOffset = $derived((skipDean ? 1 : 0) + (skipSec ? 1 : 0));
+
+    // Receipt upload state
+    let receiptFile = $state<File | null>(null);
+    let receiptPreview = $state<string | null>(null);
+    let receiptLoading = $state(false);
+    let receiptError = $state('');
+
+    function handleReceiptChange(e: Event) {
+        const input = e.target as HTMLInputElement;
+        receiptError = '';
+        if (receiptPreview) URL.revokeObjectURL(receiptPreview);
+        if (input.files && input.files[0]) {
+            const f = input.files[0];
+            if (!f.type.startsWith('image/')) {
+                alert('Only image files are allowed.');
+                input.value = '';
+                receiptFile = null;
+                receiptPreview = null;
+                return;
+            }
+            receiptFile = f;
+            receiptPreview = URL.createObjectURL(f);
+        } else {
+            receiptFile = null;
+            receiptPreview = null;
+        }
+    }
+
+    async function confirmReceipt() {
+        if (!receiptFile) {
+            receiptError = 'Please select an image of your payment receipt first.';
+            return;
+        }
+        receiptLoading = true;
+        receiptError = '';
+        try {
+            const formData = new FormData();
+            formData.append('receipt', receiptFile);
+            const res = await fetch('/api/receipt', { method: 'POST', body: formData });
+            const resData = await res.json();
+            if (!res.ok) {
+                receiptError = resData.error || 'Failed to upload receipt.';
+            } else {
+                receiptFile = null;
+                receiptPreview = null;
+                await invalidateAll();
+            }
+        } catch (e: any) {
+            receiptError = e.message || 'Network error.';
+        } finally {
+            receiptLoading = false;
+        }
+    }
 
     // Vehicle change modal state
     let changeModalOpen = $state(false);
@@ -121,38 +177,38 @@
         
         if (stepNum === 1) { // College Head Approval
             if (['visitor', 'concessionaire'].includes(app.role)) return 'done';
-            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
+            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
             if (s === 'dept_val' || s === 'pending') return 'active';
             return 'pending';
         }
 
         if (stepNum === 2) { // OSA Review and Schedule
-            if (['osa_validated', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
+            if (['osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
             if (s === 'dept_validated' || s === 'osa_val' || (['visitor', 'concessionaire'].includes(app.role) && s === 'pending')) return 'active';
             return 'pending';
         }
 
         if (stepNum === 3) { // OSA Checked Hardcopies
-            if (app.osa_dist_at || ['distributed', 'security_checked', 'sticker_released', 'sticker_installed', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
+            if (app.osa_dist_at || ['distributed', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
             if (['osa_validated'].includes(s)) return 'active'; 
             return 'pending';
         }
 
         if (stepNum === 4) { // Security Check Hardcopies
-            if (app.security_check_at || app.security_checked_at || ['security_checked', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
+            if (app.security_check_at || app.security_checked_at || ['security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
             if (s === 'distributed' || app.osa_dist_at) return 'active';
             return 'pending';
         }
 
-        if (stepNum === 5) { // OSA Release Sticker
-            if (app.sticker_released_at || ['sticker_released', 'sticker_installed', 'completed', 'approved'].includes(s)) return 'done';
-            if (s === 'security_checked' || app.security_check_at || app.security_checked_at) return 'active';
+        if (stepNum === 5) { // Payment and Receipt Upload
+            if (app.receipt || ['receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done';
+            if (s === 'security_checked') return 'active';
             return 'pending';
         }
 
-        if (stepNum === 6) { // Security Installed Sticker
-            if (app.sticker_installed_at || ['sticker_installed', 'approved'].includes(s)) return 'done';
-            if (s === 'sticker_released' || s === 'completed' || app.sticker_released_at) return 'active';
+        if (stepNum === 6) { // OSA Release Sticker
+            if (app.sticker_released_at || ['sticker_released', 'sticker_installed', 'completed', 'approved'].includes(s)) return 'done';
+            if (s === 'receipt_submitted') return 'active';
             return 'pending';
         }
 
@@ -278,6 +334,7 @@
           </div>
         </div>
 
+        {#if !skipSec}
         <div class="ps-connector"></div>
 
         <div class="progress-step" class:step-done={stepStatus(app, 4) === 'done'} class:step-active={stepStatus(app, 4) === 'active'} class:step-pending={stepStatus(app, 4) === 'pending'}>
@@ -296,6 +353,7 @@
             {/if}
           </div>
         </div>
+        {/if}
 
         <div class="ps-connector"></div>
 
@@ -304,14 +362,40 @@
             {#if stepStatus(app, 5) === 'done'}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
             {:else}
-              {skipDean ? 4 : 5}
+              {5 - stepOffset}
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 4 : 5} — Final Review and Sticker Release</span>
-            <span class="ps-desc">Return to the OSA Office for a review of the verification marks from Safety and Security. Settle the required payment at the Registrar's Office and claim your vehicle sticker.</span>
-            {#if app.sticker_released_at}
-              <div class="sched-pill sched-done">Released by OSA: {new Date(app.sticker_released_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
+            <span class="ps-label">Step {5 - stepOffset} — Payment and Receipt Upload</span>
+            <span class="ps-desc">You can now pay at the cashier and upload your payment receipt.</span>
+            {#if (app.status || '').toLowerCase() === 'security_checked'}
+              <div class="receipt-upload">
+                <input
+                  id="receipt-input"
+                  type="file"
+                  accept="image/*"
+                  onchange={handleReceiptChange}
+                  disabled={receiptLoading}
+                />
+                {#if receiptPreview}
+                  <img src={receiptPreview} alt="Receipt preview" style="max-width: 220px; max-height: 220px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 0.5rem; display: block;" />
+                {/if}
+                {#if receiptError}
+                  <p style="color: #dc2626; font-size: 0.8rem; margin: 0.5rem 0 0 0;">{receiptError}</p>
+                {/if}
+                <button
+                  id="confirm-receipt-btn"
+                  type="button"
+                  class="btn-reapply"
+                  style="margin-top: 0.75rem; cursor: pointer; border: none;"
+                  onclick={confirmReceipt}
+                  disabled={receiptLoading || !receiptFile}
+                >
+                  {receiptLoading ? 'Uploading…' : 'Confirm'}
+                </button>
+              </div>
+            {:else if app.receipt}
+              <div class="sched-pill sched-done">Receipt submitted</div>
             {/if}
           </div>
         </div>
@@ -323,14 +407,14 @@
             {#if stepStatus(app, 6) === 'done'}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
             {:else}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              {6 - stepOffset}
             {/if}
           </div>
           <div class="ps-info">
-            <span class="ps-label">Step {skipDean ? 5 : 6} — Vehicle Sticker Installation (Mandatory)</span>
-            <span class="ps-desc">Proceed to the Safety and Security Office to have your vehicle sticker installed. This step is mandatory to complete your vehicle registration process.</span>
-            {#if app.sticker_installed_at}
-              <div class="sched-pill sched-done">Installed: {new Date(app.sticker_installed_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})} — Registration Completed</div>
+            <span class="ps-label">Step {6 - stepOffset} — Sticker Release</span>
+            <span class="ps-desc">OSA will review your receipt and release your sticker. Once completed, claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.</span>
+            {#if app.sticker_released_at}
+              <div class="sched-pill sched-done">Released by OSA: {new Date(app.sticker_released_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
             {/if}
           </div>
         </div>
@@ -359,6 +443,8 @@
       exp: app.expires_at,
       dlv: app.osa_dist_at,
       rejection_reason: app.invalid_reason || null,
+      qr_code: app.qr_code,
+      qr_unique_code: app.qr_unique_code,
       documents: {
         id: app.doc_id,
         enrollment: app.doc_load,
@@ -368,13 +454,13 @@
         letter: app.doc_letter
       }
     }}
-    showQR={false}
+    showQR={['completed', 'approved', 'registered', 'sticker_installed'].includes((app.status || '').toLowerCase())}
     tab="status"
     showDocs={true}>
     </ApplicationCard>
 
     <!-- ── Vehicle Change Request Section ── -->
-    {#if app && (['completed', 'approved', 'sticker_installed', 'Sticker_Installed'].includes(app.status) || app.sticker_installed_at || changeRequest)}
+    {#if app && (['completed', 'approved', 'sticker_installed', 'Sticker_Installed'].includes(app.status) || changeRequest)}
       <div class="change-request-section">
         {#if changeRequest && ['pending', 'Pending'].includes(changeRequest.status)}
           <div class="cr-status-box cr-status-pending">
@@ -1140,6 +1226,29 @@
     }
     .ps-desc {
       font-size: 0.78rem;
+    }
+    .cr-action-bar {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 1rem;
+    }
+    .btn-change-vehicle {
+      width: 100%;
+      justify-content: center;
+    }
+    .modal-card {
+      padding: 1.25rem 1rem;
+      max-width: 95vw;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .ps-label {
+      font-size: 0.75rem;
+    }
+    .btn-reapply {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>

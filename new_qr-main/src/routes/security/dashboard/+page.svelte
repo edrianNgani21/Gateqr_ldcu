@@ -59,7 +59,7 @@
     guest: 'Guest'
   };
 
-  function getCampusRoleStats(campusLabel: string) {
+  function getCampusRoleStats(campusLabel: string, occupiedCount: number = 0) {
     const key = campusLabel === 'MAIN CAMPUS' ? 'Main Campus' : campusLabel;
     const breakdown = roleBreakdownByCampus[key] || {};
     const roles = [
@@ -76,10 +76,13 @@
     let total = 0;
     roles.forEach(r => { total += (breakdown[r] || 0); });
 
+    // When occupied has records/numbers, rates and total reflect occupied count
+    const denominator = occupiedCount > 0 ? occupiedCount : total;
+
     let accumulatedPct = 0;
     const items = roles.map(r => {
       const count = breakdown[r] || 0;
-      const pct = total > 0 ? (count / total) * 100 : 0;
+      const pct = denominator > 0 ? (count / denominator) * 100 : 0;
       const offsetPct = accumulatedPct;
       accumulatedPct += pct;
       return {
@@ -93,7 +96,7 @@
       };
     });
 
-    return { total, items };
+    return { total: denominator, items };
   }
   let hourlyChart = $derived((data.hourlyChart as number[]) || Array(24).fill(0));
   let flaggedAlerts = $derived((data.flaggedAlerts as any[]) || []);
@@ -158,7 +161,7 @@
     <!-- Stats Cards Grid with Role Percentage Diagrams -->
     <div class="stats-grid">
       {#each statCards as card}
-        {@const roleStats = getCampusRoleStats(card.label)}
+        {@const roleStats = getCampusRoleStats(card.label, card.capacity?.occupied ?? card.value ?? 0)}
         <div class="stat-card" style="--card-color: {card.color}; --card-bg: {card.bg};">
           {#if card.event}
             <div class="event-badge">

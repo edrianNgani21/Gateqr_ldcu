@@ -189,7 +189,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         if (tabParam) {
             const low = tabParam.toLowerCase();
             if (low.includes('doc') || low.includes('review')) initialTab = 'Document Review';
-            else if (low.includes('sticker') || low.includes('install')) initialTab = 'Sticker Installation';
             else if (low.includes('reg') && !low.includes('revok') && !low.includes('reject')) initialTab = 'Registered Vehicles';
             else if (low.includes('reject') || low.includes('revok')) initialTab = 'Rejected or Revoked Accounts & Applications';
             else initialTab = tabParam;

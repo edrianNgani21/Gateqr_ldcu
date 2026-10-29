@@ -119,7 +119,7 @@ export async function POST({ request, locals }: RequestEvent) {
                     osa_dist_at: null,
                     security_check_at: null,
                     sticker_released_at: null,
-                    sticker_installed_at: null
+                    receipt: null
                 })
                 .eq('registration_id', changeRequest.registration_id);
 

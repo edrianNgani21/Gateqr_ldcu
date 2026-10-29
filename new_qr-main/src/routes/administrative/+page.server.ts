@@ -91,6 +91,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         (app.agreement_form && typeof app.agreement_form === 'string' && app.agreement_form.startsWith('http') ? app.agreement_form : null) || 
                         (app.school_id && typeof app.school_id === 'string' && app.school_id.startsWith('http') ? app.school_id : null) || null,
                 doc_load: app.enrollment_form || null,
+                enrollment_form: app.enrollment_form || null,
                 doc_or: app.vehicle_information?.or || (app.vehicle_information as any)?.or_document || null,
                 doc_cr: app.vehicle_information?.cr || (app.vehicle_information as any)?.cr_document || null,
                 doc_license: app.drivers_license || (app.vehicle_information as any)?.drivers_license || null,

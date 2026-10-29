@@ -1,5 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { onMount } from "svelte";
+  import { supabaseClient } from "$lib/supabaseClient";
 
   // First to show is "apply" as requested: "the first to show is the Apply For Sticker"
   let activeMode = $state<'apply' | 'admin'>('apply');
@@ -49,6 +51,71 @@
       loading = false;
     }
   }
+
+  // Admin Google sign-in (Supabase Auth Google provider)
+  async function handleGoogleLogin() {
+    loading = true;
+    error = "";
+    const { error: oauthError } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/login`,
+        queryParams: { prompt: "select_account" },
+      },
+    });
+    if (oauthError) {
+      error = oauthError.message || "Could not start Google sign-in.";
+      loading = false;
+    }
+  }
+
+  // Complete Google sign-in after redirect back from Google
+  onMount(async () => {
+    const hash = window.location.hash || "";
+    const query = window.location.search || "";
+    const returnedFromGoogle = hash.includes("access_token") || hash.includes("error_description") || query.includes("error_description");
+    if (!returnedFromGoogle) return;
+
+    activeMode = "admin";
+    loading = true;
+
+    try {
+      const params = new URLSearchParams(hash.replace(/^#/, "") || query.replace(/^\?/, ""));
+      const oauthErr = params.get("error_description");
+      if (oauthErr) {
+        error = oauthErr;
+        return;
+      }
+
+      const { data } = await supabaseClient.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) {
+        error = "Google sign-in failed. Please try again.";
+        return;
+      }
+
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: accessToken }),
+      });
+      const result = await res.json();
+
+      // The app uses its own session cookie; clear the Supabase browser session
+      await supabaseClient.auth.signOut({ scope: "local" });
+      history.replaceState(null, "", window.location.pathname);
+
+      if (res.ok) {
+        goto(result.redirectUrl || "/osa/dashboard");
+        return;
+      }
+      error = result.error || "Google sign-in was not authorized.";
+    } catch (err) {
+      error = "A network error occurred. Please check your connection.";
+    } finally {
+      loading = false;
+    }
+  });
 
   // Handle Apply for Sticker / Register / Check Status
   async function handleApplicantRegister(e: Event) {
@@ -284,6 +351,34 @@
             </button>
           </div>
         </form>
+
+        <!-- Google sign-in (reuses existing switch-button styling) -->
+        <div class="switch-section">
+          <div class="divider-line">
+            <span>OR</span>
+          </div>
+          <button
+            type="button"
+            class="btn-admin-switch"
+            onclick={handleGoogleLogin}
+            disabled={loading}
+          >
+            <div class="switch-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M16 12h-4"/>
+                <path d="M17 9.5A6 6 0 1 0 17 14.5"/>
+              </svg>
+            </div>
+            <div class="switch-label-group">
+              <span class="switch-primary">Sign in with Google</span>
+              <span class="switch-secondary">Use your registered institutional email</span>
+            </div>
+            <svg class="switch-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M9 18l6-6-6-6"/>
+            </svg>
+          </button>
+        </div>
 
         <!-- Divider with Switch Button Back to Apply for Sticker -->
         <div class="switch-section">

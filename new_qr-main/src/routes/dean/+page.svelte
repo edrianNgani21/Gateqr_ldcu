@@ -11,7 +11,34 @@
   let apps = $derived(applicationsState);
 
   let searchQuery = $state("");
+  let roleFilter = $state("all");
+  let vehicleTypeFilter = $state("all");
+  let selectedCampus = $state("all");
   let approvingId = $state<number | null>(null);
+  let showDocPopup = $state<string | null>(null);
+
+  function isValidDoc(url: string | null | undefined): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const t = url.trim().toLowerCase();
+    if (['pending_or', 'pending_cr', 'pending_license', 'pending_enrollment', 'n/a', 'pending', 'null', 'undefined', 'not specified', '-', ''].includes(t)) {
+      return false;
+    }
+    if (/^\d{4}-\d+$/.test(t) || /^\d+$/.test(t)) {
+      return false;
+    }
+    return t.startsWith('http://') || t.startsWith('https://') || t.startsWith('data:') || t.startsWith('/');
+  }
+
+  function isPdf(url: string | null | undefined): boolean {
+    if (!url || typeof url !== 'string') return false;
+    return url.toLowerCase().includes('.pdf');
+  }
+
+  function openDoc(url: string | null | undefined) {
+    if (url && isValidDoc(url)) {
+      showDocPopup = url;
+    }
+  }
 
   // Pure realtime WebSocket sync for Dean portal without background polling
   $effect(() => {
@@ -27,6 +54,49 @@
   let displayedApps = $derived.by(() => {
     let filtered = currentTabApps;
 
+    if (roleFilter !== "all") {
+      filtered = filtered.filter((a: any) => {
+        const r = (a.role || "").toLowerCase().trim();
+        if (roleFilter === "student") return r === "student";
+        if (roleFilter === "staff") return r === "staff" || r === "employee";
+        if (roleFilter === "faculty") return r === "faculty";
+        if (roleFilter === "concessionnare" || roleFilter === "concessionaire") return r === "concessionaire" || r === "concessionnare" || r === "concecioonaire";
+        if (roleFilter === "supplier") return r === "supplier";
+        if (roleFilter === "administrator") return r === "administrator" || r === "admin";
+        if (roleFilter === "vps") return r === "vps";
+        return r === roleFilter.toLowerCase();
+      });
+    }
+
+    if (vehicleTypeFilter !== "all") {
+      filtered = filtered.filter((a: any) => {
+        const rawType = (a.vehicle_type || a.vehicle_information?.type || "").toLowerCase().trim();
+        if (vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
+          return rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike");
+        }
+        if (vehicleTypeFilter === "4 wheelers" || vehicleTypeFilter === "4-wheelers" || vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") {
+          return rawType.includes("4") || rawType.includes("car");
+        }
+        return rawType === vehicleTypeFilter.toLowerCase();
+      });
+    }
+
+    if (selectedCampus !== "all") {
+      filtered = filtered.filter((a: any) => {
+        const c = (a.campus || "").toLowerCase().trim();
+        if (selectedCampus === 'Main campus' || selectedCampus === 'main') {
+          return c.includes('main');
+        }
+        if (selectedCampus === 'rnp campus' || selectedCampus === 'rnp') {
+          return c.includes('rnp');
+        }
+        if (selectedCampus === 'Paseo' || selectedCampus === 'paseo') {
+          return c.includes('paseo');
+        }
+        return c === selectedCampus.toLowerCase().trim();
+      });
+    }
+
     if (searchQuery && searchQuery.trim()) {
       const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
       filtered = filtered.filter((a) => {
@@ -40,6 +110,8 @@
           a.department_name,
           a.department?.department_name,
           a.department?.department,
+          a.campus,
+          a.role,
           data.departmentName
         ].filter(Boolean).map(String).join(" ").toLowerCase();
 
@@ -112,7 +184,7 @@
     </div>
   </div>
 
-  <!-- Search Toolbar (Campus, Vehicle Types, and Roles removed) -->
+  <!-- Search & Filter Controls Toolbar -->
   <div class="controls-row">
     <div class="search-wrap">
       <svg
@@ -142,6 +214,32 @@
         >×</button>
       {/if}
     </div>
+
+    <div class="filter-group">
+      <select bind:value={roleFilter} class="filter-btn">
+        <option value="all">All Roles</option>
+        <option value="student">Student</option>
+        <option value="staff">Staff</option>
+        <option value="faculty">Faculty</option>
+        <option value="concessionnare">Concessionaire</option>
+        <option value="supplier">Supplier</option>
+        <option value="administrator">Administrator</option>
+        <option value="vps">VPS</option>
+      </select>
+
+      <select bind:value={vehicleTypeFilter} class="filter-btn">
+        <option value="all">All Vehicles</option>
+        <option value="2 wheelers">2 Wheelers</option>
+        <option value="4 wheelers">4 Wheelers</option>
+      </select>
+
+      <select bind:value={selectedCampus} class="filter-btn">
+        <option value="all">All Campuses</option>
+        <option value="Main campus">Main campus</option>
+        <option value="rnp campus">rnp campus</option>
+        <option value="Paseo">Paseo</option>
+      </select>
+    </div>
   </div>
 
   <!-- Cards List showing only name, email, department, and Approve button -->
@@ -153,6 +251,8 @@
       {@const deptName = app.department_name || app.department?.department_name || app.department?.department || data.departmentName || 'Department'}
       {@const isApproving = approvingId === appId}
       {@const isPending = ['dept_val', 'pending'].includes((app.status || '').toLowerCase())}
+      {@const studentIdDoc = app.doc_id || (typeof app.agreement_form === 'string' && app.agreement_form.startsWith('http') ? app.agreement_form : null) || (typeof app.school_id === 'string' && app.school_id.startsWith('http') ? app.school_id : null)}
+      {@const enrollmentDoc = app.enrollment_form || app.doc_load}
 
       <div class="dean-app-card">
         <div class="card-left-section">
@@ -178,6 +278,42 @@
                 <span class="meta-label">Department:</span>
                 <span class="meta-value">{deptName}</span>
               </div>
+              <div class="meta-field">
+                <span class="meta-label">Year Level:</span>
+                <span class="meta-value year-level-badge">{app.year_level && app.year_level !== '-' ? app.year_level : 'N/A'}</span>
+              </div>
+            </div>
+
+            <!-- Documents: Enrollment Form & Student ID -->
+            <div class="applicant-docs-row">
+              <span class="docs-label">Documents:</span>
+              <button
+                type="button"
+                class="btn-doc-view"
+                class:has-doc={isValidDoc(studentIdDoc)}
+                disabled={!isValidDoc(studentIdDoc)}
+                onclick={() => openDoc(studentIdDoc)}
+                title={isValidDoc(studentIdDoc) ? 'View Student ID Document' : 'Student ID Not Uploaded'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>
+                </svg>
+                <span>Student ID</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn-doc-view"
+                class:has-doc={isValidDoc(enrollmentDoc)}
+                disabled={!isValidDoc(enrollmentDoc)}
+                onclick={() => openDoc(enrollmentDoc)}
+                title={isValidDoc(enrollmentDoc) ? 'View Enrollment Form Document' : 'Enrollment Form Not Uploaded'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span>Enrollment Form</span>
+              </button>
             </div>
           </div>
         </div>
@@ -236,6 +372,42 @@
     {/each}
   </div>
 </AppShell>
+
+{#if showDocPopup}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="doc-modal-overlay" onclick={() => (showDocPopup = null)} role="dialog" aria-modal="true" tabindex="-1">
+    <div class="doc-modal-content" onclick={(e) => e.stopPropagation()}>
+      <div class="doc-modal-header">
+        <h4 class="doc-modal-title">Document Preview</h4>
+        <button class="close-modal" aria-label="Close document viewer" onclick={() => (showDocPopup = null)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="doc-image-wrap">
+        {#if isPdf(showDocPopup)}
+          <iframe src={showDocPopup} title="Document Preview" class="doc-preview-frame"></iframe>
+          <div class="doc-pdf-fallback">
+            <a href={showDocPopup} target="_blank" rel="noopener noreferrer" class="doc-open-link">
+              Open original PDF in new tab ↗
+            </a>
+          </div>
+        {:else}
+          <img src={showDocPopup} alt="Document Preview" class="doc-preview-img" onerror={(e) => {
+            (e.currentTarget as HTMLImageElement).src = '/liceo-logo.png';
+          }} />
+          <div class="doc-pdf-fallback">
+            <a href={showDocPopup} target="_blank" rel="noopener noreferrer" class="doc-open-link">
+              Open original document in new tab ↗
+            </a>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* Welcome Banner matching Dashboard aesthetic */
@@ -364,6 +536,51 @@
 
   .search-clear:hover {
     color: var(--text-primary);
+  }
+
+  .filter-group {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.85rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 42px;
+    box-sizing: border-box;
+  }
+
+  .filter-btn:hover {
+    border-color: #8B1A3C;
+  }
+
+  .filter-btn:focus {
+    border-color: #8B1A3C;
+    box-shadow: 0 0 0 2px rgba(139, 26, 60, 0.12);
+  }
+
+  @media (max-width: 768px) {
+    .controls-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .filter-group {
+      flex-wrap: wrap;
+    }
+    .filter-btn {
+      flex: 1 1 calc(50% - 0.5rem);
+    }
   }
 
   /* Cards List */
@@ -595,8 +812,183 @@
     transition: background 0.2s;
   }
 
-  .btn-clear-empty:hover {
-    background: #701530;
+  .year-level-badge {
+    background: #e0f2fe;
+    color: #0369a1;
+    font-weight: 700;
+    padding: 0.15rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    border: 1px solid #bae6fd;
+    display: inline-block;
+  }
+
+  .applicant-docs-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  .docs-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .btn-doc-view {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.35rem 0.75rem;
+    background: #f8fafc;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 8px;
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+  }
+
+  .btn-doc-view.has-doc {
+    background: #fdf2f4;
+    border-color: rgba(139, 26, 60, 0.35);
+    color: #8B1A3C;
+  }
+
+  .btn-doc-view.has-doc:hover:not(:disabled) {
+    background: #8B1A3C;
+    border-color: #8B1A3C;
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(139, 26, 60, 0.2);
+  }
+
+  .btn-doc-view:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #94a3b8;
+  }
+
+  /* Document Modal */
+  .doc-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+    animation: fadeIn 0.15s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .doc-modal-content {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 1.25rem;
+    position: relative;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 92vw;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(16px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .doc-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .doc-modal-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .close-modal {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #64748b;
+    transition: all 0.15s;
+  }
+
+  .close-modal:hover {
+    background: #8B1A3C;
+    color: #ffffff;
+    border-color: #8B1A3C;
+  }
+
+  .doc-image-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .doc-preview-img {
+    max-width: 88vw;
+    max-height: 72vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .doc-preview-frame {
+    width: 80vw;
+    height: 72vh;
+    border: none;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .doc-pdf-fallback {
+    text-align: center;
+    padding-top: 0.25rem;
+  }
+
+  .doc-open-link {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #8B1A3C;
+    text-decoration: underline;
+    transition: color 0.15s;
+  }
+
+  .doc-open-link:hover {
+    color: #701530;
   }
 
   /* Responsive Adjustments */
@@ -635,6 +1027,33 @@
     }
     .applicant-avatar {
       display: none;
+    }
+    .filter-btn {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+    .btn-doc-view {
+      flex: 1 1 calc(50% - 0.5rem);
+      justify-content: center;
+    }
+    .applicant-name-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.35rem;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .filter-group {
+      flex-direction: column;
+      width: 100%;
+    }
+    .btn-doc-view {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+    .welcome-banner {
+      padding: 0.85rem;
     }
   }
 </style>

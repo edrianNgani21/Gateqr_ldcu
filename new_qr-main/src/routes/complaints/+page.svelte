@@ -568,4 +568,44 @@
     font-family: inherit;
   }
   .btn-delete:hover { background: rgba(220,38,38,0.08); }
+
+  @media (max-width: 768px) {
+    .welcome-banner {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.25rem;
+    }
+    .wb-actions-right {
+      width: 100%;
+    }
+    .btn-portal-back {
+      width: 100%;
+      justify-content: center;
+    }
+    .card-footer {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .btn-delete {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .card-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.4rem;
+    }
+    .complaint-form-card {
+      padding: 1rem;
+    }
+    .btn-submit {
+      width: 100%;
+      justify-content: center;
+    }
+  }
 </style>

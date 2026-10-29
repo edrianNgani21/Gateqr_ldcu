@@ -184,4 +184,15 @@
     border-radius: var(--radius-sm); cursor: pointer; font-size: 0.75rem; font-weight: 600;
   }
   .btn-success:hover { background: #15803d; }
+
+  @media (max-width: 480px) {
+    .data-table th, .data-table td {
+      padding: 0.65rem 0.5rem;
+      font-size: 0.78rem;
+    }
+    .status-badge {
+      font-size: 0.68rem;
+      padding: 0.2rem 0.45rem;
+    }
+  }
 </style>

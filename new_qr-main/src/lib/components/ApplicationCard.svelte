@@ -25,7 +25,7 @@
   } = $props();
 
   let expanded = $state(startExpanded);
-  let effectiveShowQR = $derived(tab === 'status' ? false : showQR);
+  let effectiveShowQR = $derived(showQR);
 
   let showDocPopup = $state<string | null>(null);
 
@@ -80,7 +80,7 @@
   };
   let roleColor = $derived(roleColors[role] ?? "#6b7280");
 
-  const excludedKeys = ["documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle"];
+  const excludedKeys = ["documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
     if (qr && typeof qr === 'string') {
@@ -279,39 +279,24 @@
           {/if}
         </div>
 
-        <!-- Timeline badges -->
-        <div class="timeline-badges">
-          {#if appStatus}
-            <StatusBadge code="STS" date={statusLabel} variant={statusVariant} />
-          {/if}
-          {#if data.crd}
-            <StatusBadge code="CRD" date={formatDate(data.crd)} />
-          {/if}
-          {#if data.dpt}
-            <StatusBadge code="DPT" date={formatDate(data.dpt)} variant="success" />
-          {/if}
-          {#if data.osa}
-            <StatusBadge code="OSA" date={formatDate(data.osa)} variant="success" />
-          {/if}
-          {#if data.sch}
-            <StatusBadge code="SCH" date={formatDate(data.sch)} variant="warning" />
-          {/if}
-          {#if data.hdc}
-            <StatusBadge code="HDC" date={formatDate(data.hdc)} variant="success" />
-          {/if}
-          {#if data.sec}
-            <StatusBadge code="SEC" date={formatDate(data.sec)} variant="success" />
-          {/if}
-          {#if data.rel}
-            <StatusBadge code="REL" date={formatDate(data.rel)} variant="success" />
-          {/if}
-          {#if data.ins}
-            <StatusBadge code="INS" date={formatDate(data.ins)} variant="success" />
-          {/if}
-          {#if data.exp}
-            <StatusBadge code="EXP" date={formatDate(data.exp)} variant="warning" />
-          {/if}
-        </div>
+        <!-- Receipt (uploaded by applicant) -->
+        {#if data.receipt}
+          <div class="detail-section">
+            <span class="section-label">Receipt</span>
+            <button
+              type="button"
+              class="qr-preview-trigger"
+              onclick={() => (showDocPopup = data.receipt)}
+              title="Click to view receipt"
+            >
+              {#if isPdf(data.receipt)}
+                <span>View receipt (PDF)</span>
+              {:else}
+                <img src={data.receipt} alt="Payment receipt" width="96" height="96" class="qr-img" style="object-fit: cover;" />
+              {/if}
+            </button>
+          </div>
+        {/if}
 
         <!-- Documents -->
         {#if showDocs}

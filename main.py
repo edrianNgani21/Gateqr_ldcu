@@ -1615,7 +1615,7 @@ def render_side(img, side, offset_x=0):
         
         btn_text = "LET IN" if side.type == 'in' else "LET OUT"
         draw_btn(img, (25, H//2 - 65, 140, 48), btn_text)
-        draw_btn(img, (185, H//2 - 65, 110, 48), "SKIP", (0,0,200))
+        draw_btn(img, (185, H//2 - 65, 110, 48), "DENY", (0,0,200))
         
     elif side.state == GateState.INVALID_QR:
         draw_text(img, "INVALID QR CODE", (25, 80), 0.8, (0,0,255), 2)
@@ -1738,14 +1738,14 @@ def render_side(img, side, offset_x=0):
 
     elif side.state == GateState.MANUAL_TYPE:
         draw_text(img, "MANUAL ENTRY", (25, 80), 0.8, (255,255,255), 2)
-        draw_btn(img, (25, 110, 120, 50), "REG ID", (150,100,50))
-        draw_btn(img, (160, 110, 100, 50), "GUEST", (100,150,50))
-        draw_btn(img, (280, 110, 150, 50), "VIP ACCESS", (200,50,200))
+        draw_btn(img, (25, 110, 210, 50), "REGISTERED ACCESS", (150,100,50))
+        draw_btn(img, (250, 110, 100, 50), "GUEST", (100,150,50))
+        draw_btn(img, (365, 110, 150, 50), "VIP ACCESS", (200,50,200))
         draw_btn(img, (25, H//2 - 65, 100, 48), "CANCEL", (100,100,100))
         
     elif side.state == GateState.MANUAL_REG:
-        draw_text(img, "ENTER REG ID (Type on keyboard)", (25, 80), 0.7)
-        cv2.rectangle(img, (25, 100), (320, 140), (255,255,255), 1)
+        draw_text(img, "ENTER PLATE NUMBER (Type on keyboard)", (25, 80), 0.7)
+        cv2.rectangle(img, (25, 100), (360, 140), (255,255,255), 1)
         draw_text(img, side.form_data[0] + "_", (35, 125), 0.7)
         draw_btn(img, (25, H//2 - 65, 120, 48), "LOOKUP", (50,200,50))
         draw_btn(img, (160, H//2 - 65, 100, 48), "CANCEL", (100,100,100))
@@ -1922,11 +1922,12 @@ def mouse_callback(event, x, y, flags, param):
             submit_vip(side)
             
     elif side.state == GateState.MANUAL_TYPE:
-        if in_rect(x, y, (25, 110, 120, 50)): # REG ID
+        if in_rect(x, y, (25, 110, 210, 50)): # REGISTERED ACCESS
             side.state = GateState.MANUAL_REG
-        elif in_rect(x, y, (160, 110, 100, 50)): # GUEST
+            side.form_data = ["", "", ""]
+        elif in_rect(x, y, (250, 110, 100, 50)): # GUEST
             side.state = GateState.MANUAL_GUEST_IN if side.type == 'in' else GateState.MANUAL_GUEST_OUT
-        elif in_rect(x, y, (280, 110, 150, 50)): # VIP ACCESS
+        elif in_rect(x, y, (365, 110, 150, 50)): # VIP ACCESS
             side.form_data = ["VIP", "VIP", "VIP Access"]
             submit_vip(side)
         elif in_rect(x, y, (25, H//2 - 65, 100, 48)):
@@ -1934,25 +1935,66 @@ def mouse_callback(event, x, y, flags, param):
             
     elif side.state == GateState.MANUAL_REG:
         if in_rect(x, y, (25, H//2 - 65, 120, 48)): # LOOKUP
-            reg_id = side.form_data[0].strip()
-            if reg_id:
+            plate_input = side.form_data[0].strip()
+            if plate_input:
                 try:
-                    response = supabase.table('registration').select('*').eq('registration_id', reg_id).execute()
-                    if response.data:
-                        reg = response.data[0]
+                    clean_input = re.sub(r'[\s\-]', '', plate_input).upper()
+                    reg = None
+                    matched_vehicle_data = {}
+
+                    # 1. Search in vehicle_information table by plate_number (ignoring hyphens and spaces)
+                    try:
+                        v_res = supabase.table('vehicle_information').select('*').execute()
+                        if v_res.data:
+                            for v_item in v_res.data:
+                                p_raw = str(v_item.get('plate_number') or '').strip().upper()
+                                if re.sub(r'[\s\-]', '', p_raw) == clean_input:
+                                    matched_vehicle_data = v_item
+                                    # Find active registration with this vehicle_information_id
+                                    r_res = supabase.table('registration').select('*')\
+                                        .eq('vehicle_information_id', v_item['vehicle_information_id'])\
+                                        .not_in('status', ['rejected', 'revoked'])\
+                                        .execute()
+                                    if r_res.data:
+                                        reg = r_res.data[0]
+                                    break
+                    except Exception as ve:
+                        print(f"DEBUG: Error querying vehicle_information: {ve}")
+
+                    # 2. Fallback: Search directly in registration table if plate stored there or by registration_id
+                    if not reg:
+                        try:
+                            r_all = supabase.table('registration').select('*').not_in('status', ['rejected', 'revoked']).execute()
+                            if r_all.data:
+                                for r_item in r_all.data:
+                                    p_raw = str(r_item.get('plate_number') or r_item.get('vehicle_plate') or '').strip().upper()
+                                    if p_raw and re.sub(r'[\s\-]', '', p_raw) == clean_input:
+                                        reg = r_item
+                                        v_id = r_item.get('vehicle_information_id')
+                                        if v_id and not matched_vehicle_data:
+                                            v_sub = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_id).execute()
+                                            if v_sub.data:
+                                                matched_vehicle_data = v_sub.data[0]
+                                        break
+                                    # Also allow fallback match on registration_id
+                                    if str(r_item.get('registration_id')) == plate_input:
+                                        reg = r_item
+                                        break
+                        except Exception as re_err:
+                            print(f"DEBUG: Error querying registration fallback: {re_err}")
+
+                    if reg:
                         side.data = reg
                         side.snapshot = side.snapshot if side.snapshot is not None else np.zeros((H//2, W, 3), dtype=np.uint8)
                         side.logged_status = "REGISTERED"
-                        
-                        try:
-                            vehicle_info_id = reg.get('vehicle_information_id')
-                            if vehicle_info_id:
-                                vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
-                                side.vehicle_data = vehicle_response.data[0] if vehicle_response.data else {}
-                            else:
+                        side.vehicle_data = matched_vehicle_data
+                        if not side.vehicle_data and reg.get('vehicle_information_id'):
+                            try:
+                                v_res = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', reg.get('vehicle_information_id')).execute()
+                                if v_res.data:
+                                    side.vehicle_data = v_res.data[0]
+                            except:
                                 side.vehicle_data = {}
-                        except:
-                            side.vehicle_data = {}
                         
                         # Cross-campus open log check for duplicate entry
                         open_cross_log = None
@@ -2086,7 +2128,7 @@ def mouse_callback(event, x, y, flags, param):
                             side.state = GateState.DETECTED
                     else:
                         side.state = GateState.INVALID_QR
-                        side.data = reg_id
+                        side.data = f"PLATE NOT FOUND: {plate_input}"
                 except Exception as e:
                     side.state = GateState.API_ERROR
                     side.api_error = f"Lookup failed: {str(e)}"

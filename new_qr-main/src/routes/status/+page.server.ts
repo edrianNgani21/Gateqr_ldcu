@@ -87,7 +87,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             vehicle_type: applications.vehicle_information?.type || '-'
         } : null;
 
-        if (application) {
+        // Only expose QR code once application has reached registered vehicle status (completed, approved, registered, or sticker_installed)
+        if (application && !['completed', 'approved', 'registered', 'sticker_installed'].includes((application.status || '').toLowerCase())) {
             delete (application as any).qr_code;
             delete (application as any).qr_unique_code;
         }

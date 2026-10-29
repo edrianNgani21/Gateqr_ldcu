@@ -162,6 +162,12 @@ export const load: PageServerLoad = async ({ locals }) => {
         const countedRnp = new Set<string | number>();
         const countedPaseo = new Set<string | number>();
 
+        const roleBreakdownByCampus: Record<string, Record<string, number>> = {
+            'Main Campus': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
+            'RNP': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
+            'PASEO': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 }
+        };
+
         activeInsideLogs.forEach((log: any) => {
             if (log.check_out) return;
             const st = (log.logged_status || '').toLowerCase();
@@ -179,44 +185,6 @@ export const load: PageServerLoad = async ({ locals }) => {
             ).toLowerCase();
             const is2W = vType.includes('2') || vType.includes('motorcycle') || vType.includes('bike') || vType.includes('scooter');
 
-            const c = (log.campus || log.campus_gate || '').toLowerCase();
-            if (c.includes('rnp')) {
-                if (!countedRnp.has(vehicleKey)) {
-                    countedRnp.add(vehicleKey);
-                    rnpCampusPresence++;
-                    if (is2W) rnp2W++; else rnp4W++;
-                }
-            } else if (c.includes('paseo')) {
-                if (!countedPaseo.has(vehicleKey)) {
-                    countedPaseo.add(vehicleKey);
-                    paseoCampusPresence++;
-                    if (is2W) paseo2W++; else paseo4W++;
-                }
-            } else {
-                if (!countedMain.has(vehicleKey)) {
-                    countedMain.add(vehicleKey);
-                    mainCampusPresence++;
-                    if (is2W) main2W++; else main4W++;
-                }
-            }
-        });
-
-        const hourlyChart = Array(24).fill(0);
-        const roleBreakdownByCampus: Record<string, Record<string, number>> = {
-            'Main Campus': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
-            'RNP': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 },
-            'PASEO': { student: 0, faculty: 0, staff: 0, administrator: 0, concessionaire: 0, supplier: 0, vps: 0, vip: 0, guest: 0 }
-        };
-
-        todayLogs.forEach((log: any) => {
-            const timeStr = log.check_in || log.created_at;
-            if (timeStr) {
-                const hour = new Date(timeStr).getHours();
-                if (hour >= 0 && hour < 24) {
-                    hourlyChart[hour]++;
-                }
-            }
-
             const rawRole = (log.registration?.role || log.role || (log.vip_access ? 'vip' : '')).toLowerCase();
             let role = 'student';
             if (log.guest_id && !log.registration) role = 'guest';
@@ -228,18 +196,47 @@ export const load: PageServerLoad = async ({ locals }) => {
             else if (rawRole.includes('vps')) role = 'vps';
             else if (rawRole.includes('vip') || log.vip_access) role = 'vip';
             else if (rawRole.includes('student')) role = 'student';
+            else if (log.guest_id || st.includes('guest')) role = 'guest';
             else role = 'student';
 
-            const logCampus = (log.campus || log.campus_gate || 'Main Campus');
-            let mappedCampus = 'Main Campus';
-            if (logCampus.toLowerCase().includes('rnp')) mappedCampus = 'RNP';
-            else if (logCampus.toLowerCase().includes('paseo')) mappedCampus = 'PASEO';
-            
-            if (roleBreakdownByCampus[mappedCampus]) {
-                if (roleBreakdownByCampus[mappedCampus][role] !== undefined) {
-                    roleBreakdownByCampus[mappedCampus][role]++;
-                } else {
-                    roleBreakdownByCampus[mappedCampus].student++;
+            const c = (log.campus || log.campus_gate || '').toLowerCase();
+            if (c.includes('rnp')) {
+                if (!countedRnp.has(vehicleKey)) {
+                    countedRnp.add(vehicleKey);
+                    rnpCampusPresence++;
+                    if (is2W) rnp2W++; else rnp4W++;
+                    if (roleBreakdownByCampus['RNP'][role] !== undefined) {
+                        roleBreakdownByCampus['RNP'][role]++;
+                    }
+                }
+            } else if (c.includes('paseo')) {
+                if (!countedPaseo.has(vehicleKey)) {
+                    countedPaseo.add(vehicleKey);
+                    paseoCampusPresence++;
+                    if (is2W) paseo2W++; else paseo4W++;
+                    if (roleBreakdownByCampus['PASEO'][role] !== undefined) {
+                        roleBreakdownByCampus['PASEO'][role]++;
+                    }
+                }
+            } else {
+                if (!countedMain.has(vehicleKey)) {
+                    countedMain.add(vehicleKey);
+                    mainCampusPresence++;
+                    if (is2W) main2W++; else main4W++;
+                    if (roleBreakdownByCampus['Main Campus'][role] !== undefined) {
+                        roleBreakdownByCampus['Main Campus'][role]++;
+                    }
+                }
+            }
+        });
+
+        const hourlyChart = Array(24).fill(0);
+        todayLogs.forEach((log: any) => {
+            const timeStr = log.check_in || log.created_at;
+            if (timeStr) {
+                const hour = new Date(timeStr).getHours();
+                if (hour >= 0 && hour < 24) {
+                    hourlyChart[hour]++;
                 }
             }
         });
