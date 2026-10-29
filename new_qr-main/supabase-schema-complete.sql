@@ -364,7 +364,9 @@ SET search_path = public
 AS $$
 BEGIN
   IF TG_TABLE_NAME = 'registration' THEN
-    NEW.qr_unique_code := COALESCE(NEW.qr_unique_code, NEW.qr_code);
+    -- New applications store qr_code = 'PENDING' until OSA schedules them; never copy that
+    -- placeholder, or every second pending application violates idx_registration_unique_qr_code
+    NEW.qr_unique_code := NULLIF(COALESCE(NEW.qr_unique_code, NULLIF(NEW.qr_code, 'PENDING')), 'PENDING');
   ELSIF TG_TABLE_NAME = 'vehicle_log' THEN
     IF NEW.campus IS NULL OR NEW.campus = '' OR NEW.campus = 'Main Campus' THEN
       NEW.campus := CASE NEW.campus_gate WHEN 'rnp' THEN 'RNP' WHEN 'paseo' THEN 'PASEO' ELSE 'Main Campus' END;
