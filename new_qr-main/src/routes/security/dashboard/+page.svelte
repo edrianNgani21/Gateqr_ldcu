@@ -333,63 +333,39 @@
       </div>
 
       {#if flaggedAlerts.length > 0}
-        <div class="table-container">
-          <table class="flagged-table">
-            <thead>
-              <tr>
-                <th>Date &amp; Time</th>
-                <th>Alert / Reason</th>
-                <th>Plate Number</th>
-                <th>Driver / Role</th>
-                <th>Campus</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each flaggedAlerts as alert (alert.id)}
-                <tr class:new-alert={newAlertIds.has(String(alert.id))}>
-                  <td class="td-datetime">
-                    <span class="date-text">{new Date(alert.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                    <span class="time-text">{new Date(alert.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </td>
-                  <td>
-                    <div class="alert-cell">
-                      <span class="alert-name-row">
-                        <span class="reason-tag" class:danger={alert.alert !== 'Violation'}>{alert.alert}</span>
-                        {#if newAlertIds.has(String(alert.id))}<span class="new-badge">NEW</span>{/if}
-                      </span>
-                      <span class="alert-detail">{alert.reason}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span class="plate-code">{alert.plate}</span>
-                  </td>
-                  <td>
-                    <div class="user-cell">
-                      <span class="user-name">{alert.name}</span>
-                      <span class="user-role">{alert.role}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      class="campus-tag"
-                      class:rnp={alert.campus?.toLowerCase().includes('rnp')}
-                      class:paseo={alert.campus?.toLowerCase().includes('paseo')}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                      </svg>
-                      {alert.campus || 'Main Campus'}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="status-badge-chip">{alert.status}</span>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+        <ul class="alert-list">
+          {#each flaggedAlerts as alert (alert.id)}
+            <li class="alert-item" class:new-alert={newAlertIds.has(String(alert.id))}>
+              <div class="alert-top">
+                <span class="alert-name-row">
+                  <span class="reason-tag" class:danger={alert.alert !== 'Violation'}>{alert.alert}</span>
+                  {#if alert.status && alert.status !== alert.alert}<span class="status-badge-chip">{alert.status}</span>{/if}
+                  {#if newAlertIds.has(String(alert.id))}<span class="new-badge">NEW</span>{/if}
+                </span>
+                <time class="alert-time" datetime={alert.time}>
+                  {new Date(alert.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  · {new Date(alert.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </time>
+              </div>
+              <p class="alert-detail">{alert.reason}</p>
+              <div class="alert-meta">
+                <span class="plate-code">{alert.plate}</span>
+                <span class="user-name">{alert.name}</span>
+                <span class="user-role">{alert.role}</span>
+                <span
+                  class="campus-tag"
+                  class:rnp={alert.campus?.toLowerCase().includes('rnp')}
+                  class:paseo={alert.campus?.toLowerCase().includes('paseo')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                  </svg>
+                  {alert.campus || 'Main Campus'}
+                </span>
+              </div>
+            </li>
+          {/each}
+        </ul>
       {:else}
         <div class="no-alerts-state">
           <div>
@@ -807,52 +783,48 @@
     color: #b91c1c;
   }
 
-  /* Flagged Alerts Small Table */
-  .table-container {
-    overflow-x: auto;
-    border: 1px solid rgba(0,0,0,0.05);
-    border-radius: 12px;
-  }
-
-  .flagged-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-    text-align: left;
-  }
-
-  .flagged-table th {
-    background: #f7fafc;
-    padding: 0.85rem 1rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #4a5568;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-  }
-
-  .flagged-table td {
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid rgba(0,0,0,0.03);
-    vertical-align: middle;
-  }
-
-  .td-datetime {
+  /* Flagged Alerts list: one block per alert, nothing squeezed into columns */
+  .alert-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.6rem;
+    max-height: 26rem;
+    overflow-y: auto;
   }
 
-  .date-text {
-    font-weight: 600;
-    color: #2d3748;
-    font-size: 0.85rem;
+  .alert-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-left: 3px solid #dc2626;
+    border-radius: 10px;
+    background: #fff;
   }
 
-  .time-text {
+  .alert-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem 0.75rem;
+  }
+
+  .alert-time {
     font-size: 0.75rem;
     color: #718096;
+    white-space: nowrap;
+  }
+
+  .alert-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
   }
 
   .reason-tag {
@@ -871,13 +843,6 @@
     color: #c53030;
   }
 
-  .alert-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    max-width: 22rem;
-  }
-
   .alert-name-row {
     display: inline-flex;
     align-items: center;
@@ -885,9 +850,10 @@
   }
 
   .alert-detail {
-    font-size: 0.75rem;
+    margin: 0;
+    font-size: 0.8rem;
     color: #64748b;
-    line-height: 1.35;
+    line-height: 1.4;
   }
 
   .new-badge {
@@ -900,12 +866,12 @@
     color: #fff;
   }
 
-  .flagged-table tr.new-alert td {
+  .alert-item.new-alert {
     animation: new-alert-flash 1.2s ease-in-out 3;
   }
 
   @keyframes new-alert-flash {
-    0%, 100% { background: transparent; }
+    0%, 100% { background: #fff; }
     50% { background: #fee2e2; }
   }
 
@@ -939,11 +905,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .flagged-table tr.new-alert td,
+    .alert-item.new-alert,
     .live-indicator.on .live-dot {
       animation: none;
     }
-    .flagged-table tr.new-alert td {
+    .alert-item.new-alert {
       background: #fee2e2;
     }
   }
@@ -959,13 +925,8 @@
     color: #2d3748;
   }
 
-  .user-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-  }
-
   .user-name {
+    font-size: 0.85rem;
     font-weight: 600;
     color: #2d3748;
   }
@@ -1249,10 +1210,6 @@
       font-size: 1.1rem;
     }
     .panel-subtext {
-      font-size: 0.78rem;
-    }
-    .flagged-table th, .flagged-table td {
-      padding: 0.65rem 0.65rem;
       font-size: 0.78rem;
     }
   }

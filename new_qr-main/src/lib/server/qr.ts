@@ -1,8 +1,18 @@
-import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { createCanvas, loadImage, GlobalFonts } from '@napi-rs/canvas';
 import QRCode from 'qrcode';
 import fs from 'fs';
 // Bundled into the server code: on Vercel the static/ folder is served by the CDN and is not on the function's disk
 import logoDataUrl from './liceo-logo.png?inline';
+// Serverless hosts have no system fonts, so the Reg. No. font ships with the code too (Roboto, Apache 2.0)
+import labelFontDataUrl from './Roboto-Bold.ttf?inline';
+
+const LABEL_FONT = 'GateQR Label';
+let labelFontReady = false;
+function ensureLabelFont() {
+    if (labelFontReady) return;
+    GlobalFonts.register(Buffer.from(labelFontDataUrl.split(',')[1], 'base64'), LABEL_FONT);
+    labelFontReady = true;
+}
 
 // Cache for the cleaned logo with transparent outer background
 let cachedCleanLogoCanvas: any = null;
@@ -125,7 +135,8 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(stripX, stripY, stripW, stripH);
         ctx.fillStyle = '#000000';
-        ctx.font = 'bold 38px sans-serif';
+        ensureLabelFont();
+        ctx.font = `bold 38px "${LABEL_FONT}"`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(labelText, totalSize / 2, stripY + stripH / 2 + 1);

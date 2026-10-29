@@ -334,6 +334,29 @@ is_connected = True
 class _EmptyResponse:
     data = []
 
+NO_INTERNET_TEXT = "NO INTERNET CONNECTION - check the Pi's network, then try again"
+
+def is_network_error(err):
+    """True for DNS / connection / timeout failures (the Pi lost its network), not database errors."""
+    text = f"{type(err).__name__} {err}".lower()
+    return any(k in text for k in ('name resolution', 'errno -3', 'errno -2', 'connecterror', 'connecttimeout',
+                                  'readtimeout', 'connection refused', 'connection reset', 'network is unreachable',
+                                  'timed out', 'remoteprotocolerror'))
+
+def net_retry(fn, attempts=3, delay=1.0):
+    """Run a Supabase read, retrying network failures a few times before giving up."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if not is_network_error(e) or i == attempts - 1:
+                raise
+            print(f"DEBUG: Network error (attempt {i + 1}/{attempts}), retrying: {e}")
+            time.sleep(delay)
+
+def friendly_error(prefix, err):
+    return NO_INTERNET_TEXT if is_network_error(err) else f"{prefix}: {err}"
+
 def normalize_campus_name(campus_val):
     """Normalize campus string to one of: 'Main Campus', 'RNP', 'PASEO'"""
     c_lower = str(campus_val or 'Main').strip().lower()
@@ -1097,9 +1120,9 @@ def process_qr(side, qr_text, frame):
         # Look up registration by qr_code or qr_unique_code in Supabase
         side.processing_step = "Checking registration..."
         try:
-            response = supabase.table('registration').select('*').eq('qr_code', qr_text).execute()
+            response = net_retry(lambda: supabase.table('registration').select('*').eq('qr_code', qr_text).execute())
             if not response.data:
-                response = supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute()
+                response = net_retry(lambda: supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute())
             
             if not response.data:
                 side.state = GateState.INVALID_QR
@@ -1110,7 +1133,7 @@ def process_qr(side, qr_text, frame):
 
         except Exception as e:
             side.state = GateState.API_ERROR
-            side.api_error = f"Supabase lookup error: {str(e)}"
+            side.api_error = friendly_error("Supabase lookup error", e)
             side.snapshot = frame.copy()
             
     except Exception as e:
@@ -1140,14 +1163,14 @@ def lookup_registered_plate(side, plate_input):
             return active or rows[:1]
 
         # 1. Match vehicle_information.plate_number, ignoring spaces and hyphens
-        v_res = supabase.table('vehicle_information').select('*').execute() if not reg_only else _EmptyResponse()
+        v_res = net_retry(lambda: supabase.table('vehicle_information').select('*').execute()) if not reg_only else _EmptyResponse()
         for v_item in (v_res.data or []):
             p_raw = str(v_item.get('plate_number') or '').strip().upper()
             if re.sub(r'[\s\-]', '', p_raw) != clean_input:
                 continue
-            r_res = supabase.table('registration').select('*')\
+            r_res = net_retry(lambda: supabase.table('registration').select('*')\
                 .eq('vehicle_information_id', v_item['vehicle_information_id'])\
-                .order('created_at', desc=True).execute()
+                .order('created_at', desc=True).execute())
             candidates = _active(r_res.data)
             if candidates:
                 reg = candidates[0]
@@ -1156,7 +1179,7 @@ def lookup_registered_plate(side, plate_input):
 
         # 2. Registration number (digits only, or typed as "REG 1042")
         if not reg and plate_input.isdigit():
-            r_res = supabase.table('registration').select('*').eq('registration_id', int(plate_input)).execute()
+            r_res = net_retry(lambda: supabase.table('registration').select('*').eq('registration_id', int(plate_input)).execute())
             candidates = _active(r_res.data)
             if candidates:
                 reg = candidates[0]
@@ -1171,7 +1194,7 @@ def lookup_registered_plate(side, plate_input):
         evaluate_registered_vehicle(side, reg, matched_vehicle_data, auto_exit=False)
     except Exception as e:
         side.state = GateState.API_ERROR
-        side.api_error = f"Lookup failed: {str(e)}"
+        side.api_error = friendly_error("Lookup failed", e)
 
 def submit_entry_exit(side):
     print(f"DEBUG: submit_entry_exit called for {side.type} gate")
@@ -1277,7 +1300,7 @@ def submit_entry_exit(side):
         except Exception as e:
             print(f"DEBUG: Error submitting {action} log: {type(e).__name__}: {e}")
             side.state = GateState.API_ERROR
-            side.api_error = f"Submit failed: {str(e)}"
+            side.api_error = friendly_error("Submit failed", e)
             
     threading.Thread(target=_run, daemon=True).start()
 
@@ -1789,6 +1812,9 @@ def get_card_status(side):
         first = content if content.startswith("NOT FOUND") else f"QR content: {content[:45]}"
         return "INVALID QR CODE", (0, 0, 200), [first, "Not a recognized registration. Use OPEN MANUALLY or DISMISS."]
     if st == GateState.API_ERROR:
+        if side.api_error == NO_INTERNET_TEXT:
+            return "NO INTERNET CONNECTION", (0, 0, 200), ["The gate could not reach the database (Pi network / Wi-Fi is down).",
+                                                          "Check the network, then DISMISS and try again, or use OPEN MANUALLY."]
         return "CONNECTION / DATABASE ERROR", (0, 0, 200), [str(side.api_error or 'Unknown error')[:70], "Use OPEN MANUALLY or DISMISS."]
     if st == GateState.WARNING:
         return "ANOMALY WARNING", (0, 120, 220), [str(side.anomaly_desc or '')[:80]]

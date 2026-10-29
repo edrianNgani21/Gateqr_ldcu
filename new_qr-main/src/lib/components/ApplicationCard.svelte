@@ -437,7 +437,7 @@
                 onclick={() => (showDocPopup = qrImgUrl)}
                 title="Click to view full size QR code"
               >
-                <img src={qrImgUrl} alt="Vehicle QR Code" width="96" height="110" class="qr-img" style="object-fit: contain;" />
+                <img src={qrImgUrl} alt="Vehicle QR Code" width="160" height="183" class="qr-img qr-code-img" />
               </button>
               <div class="qr-meta">
                 <a href={qrImgUrl} download={`gateqr-${data.registration_id || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
@@ -577,6 +577,10 @@
     .qr-img {
       width: 130px;
       height: 130px;
+    }
+    .qr-code-img {
+      width: 160px;
+      height: auto;
     }
     .doc-preview-frame {
       width: 90vw;
@@ -928,6 +932,13 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     background: #fff;
     display: block;
+  }
+  /* Role-colored QR with the logo and Reg. No. below (440 x 504 image) */
+  .qr-code-img {
+    width: 160px;
+    height: auto;
+    aspect-ratio: 440 / 504;
+    object-fit: contain;
   }
   .qr-meta {
     display: flex;
