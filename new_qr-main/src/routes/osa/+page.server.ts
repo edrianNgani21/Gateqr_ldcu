@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { getActiveBlocks } from '$lib/server/blocks';
 
 export const load: PageServerLoad = async ({ locals, cookies }) => {
     if (!locals.user || locals.user.role !== 'osa') {
@@ -45,6 +46,9 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
                 .order('request_at', { ascending: false })
         ]);
 
+        // Active gate blocks show up under Rejected, Revoked & Blocked
+        const activeBlocks = await getActiveBlocks();
+
         const changeReqMap = new Map<number, any>();
         (changeReqs || []).forEach((cr: any) => {
             if (!changeReqMap.has(cr.registration_id)) {
@@ -70,6 +74,7 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
             return {
                 ...app,
                 id: app.registration_id, // Map registration_id to id
+                active_block: activeBlocks.get(app.registration_id) ?? null,
                 department_name: app.department?.academic_department || app.department?.administrative_department || (app.department as any)?.department_name || (app.department as any)?.department || 'Unknown Department',
                 department_email: '-',
                 user_email: app.user?.email,

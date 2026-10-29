@@ -402,7 +402,7 @@
     { label: 'Submission of Documents', tab: 'distribution', href: '/osa?tab=distribution' },
     { label: 'Releasing of Stickers', tab: 'release', href: '/osa?tab=release' },
     { label: 'Registered Vehicles', tab: 'registered', href: '/osa?tab=registered' },
-    { label: 'Rejected or Revoked Accounts & Applications', tab: 'rejected', href: '/osa?tab=rejected' },
+    { label: 'Rejected, Revoked & Blocked', tab: 'rejected', href: '/osa?tab=rejected' },
     { label: 'Profile Update Requests', path: '/osa/change-requests', href: '/osa/change-requests' }
   ];
 

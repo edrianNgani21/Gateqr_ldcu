@@ -35,11 +35,14 @@
   const tabLabels: Record<string, string> = {
     "Document Review": "Document Review",
     "Registered Vehicles": "Registered Vehicles",
-    "Rejected or Revoked Accounts & Applications": "Rejected or Revoked",
+    "Rejected or Revoked Accounts & Applications": "Rejected, Revoked & Blocked",
   };
 
-  // â”€â”€ Vehicle Monitoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Vehicle Monitoring ──────────────────────────────────────────────────
   let vehicles = $state(data.vehicles);
+
+  // Rejected, Revoked & Blocked tab: sub-filter
+  let rejectedFilter = $state<"all" | "rejected" | "revoked" | "blocked">("all");
 
   // Record Violation modal (Registered Vehicles tab)
   let violationTarget = $state<{ id: number; name: string; plate: string } | null>(null);
@@ -86,7 +89,7 @@
       );
     }
     if (t === "Rejected or Revoked Accounts & Applications" || t === "Revoked Registered") {
-      return vehicles.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()));
+      return vehicles.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()) || v.active_block);
     }
     return [];
   }
@@ -155,7 +158,7 @@
   }
 
 
-  // â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Photo modal ──────────────────────────────────────────────────────────
   let showModal = $state(false);
   let modalImage = $state("");
   function openPhoto(url: string | null) {
@@ -290,7 +293,10 @@
         (v: any) => ["approved", "completed"].includes((v.status || "").toLowerCase())
       );
     } else if (tab === "Rejected or Revoked Accounts & Applications" || tab === "Revoked Registered") {
-      filtered = filtered.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()));
+      filtered = filtered.filter((v: any) => ['revoked', 'rejected'].includes((v.status || "").toLowerCase()) || v.active_block);
+      if (rejectedFilter === "rejected") filtered = filtered.filter((v: any) => (v.status || "").toLowerCase() === "rejected");
+      else if (rejectedFilter === "revoked") filtered = filtered.filter((v: any) => (v.status || "").toLowerCase() === "revoked");
+      else if (rejectedFilter === "blocked") filtered = filtered.filter((v: any) => v.active_block);
     }
 
     if (roleFilter !== "all") {
@@ -611,7 +617,7 @@
                                 <td>#${log.vehicle_log_id}</td>
                                 <td>${log.plate || log.vehicle_plate || 'No Plate'}</td>
                                 <td>${log.driver_name || log.name || 'Driver'} (${log.role || 'Visitor'})</td>
-                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : 'â€”'}</td>
+                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
                                 <td>${log.check_out ? new Date(log.check_out).toLocaleString() : "Still Inside"}</td>
                                 <td>${log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</td>
                             </tr>
@@ -631,7 +637,7 @@
 </script>
 
 <svelte:head>
-  <title>Application Review â€” Security | GateQR</title>
+  <title>Application Review — Security | GateQR</title>
   <meta
     name="description"
     content="Security vehicle monitoring dashboard for Liceo de Cagayan University."
@@ -664,6 +670,29 @@
 
   <TabBar {tabs} active={tab} counts={tabCounts} labels={tabLabels} onchange={switchTab} />
 
+  {#if tab === "Rejected or Revoked Accounts & Applications"}
+    {@const rejList = getAppsForTab("Rejected or Revoked Accounts & Applications")}
+    <div class="sub-filter-bar" role="tablist" aria-label="Show">
+      {#each [
+        { key: "all", label: "All Records", count: rejList.length },
+        { key: "rejected", label: "Rejected", count: rejList.filter((v: any) => (v.status || "").toLowerCase() === "rejected").length },
+        { key: "revoked", label: "Revoked", count: rejList.filter((v: any) => (v.status || "").toLowerCase() === "revoked").length },
+        { key: "blocked", label: "Blocked", count: rejList.filter((v: any) => v.active_block).length },
+      ] as f (f.key)}
+        <button
+          type="button"
+          role="tab"
+          class="sub-filter-btn"
+          class:active={rejectedFilter === f.key}
+          aria-selected={rejectedFilter === f.key}
+          onclick={() => (rejectedFilter = f.key as typeof rejectedFilter)}
+        >
+          {f.label} <span class="sub-filter-count">{f.count}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if tab === "Document Review" || tab === "Registered" || tab === "Registered Vehicles" || tab === "Revoked Registered" || tab === "Rejected or Revoked Accounts & Applications"}
     <!-- Monitoring Tab - Registered Vehicles -->
     <div class="controls-row">
@@ -681,7 +710,7 @@
         </svg>
         <input
           type="text"
-          placeholder="Search name, plate, vehicleâ€¦"
+          placeholder="Search name, plate, vehicle…"
           bind:value={searchQuery}
           class="search-input"
         />
@@ -690,7 +719,7 @@
             class="search-clear"
             onclick={() => {
               searchQuery = "";
-            }}>Ã—</button
+            }}>×</button
           >
         {/if}
       </div>
@@ -791,6 +820,8 @@
             is_change_vehicle: app.is_change_vehicle,
             qr_code: app.qr_code,
             qr_unique_code: app.qr_unique_code,
+            blocked_until: app.active_block?.blocked_until ?? null,
+            block_reason: app.active_block?.reason ?? null,
             documents: {
               id:
                 toDocUrl(app.doc_id) ||
@@ -814,6 +845,9 @@
           showQR={true}
         >
           {#snippet children()}
+            {#if tab === "Rejected or Revoked Accounts & Applications" && !["rejected", "revoked"].includes((app.status || "").toLowerCase())}
+              <p class="blocked-note">This vehicle is still registered. The gate block ends automatically on {new Date(app.active_block?.blocked_until).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}.</p>
+            {:else}
             <ActionBar
               {tab}
               status={app.status}
@@ -901,6 +935,7 @@
                 }
               }}
             />
+            {/if}
           {/snippet}
         </ApplicationCard>
       {:else}
@@ -1005,7 +1040,7 @@
           />
           <input
             type="text"
-            placeholder="Searchâ€¦"
+            placeholder="Search…"
             bind:value={searchQuery}
             oninput={onSearchInput}
             class="search-box"
@@ -1028,7 +1063,7 @@
       {#if loading}
         <div class="loading-row">
           <div class="spinner"></div>
-          Loadingâ€¦
+          Loading…
         </div>
       {:else}
         <div class="table-wrap">
@@ -1079,7 +1114,7 @@
                   </td>
                   <td class="td-time">
                     <span class="time-main"
-                      >{log.check_in ? new Date(log.check_in).toLocaleString() : 'â€”'}</span
+                      >{log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</span
                     >
                   </td>
                   <td class="td-time">
@@ -1317,7 +1352,7 @@
           </select>
           <input
             type="text"
-            placeholder="Search name, plate, vehicleâ€¦"
+            placeholder="Search name, plate, vehicle…"
             bind:value={searchQuery}
             oninput={onSearchInput}
             class="search-box"
@@ -1328,7 +1363,7 @@
       {#if loading}
         <div class="loading-row">
           <div class="spinner"></div>
-          Loadingâ€¦
+          Loading…
         </div>
       {:else}
         <div class="table-wrap">
@@ -1459,7 +1494,7 @@
     margin: 0;
   }
 
-  /* â”€â”€ Print / Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Print / Tabs ────────────────────────────────────────────────────── */
 
   .parking-info {
     display: flex;
@@ -1569,7 +1604,7 @@
     color: #16a34a;
   }
 
-  /* â”€â”€ Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Controls ────────────────────────────────────────────────────────── */
   .controls-row {
     padding: 0.625rem 1rem;
     border-bottom: 1px solid var(--border);
@@ -1786,7 +1821,7 @@
     flex-shrink: 0;
   }
 
-  /* â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Loading ─────────────────────────────────────────────────────────── */
   .loading-row {
     display: flex;
     align-items: center;
@@ -1810,7 +1845,7 @@
     }
   }
 
-  /* â”€â”€ Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Table ───────────────────────────────────────────────────────────── */
 
   .td-time {
     min-width: 80px;
@@ -1879,7 +1914,7 @@
     text-decoration: underline;
   }
 
-  /* â”€â”€ Chips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Chips ───────────────────────────────────────────────────────────── */
   .chip {
     display: inline-flex;
     align-items: center;
@@ -1896,7 +1931,7 @@
     font-size: 0.875rem;
   }
 
-  /* â”€â”€ Paginator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Paginator ───────────────────────────────────────────────────────── */
   .paginator {
     display: flex;
     align-items: center;
@@ -1933,7 +1968,7 @@
     color: var(--text-dim);
   }
 
-  /* â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Photo modal ─────────────────────────────────────────────────────── */
   .modal-backdrop {
     position: fixed;
     top: 0;
@@ -2055,11 +2090,58 @@
     border-radius: var(--radius-md);
   }
 
-  /* â”€â”€ Additional styles for monitoring/history tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Additional styles for monitoring/history tabs ──────────────────────── */
   .cards-list {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+  }
+
+  /* Rejected, Revoked & Blocked sub-filter */
+  .sub-filter-bar {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0 1rem;
+  }
+
+  .sub-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 38px;
+    padding: 0.45rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid #E8D5DA;
+    background: #ffffff;
+    color: #5C3A42;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .sub-filter-btn.active {
+    background: #8B1A3C;
+    border-color: #8B1A3C;
+    color: #ffffff;
+  }
+
+  .sub-filter-count {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .sub-filter-btn.active .sub-filter-count {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  .blocked-note {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #991b1b;
   }
 
   /* Registered Vehicles print toolbar */
@@ -2208,7 +2290,7 @@
     background: var(--surface-hover);
   }
 
-  /* â”€â”€ Chips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Chips ───────────────────────────────────────────────────────────── */
   .chip {
     display: inline-flex;
     align-items: center;
@@ -2225,7 +2307,7 @@
     font-size: 0.875rem;
   }
 
-  /* â”€â”€ Paginator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Paginator ───────────────────────────────────────────────────────── */
   .paginator {
     display: flex;
     align-items: center;
@@ -2262,7 +2344,7 @@
     color: var(--text-dim);
   }
 
-  /* â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Photo modal ─────────────────────────────────────────────────────── */
   .modal-backdrop {
     position: fixed;
     top: 0;
@@ -2401,7 +2483,7 @@
     text-decoration: underline;
   }
 
-  /* â”€â”€ Print functionality styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Print functionality styles ─────────────────────────────────────────── */
   .print-btn {
     background: var(--maroon);
     color: white;

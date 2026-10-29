@@ -31,12 +31,12 @@
         'distribution': 'Submission of Documents',
         'release':      'Releasing of Stickers',
         'registered':   'Registered Vehicles',
-        'rejected':     'Rejected or Revoked Accounts & Applications'
+        'rejected':     'Rejected, Revoked & Blocked'
     };
 
     // Sub-filters for Submission of Documents and Rejected or Revoked
     let docSubmissionFilter = $state<'upcoming' | 'overdue'>('upcoming');
-    let rejectedFilter = $state<'all' | 'rejected' | 'revoked'>('all');
+    let rejectedFilter = $state<'all' | 'rejected' | 'revoked' | 'blocked'>('all');
 
     function isAppOverdue(a: any): boolean {
         if (a.invalid_reason === 'OVERDUE' || a.rejection_reason === 'OVERDUE') return true;
@@ -51,16 +51,16 @@
         if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
         if (t === 'release') return apps.filter(a => (a.status || '').toLowerCase() === 'receipt_submitted' && !a.sticker_released_at);
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
-        if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()));
+        if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()) || a.active_block);
         return [];
     }
 
     $effect(() => {
         const urlTab = $page.url.searchParams.get('tab');
         if (urlTab) {
-            if (urlTab === 'revoked') {
+            if (urlTab === 'revoked' || urlTab === 'blocked') {
                 tab = 'rejected';
-                rejectedFilter = 'revoked';
+                rejectedFilter = urlTab;
             } else if (urlTab === 'overdue') {
                 tab = 'distribution';
                 docSubmissionFilter = 'overdue';
@@ -283,6 +283,8 @@
                 filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'rejected');
             } else if (rejectedFilter === 'revoked') {
                 filtered = filtered.filter(a => (a.status || '').toLowerCase() === 'revoked');
+            } else if (rejectedFilter === 'blocked') {
+                filtered = filtered.filter(a => a.active_block);
             }
         }
 
@@ -356,6 +358,7 @@
     let docSubmissionOverdueCount = $derived(getAppsForTab('distribution').filter(a => isAppOverdue(a)).length);
     let rejectedCountOnly = $derived(getAppsForTab('rejected').filter(a => (a.status || '').toLowerCase() === 'rejected').length);
     let revokedCountOnly = $derived(getAppsForTab('rejected').filter(a => (a.status || '').toLowerCase() === 'revoked').length);
+    let blockedCountOnly = $derived(getAppsForTab('rejected').filter(a => a.active_block).length);
 
     let scheduleModalOpen = $state(false);
     let selectedSchedule = $state('');
@@ -602,6 +605,15 @@
           <span>Revoked Privileges</span>
           <span class="sub-tab-badge badge-revoked">{revokedCountOnly}</span>
         </button>
+        <button
+          type="button"
+          class="sub-tab-btn"
+          class:active={rejectedFilter === 'blocked'}
+          onclick={() => { rejectedFilter = 'blocked'; }}
+        >
+          <span>Blocked Vehicles</span>
+          <span class="sub-tab-badge badge-rejected">{blockedCountOnly}</span>
+        </button>
       </div>
     {/if}
 
@@ -697,6 +709,8 @@
               rejection_reason: app.invalid_reason || null,
               qr_code: app.qr_code,
               qr_unique_code: app.qr_unique_code,
+              blocked_until: app.active_block?.blocked_until ?? null,
+              block_reason: app.active_block?.reason ?? null,
               documents: {
                 id: app.doc_id,
                 enrollment: app.doc_load,
@@ -833,6 +847,8 @@
                       rejection_reason: app.invalid_reason || null,
                       qr_code: app.qr_code,
                       qr_unique_code: app.qr_unique_code,
+                      blocked_until: app.active_block?.blocked_until ?? null,
+                      block_reason: app.active_block?.reason ?? null,
                       documents: {
                         id: app.doc_id,
                         enrollment: app.doc_load,
@@ -885,6 +901,8 @@
                   rejection_reason: app.invalid_reason || null,
                   qr_code: app.qr_code,
                   qr_unique_code: app.qr_unique_code,
+                  blocked_until: app.active_block?.blocked_until ?? null,
+                  block_reason: app.active_block?.reason ?? null,
                   documents: {
                     id: app.doc_id,
                     enrollment: app.doc_load,
@@ -900,7 +918,11 @@
                 showQR={true}
                 {tab}>
                   {#snippet children()}
-                    <ActionBar {tab} status={app.status} role={app.role} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
+                    {#if tab === 'rejected' && !['rejected', 'revoked'].includes((app.status || '').toLowerCase())}
+                      <p class="blocked-note">This vehicle is still registered. The gate block ends automatically on {new Date(app.active_block?.blocked_until).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}.</p>
+                    {:else}
+                      <ActionBar {tab} status={app.status} role={app.role} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
+                    {/if}
                   {/snippet}
                 </ApplicationCard>
               {/if}
@@ -1585,6 +1607,12 @@
     .schedule-calendar-panel {
       width: 100%;
     }
+  }
+
+  .blocked-note {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #991b1b;
   }
 
   /* Registered Vehicles print toolbar */

@@ -158,6 +158,7 @@ class GateState:
     CAMPUS_FULL = "CAMPUS_FULL"
     BLOCKED = "BLOCKED"         # Registration / vehicle is on the blocklist: entry denied
     TYPE_FULL = "TYPE_FULL"     # No free 2-wheel (or 4-wheel) slots for this vehicle's type
+    STATUS_DENIED = "STATUS_DENIED"  # QR belongs to a revoked / not-yet-registered / expired application
 
 class SideState:
     def __init__(self, gate_type):
@@ -776,12 +777,77 @@ def show_blocked(side, reg, block):
             "sticker_status": "registered",
             "campus_gate": gate_enum,
             "campus": campus_name,
+            "flagged_alert": "blocked",
             "reason": f"BLOCKED - entry denied ({format_remaining(block.get('blocked_until'))} left): {block.get('reason') or 'No reason given'}"
         }).execute()
     except Exception as e:
         print(f"DEBUG: Error logging blocked attempt: {e}")
 
     side.state = GateState.BLOCKED
+
+def registration_access(reg):
+    """(allowed, alert_kind, title, detail) for a registration's current status.
+    Only registered (approved / completed) stickers that have not expired may enter."""
+    status = str(reg.get('status') or '').strip().lower()
+    if status == 'revoked':
+        reason = reg.get('revoke_reason') or 'No reason given'
+        return False, 'revoked', "REVOKED", f"Revoked by OSA: {reason}. Access returns only after the QR is unrevoked."
+    if status in ('approved', 'completed'):
+        expires = parse_db_timestamp(reg.get('expires_at'))
+        if expires and expires < datetime.now(timezone.utc):
+            return False, 'not_registered', "STICKER EXPIRED", f"Sticker expired on {expires.astimezone().strftime('%b %d, %Y')}."
+        return True, None, None, None
+    label = status.replace('_', ' ').upper() or 'UNKNOWN'
+    return False, 'not_registered', "NOT REGISTERED", f"Application status is {label}; the sticker is not active yet."
+
+def exit_flag_for(reg, vehicle_id=None):
+    """Alert to record when a vehicle that should not have access leaves (exits are still allowed)."""
+    allowed, kind, title, detail = registration_access(reg)
+    if not allowed:
+        return kind, f"{title} QR used at exit (allowed out): {detail}"
+    block = get_active_block(reg.get('registration_id'), vehicle_id or reg.get('vehicle_information_id'))
+    if block:
+        return 'blocked', f"Blocked vehicle exited ({format_remaining(block.get('blocked_until'))} left): {block.get('reason') or 'No reason given'}"
+    return None
+
+def show_status_denied(side, reg, kind, title, detail):
+    """Entrance refused because the QR is revoked, expired or not registered yet."""
+    global latest_scanned_details
+    side.data = reg
+    side.denied_info = (title, detail, str(reg.get('status') or '').upper())
+    first_n = reg.get('first_name', '')
+    last_n = reg.get('last_name', '')
+    v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+    v_color = side.vehicle_data.get('color') or ''
+    latest_scanned_details = {
+        "gate": "ENTRANCE",
+        "name": f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A',
+        "role": (reg.get('role') or 'N/A').capitalize(),
+        "plate": side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A',
+        "brand": f"{v_brand} ({v_color})" if v_color else v_brand,
+        "type": side.vehicle_data.get('type') or reg.get('type') or 'N/A',
+        "status": title,
+        "time": datetime.now().strftime("%I:%M:%S %p")
+    }
+    try:
+        gate_enum, campus_name = get_campus_gate_and_name()
+        now_iso = datetime.now().isoformat()
+        supabase.table('vehicle_log').insert({
+            "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'),
+            "registration_id": reg.get('registration_id'),
+            "check_in": now_iso,
+            "check_out": now_iso,
+            "logged_status": "denied",
+            "sticker_status": "registered" if kind == 'revoked' else "unregistered",
+            "campus_gate": gate_enum,
+            "campus": campus_name,
+            "flagged_alert": kind,
+            "reason": f"{title} - entry denied: {detail}"
+        }).execute()
+    except Exception as e:
+        print(f"DEBUG: Error logging denied {kind} attempt: {e}")
+    print(f"[{side.type}] {title}: registration {reg.get('registration_id')} denied entry")
+    side.state = GateState.STATUS_DENIED
 
 def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     """Decide what the gate shows for a registered vehicle: BLOCKED, duplicate-entry / wrong-campus
@@ -817,6 +883,18 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
         print(f"Error fetching vehicle information: {e}")
         side.vehicle_data = {}
     
+    side.exit_flag = None
+    if side.type == 'out':
+        # Exits are always allowed so no car is trapped inside; a revoked / unregistered / blocked QR is flagged
+        side.exit_flag = exit_flag_for(reg, side.vehicle_data.get('vehicle_information_id'))
+
+    # Registration status (all campuses): only active registered stickers may enter
+    if side.type == 'in':
+        allowed, kind, title, detail = registration_access(reg)
+        if not allowed:
+            show_status_denied(side, reg, kind, title, detail)
+            return
+
     # Blocklist check (all campuses). Applies to the entrance; a blocked vehicle already inside may still leave.
     if side.type == 'in':
         block = get_active_block(reg.get('registration_id'), side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'))
@@ -901,11 +979,11 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
         # Case 1: ENTRANCE CAMERA (side.type == 'in')
         if side.type == 'in':
             if active_campus_norm != current_campus_norm:
-                side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot enter {current_campus_norm.upper()}."
-                reason_text = f"Duplicate Entry: Currently checked in at {active_campus_norm}, attempted entry at {current_campus_norm}"
+                side.anomaly_desc = f"DOUBLE ACCESS: Currently checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot enter {current_campus_norm.upper()}."
+                reason_text = f"Double Access: Currently checked in at {active_campus_norm}, attempted entry at {current_campus_norm}"
             else:
-                side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {current_campus_norm.upper()} (Entered at {check_in_time})!"
-                reason_text = f"Duplicate Entry: Vehicle already inside {current_campus_norm}"
+                side.anomaly_desc = f"DOUBLE ACCESS: Vehicle already INSIDE {current_campus_norm.upper()} (Entered at {check_in_time})!"
+                reason_text = f"Double Access: Vehicle already inside {current_campus_norm}"
 
             # Log the flagged violation to database
             try:
@@ -918,10 +996,11 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                     "sticker_status": "registered",
                     "campus_gate": current_gate,
                     "campus": current_campus_norm,
+                    "flagged_alert": "double_access",
                     "reason": reason_text
                 }).execute()
             except Exception as err:
-                print(f"DEBUG: Error logging duplicate entry violation: {err}")
+                print(f"DEBUG: Error logging double access violation: {err}")
 
             latest_scanned_details = {
                 "gate": "ENTRANCE",
@@ -930,7 +1009,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                 "plate": v_plate,
                 "brand": full_brand,
                 "type": v_type,
-                "status": "FLAGGED (DUPLICATE ENTRY)",
+                "status": "FLAGGED (DOUBLE ACCESS)",
                 "time": datetime.now().strftime("%I:%M:%S %p")
             }
 
@@ -955,6 +1034,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                         "sticker_status": "registered",
                         "campus_gate": current_gate,
                         "campus": current_campus_norm,
+                        "flagged_alert": "wrong_campus_exit",
                         "reason": reason_text
                     }).execute()
                 except Exception as err:
@@ -1045,7 +1125,11 @@ def lookup_registered_plate(side, plate_input):
         matched_vehicle_data = {}
 
         def _active(rows):
-            return [r for r in (rows or []) if str(r.get('status') or '').lower() not in ('rejected', 'revoked')]
+            # Prefer an active application; otherwise return the latest one so the gate can say why
+            # it is denied (REVOKED / NOT REGISTERED) instead of "not found"
+            rows = rows or []
+            active = [r for r in rows if str(r.get('status') or '').lower() not in ('rejected', 'revoked')]
+            return active or rows[:1]
 
         # 1. Match vehicle_information.plate_number, ignoring spaces and hyphens
         v_res = supabase.table('vehicle_information').select('*').execute() if not reg_only else _EmptyResponse()
@@ -1118,6 +1202,8 @@ def submit_entry_exit(side):
                 # EXIT: Close any open entry logs in vehicle_log where check_out is null
                 side.scan_cooldown_end = time.time() + 5.0
                 side.prolong_ready_time = time.time() + 5.0
+                exit_flag = getattr(side, 'exit_flag', None)
+                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
                 try:
                     all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
                     open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
@@ -1125,7 +1211,8 @@ def submit_entry_exit(side):
                         for row in open_rows:
                             supabase.table('vehicle_log').update({
                                 "check_out": current_time,
-                                "logged_status": "exited_campus"
+                                "logged_status": "exited_campus",
+                                **flag_fields
                             }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
                         print(f"DEBUG: Closed {len(open_rows)} open vehicle_log row(s) on exit")
                     else:
@@ -1138,7 +1225,8 @@ def submit_entry_exit(side):
                             "logged_status": "exited_campus",
                             "sticker_status": "registered",
                             "campus_gate": gate_enum,
-                            "campus": norm_campus_name
+                            "campus": norm_campus_name,
+                            **flag_fields
                         }
                         supabase.table('vehicle_log').insert(log_data).execute()
                         print(f"DEBUG: Standalone exit log created")
@@ -1693,12 +1781,16 @@ def get_card_status(side):
     if st == GateState.WARNING:
         return "ANOMALY WARNING", (0, 120, 220), [str(side.anomaly_desc or '')[:80]]
     if st == GateState.LOG_WARNING:
-        title = "FLAGGED: WRONG CAMPUS EXIT" if side.type == 'out' else "FLAGGED: DUPLICATE ENTRY"
+        title = "FLAGGED: WRONG CAMPUS EXIT" if side.type == 'out' else "FLAGGED: DOUBLE ACCESS"
         return title, (0, 0, 200), [str(side.anomaly_desc or '')[:80], "Violation logged. Security override required."]
     if st == GateState.TYPE_FULL:
         label = getattr(side, 'full_type_label', 'VEHICLE')
         used, cap = getattr(side, 'full_type_counts', (0, 0))
         return f"{label} PARKING FULL", (0, 0, 200), [f"{label} slots occupied: {used} / {cap}", "Override only if a slot is actually free."]
+    if st == GateState.STATUS_DENIED:
+        title, detail, status = getattr(side, 'denied_info', ("ENTRY DENIED", "", ""))
+        lines = [detail[:80], detail[80:160], f"Application status: {status or 'UNKNOWN'}"]
+        return f"{title} - ENTRY DENIED", (0, 0, 200), [l for l in lines if l]
     if st == GateState.BLOCKED:
         block = side.block_info or {}
         until_dt = parse_db_timestamp(block.get('blocked_until'))
@@ -1817,7 +1909,7 @@ def render_bottom_panel(display):
         
     # If the barrier is closed, the scanned QR code details display will disappear
     barrier_open_or_active = (
-        side_in.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING, GateState.BLOCKED, GateState.TYPE_FULL) or
+        side_in.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING, GateState.BLOCKED, GateState.TYPE_FULL, GateState.STATUS_DENIED) or
         side_out.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING, GateState.BLOCKED, GateState.TYPE_FULL)
     )
     global latest_scanned_details
@@ -1891,7 +1983,7 @@ def render_side(img, side, offset_x=0):
         draw_btn(img, (25, H//2 - 65, 230, 48), "OVERRIDE (LET IN)", (0, 140, 255))
         draw_btn(img, (270, H//2 - 65, 110, 48), "DENY", (0, 0, 200))
 
-    elif side.state == GateState.BLOCKED:
+    elif side.state in (GateState.BLOCKED, GateState.STATUS_DENIED):
         draw_btn(img, (25 + 25, H//2 - 65, 200, 48), "DENY ENTRY", (0, 0, 200))
 
     elif side.state == GateState.TIMEOUT:
@@ -2063,7 +2155,7 @@ def mouse_callback(event, x, y, flags, param):
         elif in_rect(x, y, (270, H//2 - 65, 110, 48)):  # DENY
             close_gate(side)
 
-    elif side.state == GateState.BLOCKED:
+    elif side.state in (GateState.BLOCKED, GateState.STATUS_DENIED):
         if in_rect(x, y, (25 + 25, H//2 - 65, 200, 48)):  # DENY ENTRY
             side.block_info = None
             close_gate(side)
@@ -2316,7 +2408,9 @@ while True:
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
-                                # Close open vehicle_log row
+                                # Close open vehicle_log row (revoked / unregistered / blocked exits are flagged)
+                                exit_flag = exit_flag_for(reg, v_info_id)
+                                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
                                 try:
                                     all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
                                     open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
@@ -2324,7 +2418,8 @@ while True:
                                         for row in open_rows:
                                             supabase.table('vehicle_log').update({
                                                 "check_out": current_time,
-                                                "logged_status": "exited_campus"
+                                                "logged_status": "exited_campus",
+                                                **flag_fields
                                             }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
                                         print(f"[{side.type}] Closed {len(open_rows)} open log(s) during countdown")
                                     else:
@@ -2337,7 +2432,8 @@ while True:
                                             "logged_status": "exited_campus",
                                             "sticker_status": "registered",
                                             "campus_gate": gate_enum,
-                                            "campus": norm_campus_name
+                                            "campus": norm_campus_name,
+                                            **flag_fields
                                         }).execute()
                                 except Exception as e:
                                     print(f"DEBUG: Error updating exit log during countdown: {e}")
@@ -2417,7 +2513,9 @@ while True:
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
-                                # Close open vehicle_log row
+                                # Close open vehicle_log row (revoked / unregistered / blocked exits are flagged)
+                                exit_flag = exit_flag_for(reg, v_info_id)
+                                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
                                 try:
                                     all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
                                     open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
@@ -2425,7 +2523,8 @@ while True:
                                         for row in open_rows:
                                             supabase.table('vehicle_log').update({
                                                 "check_out": current_time,
-                                                "logged_status": "exited_campus"
+                                                "logged_status": "exited_campus",
+                                                **flag_fields
                                             }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
                                         print(f"[{side.type}] PROLONG: Closed {len(open_rows)} open log(s)")
                                     else:
@@ -2438,7 +2537,8 @@ while True:
                                             "logged_status": "exited_campus",
                                             "sticker_status": "registered",
                                             "campus_gate": gate_enum,
-                                            "campus": norm_campus_name
+                                            "campus": norm_campus_name,
+                                            **flag_fields
                                         }).execute()
                                 except Exception as e:
                                     print(f"DEBUG: Error updating exit log in prolong: {e}")

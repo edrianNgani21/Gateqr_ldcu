@@ -55,6 +55,7 @@ DROP TYPE IF EXISTS form_status_enum CASCADE;
 DROP TYPE IF EXISTS blocklist_by_enum CASCADE;
 DROP TYPE IF EXISTS violation_level_enum CASCADE;
 DROP TYPE IF EXISTS login_confirmation_status_enum CASCADE;
+DROP TYPE IF EXISTS flagged_alert_enum CASCADE;
 
 CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'osa', 'dean', 'Academic Head', 'Office Head');
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
@@ -1318,3 +1319,20 @@ CREATE INDEX IF NOT EXISTS idx_login_confirmation_user ON public.login_confirmat
 
 -- Server-only table: no policies, so only the service role can read or write it
 ALTER TABLE public.login_confirmation ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------
+-- 19. GATE ALERTS ON vehicle_log (idempotent)
+-- ---------------------------------------------------------------------
+-- Kind of gate alert recorded on a vehicle_log row (NULL = normal entry/exit).
+-- main.py sets it; the security dashboard's Flagged Alerts lists every row where it is set.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'flagged_alert_enum') THEN
+    CREATE TYPE flagged_alert_enum AS ENUM ('double_access', 'wrong_campus_exit', 'blocked', 'revoked', 'not_registered');
+  END IF;
+END $$;
+
+ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS flagged_alert flagged_alert_enum;
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_log_flagged_alert
+  ON public.vehicle_log (check_in DESC) WHERE flagged_alert IS NOT NULL;

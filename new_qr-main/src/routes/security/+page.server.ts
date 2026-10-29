@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { supabase } from '$lib/server/supabase';
+import { getActiveBlocks } from '$lib/server/blocks';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) {
@@ -81,6 +82,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                 .maybeSingle()
         ]);
 
+        // Active gate blocks show up under Rejected, Revoked & Blocked
+        const activeBlocks = await getActiveBlocks();
+
         const changeReqMap = new Map<number, any>();
         (changeReqs || []).forEach((cr: any) => {
             if (!changeReqMap.has(cr.registration_id)) {
@@ -103,6 +107,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
             return {
                 ...v,
+                active_block: activeBlocks.get(v.registration_id) ?? null,
                 osa_dist_at,
                 security_check_at,
                 security_checked_at: security_check_at,

@@ -331,7 +331,7 @@
                   <td>
                     <span
                       class="reason-tag"
-                      class:danger={alert.reason.toLowerCase().includes('not recognized') || alert.reason.toLowerCase().includes('duplicate') || alert.reason.toLowerCase().includes('denied')}
+                      class:danger={/not recognized|duplicate|double access|denied|blocked|revoked|not registered|wrong campus|expired/i.test(alert.reason)}
                     >
                       {alert.reason}
                     </span>

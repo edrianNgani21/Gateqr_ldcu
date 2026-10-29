@@ -94,6 +94,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     check_in,
                     created_at,
                     logged_status,
+                    flagged_alert,
                     reason,
                     campus,
                     campus_gate,
@@ -108,7 +109,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                         role
                     )
                 `)
-                .or('reason.not.is.null,logged_status.eq.denied')
+                // main.py sets flagged_alert on every gate alert; 'denied' covers rows saved before that column existed
+                .or('flagged_alert.not.is.null,logged_status.eq.denied')
                 .order('check_in', { ascending: false })
                 .limit(20),
 
@@ -286,14 +288,15 @@ export const load: PageServerLoad = async ({ locals }) => {
             };
         });
 
+        const alertLabels: Record<string, string> = {
+            double_access: 'Double Access',
+            wrong_campus_exit: 'Wrong Campus Exit',
+            blocked: 'Blocked',
+            revoked: 'Revoked QR',
+            not_registered: 'Not Registered'
+        };
         const gateAlerts = flaggedRows
-            .filter((r: any) => {
-                const st = (r.logged_status || '').toLowerCase();
-                const reason = (r.reason || '').toLowerCase();
-                if (reason === 'vip access' && !st.includes('denied') && !st.includes('flag')) return false;
-                if ((st === 'inside_campus' || st === 'inside' || st === 'exited_campus' || st === 'exited' || st === 'ok') && !reason) return false;
-                return reason.length > 0 || st.includes('denied') || st.includes('flag') || st.includes('warn');
-            })
+            .filter((r: any) => r.flagged_alert || r.logged_status === 'denied')
             .map((r: any) => ({
                 id: r.vehicle_log_id,
                 time: r.check_in || r.created_at || new Date().toISOString(),
@@ -309,7 +312,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     if (low === 'main' || low.includes('main')) return 'Main Campus';
                     return raw.charAt(0).toUpperCase() + raw.slice(1);
                 })(),
-                status: r.logged_status === 'denied' ? 'Denied' : (r.logged_status || 'Flagged')
+                status: alertLabels[r.flagged_alert] || (r.logged_status === 'denied' ? 'Denied' : 'Flagged')
             }));
 
         // Gate events and recorded violations, newest first

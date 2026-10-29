@@ -89,6 +89,12 @@
       : workflowPills?.[0]?.tone ?? statusVariant,
   );
 
+  // Active gate block (3rd violation level)
+  let blockedUntil = $derived(data.blocked_until ? new Date(data.blocked_until) : null);
+  let blockedUntilText = $derived(
+    blockedUntil ? blockedUntil.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "",
+  );
+
   let regNo = $derived.by(() => {
     const raw = String(data.registration_id ?? data.id ?? "").replace(/\D/g, "");
     return raw || null;
@@ -132,7 +138,7 @@
 
   // `id` is the registration_id: shown as "Reg. No." on the title line, not in the details.
   // `name` is the title itself.
-  const excludedKeys = ["id", "registration_id", "name", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
+  const excludedKeys = ["id", "registration_id", "name", "blocked_until", "block_reason", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
     const rawCode = (uniqueCode && uniqueCode.trim()) || (qr && typeof qr === 'string' && !qr.trim().startsWith('http') ? qr.trim() : null);
@@ -228,6 +234,13 @@
         </span>
       {/if}
 
+      {#if blockedUntil}
+        <span class="indicator-pill indicator-rejected" title="Gate block in force: entry is denied at every campus">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          BLOCKED UNTIL {blockedUntil.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+        </span>
+      {/if}
+
       {#if rejectionReason === 'OVERDUE' || (data.sch && (!data.hdc || data.hdc === '-') && new Date(data.sch) < new Date())}
         <span class="indicator-pill indicator-overdue" title="Passed scheduled visit date">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -287,6 +300,20 @@
               <strong>Revoked Account / Application:</strong> Vehicle sticker privileges have been revoked.
               {#if rejectionReason}
                 <div class="alert-reason-text"><strong>Revocation Reason:</strong> {rejectionReason}</div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        {#if blockedUntil}
+          <div class="app-alert-banner alert-rejected-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+            </svg>
+            <div>
+              <strong>Blocked from the gate:</strong> entry is denied at every campus until <strong>{blockedUntilText}</strong>.
+              {#if data.block_reason}
+                <div class="alert-reason-text"><strong>Reason:</strong> {data.block_reason}</div>
               {/if}
             </div>
           </div>
