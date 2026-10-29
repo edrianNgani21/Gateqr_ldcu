@@ -481,6 +481,8 @@
 
   .table-type-selector {
     display: inline-flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     gap: 0.5rem;
     background: var(--surface);
     border: 1.5px solid var(--border);
@@ -492,6 +494,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    /* Keep labels on one line (global overflow-wrap: anywhere was splitting words) */
+    white-space: nowrap;
+    overflow-wrap: normal;
+    flex-shrink: 0;
     padding: 0.65rem 1.25rem;
     background: transparent;
     border: none;
@@ -534,6 +540,7 @@
   /* Status Filter */
   .status-filter {
     display: flex;
+    flex-shrink: 0;
     gap: 0.5rem;
     padding: 0.35rem;
     background: var(--surface);
@@ -542,8 +549,10 @@
   }
 
   .filter-tab {
-    flex: 1;
+    flex: 1 0 auto;
     padding: 0.625rem 1rem;
+    white-space: nowrap;
+    overflow-wrap: normal;
     background: transparent;
     border: none;
     border-radius: 8px;
