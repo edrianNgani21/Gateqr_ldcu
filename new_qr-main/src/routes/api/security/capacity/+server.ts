@@ -9,7 +9,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { campus, parking_capacity, event_name, start_date, end_date, remove_event, check_expired } = await request.json();
+        const { campus, capacity_2_wheels, capacity_4_wheels, event_name, start_date, end_date, remove_event, check_expired } = await request.json();
 
         if (check_expired) {
             invalidateCapacityServerCache();
@@ -52,10 +52,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ success: true });
         }
 
-        // Handle regular capacity updates
-        if (typeof parking_capacity !== 'number') {
-            return json({ error: 'Invalid capacity' }, { status: 400 });
+        // Handle regular capacity updates: separate 2-wheel and 4-wheel limits, total is their sum
+        const isLimit = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 10000;
+        if (!isLimit(capacity_2_wheels) || !isLimit(capacity_4_wheels)) {
+            return json({ error: '2-wheel and 4-wheel limits must be whole numbers from 0 to 10000.' }, { status: 400 });
         }
+        const parking_capacity = capacity_2_wheels + capacity_4_wheels;
 
         const isEventEnded = Boolean(event_name && end_date && new Date(end_date).getTime() <= Date.now());
         const effectiveEventName = (!isEventEnded && event_name) ? event_name : null;
@@ -102,6 +104,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .update({
                     parking_capacity,
                     capacity: parking_capacity,
+                    capacity_2_wheels,
+                    capacity_4_wheels,
                     slot_occupied: occupied,
                     occupied: occupied,
                     slot_unoccupied: available,
@@ -153,6 +157,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     campus_gate: gate,
                     parking_capacity,
                     capacity: parking_capacity,
+                    capacity_2_wheels,
+                    capacity_4_wheels,
                     slot_occupied: occupied,
                     occupied: occupied,
                     slot_unoccupied: available,
@@ -178,6 +184,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                             vehicle_log_id: anyRecord.vehicle_log_id,
                             campus,
                             parking_capacity,
+                            capacity_2_wheels,
+                            capacity_4_wheels,
                             slot_occupied: occupied,
                             slot_unoccupied: available,
                             event_name: effectiveEventName

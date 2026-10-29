@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import { invalidateAll } from '$app/navigation';
@@ -41,7 +42,7 @@
         if (input.files && input.files[0]) {
             const f = input.files[0];
             if (!f.type.startsWith('image/')) {
-                alert('Only image files are allowed.');
+                showAlert('Only image files are allowed.');
                 input.value = '';
                 receiptFile = null;
                 receiptPreview = null;
@@ -106,7 +107,7 @@
             const f = input.files[0];
             const isPdf = f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf';
             if (!isPdf) {
-                alert('Only PDF files are allowed.');
+                showAlert('Only PDF files are allowed.');
                 input.value = '';
                 return;
             }
@@ -153,7 +154,7 @@
             if (!res.ok) {
                 changeError = resData.error || 'Failed to submit change request.';
             } else {
-                alert('Your request to change registration details has been submitted to OSA for review!');
+                showAlert('Your request to change registration details has been submitted to OSA for review!');
                 changeModalOpen = false;
                 changeReason = '';
                 newMake = '';

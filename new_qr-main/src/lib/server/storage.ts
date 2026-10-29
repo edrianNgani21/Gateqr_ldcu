@@ -26,13 +26,23 @@ export async function uploadToStorage(
             options.contentType = contentType;
         }
 
-        const { data, error } = await supabaseAdmin.storage
-            .from(bucket)
-            .upload(cleanPath, fileData, options);
+        // Supabase Storage occasionally answers 5xx (e.g. 520) with no message; retry those a few times
+        const maxAttempts = 3;
+        for (let attempt = 1; ; attempt++) {
+            const { error } = await supabaseAdmin.storage
+                .from(bucket)
+                .upload(cleanPath, fileData, options);
 
-        if (error) {
-            console.error(`[Storage] Upload error for ${cleanPath}:`, error);
-            throw error;
+            if (!error) break;
+
+            const status = Number((error as any).statusCode ?? (error as any).status ?? 0);
+            const retryable = !status || status >= 500 || status === 408 || status === 429;
+            console.error(`[Storage] Upload error for ${cleanPath} (attempt ${attempt}/${maxAttempts}, status ${status || 'unknown'}):`, error);
+            if (!retryable || attempt >= maxAttempts) {
+                const reason = error.message && error.message !== '<none>' ? error.message : `storage service returned ${status || 'an unknown error'}`;
+                throw new Error(`File upload failed: ${reason}. Please try again.`);
+            }
+            await new Promise((r) => setTimeout(r, 600 * attempt));
         }
 
         const { data: publicData } = supabaseAdmin.storage

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
   let {
     tab,
     status = '',
@@ -114,7 +115,7 @@
           <button
             class="action-btn btn-reject"
             onclick={() => {
-              if (!rejectReason.trim()) { alert('Please provide a reason.'); return; }
+              if (!rejectReason.trim()) { showAlert('Please provide a reason.'); return; }
               act('security_reject', rejectReason.trim());
               showRejectInput = false;
               rejectReason = '';
@@ -153,7 +154,7 @@
           Processing…
         {:else}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-          Check
+          Mark as Checked
         {/if}
       </button>
     {/if}
@@ -175,6 +176,20 @@
     </button>
 
   {:else if tab.toLowerCase().includes('register')}
+    <button
+      class="action-btn btn-violation"
+      onclick={() => act('record_violation')}
+      disabled={!!loadingAction}
+      class:btn-loading={loadingAction === 'record_violation'}
+    >
+      {#if loadingAction === 'record_violation'}
+        {@render spinner()}
+        Opening…
+      {:else}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        Record Violation
+      {/if}
+    </button>
     <button
       class="action-btn btn-revoke"
       onclick={() => act('revoke')}
@@ -396,6 +411,13 @@
     border: 1.5px solid #fde68a;
   }
   .btn-revoke:not(:disabled):hover { background: #fef3c7; }
+
+  .btn-violation {
+    background: #fff7ed;
+    color: #c2410c;
+    border: 1.5px solid #fdba74;
+  }
+  .btn-violation:not(:disabled):hover { background: #ffedd5; }
 
   .btn-unrevoke {
     background: #ecfdf5;

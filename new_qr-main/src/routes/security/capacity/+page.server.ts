@@ -132,7 +132,12 @@ export const load: PageServerLoad = async ({ locals }) => {
                 return !isNaN(endMs) && endMs <= nowMs;
             }).slice(0, 30);
 
-            const capacity = paData?.parking_capacity ?? paData?.capacity ?? 200;
+            // Separate limits for motorcycles and cars; the total is their sum once both are set
+            const capacity2 = paData?.capacity_2_wheels ?? null;
+            const capacity4 = paData?.capacity_4_wheels ?? null;
+            const capacity = capacity2 !== null && capacity4 !== null
+                ? capacity2 + capacity4
+                : (paData?.parking_capacity ?? paData?.capacity ?? 200);
             const occupied = stats.occupied;
             const available = Math.max(0, capacity - occupied);
 
@@ -144,6 +149,10 @@ export const load: PageServerLoad = async ({ locals }) => {
                 unoccupied: available,
                 wheels2: stats.wheels2,
                 wheels4: stats.wheels4,
+                capacity2,
+                capacity4,
+                available2: capacity2 !== null ? Math.max(0, capacity2 - stats.wheels2) : null,
+                available4: capacity4 !== null ? Math.max(0, capacity4 - stats.wheels4) : null,
                 event_name: activeEvent?.event_name ?? '',
                 event_start: activeEvent?.start_date ?? '',
                 event_end: activeEvent?.end_date ?? '',
@@ -171,6 +180,10 @@ export const load: PageServerLoad = async ({ locals }) => {
                 unoccupied: 200,
                 wheels2: 0,
                 wheels4: 0,
+                capacity2: null as number | null,
+                capacity4: null as number | null,
+                available2: null as number | null,
+                available4: null as number | null,
                 event_name: '',
                 event_start: '',
                 event_end: '',

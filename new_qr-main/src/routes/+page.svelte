@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert, showError } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import { goto } from '$app/navigation';
 
@@ -90,7 +91,7 @@
         if (file) {
             const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
             if (!isPdf) {
-                alert('Only PDF files are allowed. (Document allows PDF and Scanned)');
+                showAlert('Only PDF files are allowed. (Document allows PDF and Scanned)');
                 if (inputEl) inputEl.value = '';
                 return;
             }
@@ -111,17 +112,17 @@
 
     async function handleSubmit() {
         if (!fname || !lname || !contact_number || !vehicle || !vehicle_type || !plate || !color || !role) {
-            alert('Please fill out all required fields.');
+            showAlert('Please fill out all required fields.');
             return;
         }
 
         if (contact_number.length !== 11 || !/^\d{11}$/.test(contact_number)) {
-            alert('Phone Number must be exactly 11 numbers (e.g. 09123456789).');
+            showAlert('Phone Number must be exactly 11 numbers (e.g. 09123456789).');
             return;
         }
 
         if (idno.length !== 11 || !/^\d{11}$/.test(idno)) {
-            alert('ID Number must be exactly 11 numbers.');
+            showAlert('ID Number must be exactly 11 numbers.');
             return;
         }
 
@@ -174,11 +175,11 @@
             if (res.ok) {
                 goto('/status');
             } else {
-                const data = await res.json();
-                alert('Error submitting application: ' + data.error);
+                const data = await res.json().catch(() => ({}));
+                showError(data.error, 'Application not submitted');
             }
         } catch(e) {
-            alert('Network error');
+            showError('Network error', 'Application not submitted');
         } finally {
             loading = false;
         }

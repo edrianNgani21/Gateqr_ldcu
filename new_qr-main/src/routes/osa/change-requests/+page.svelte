@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
   import { invalidateAll } from '$app/navigation';
@@ -128,7 +129,7 @@
       if (!res.ok) {
         scheduleError = resData.error || 'Failed to accept and schedule request.';
       } else {
-        alert('Registration details change request accepted! The application has now moved to the Hardcopy Compliance Schedules in Manage Applications.');
+        showAlert('Registration details change request accepted! The application has now moved to the Hardcopy Compliance Schedules in Manage Applications.');
         closeScheduleModal();
         await invalidateAll();
       }
@@ -178,7 +179,7 @@
       if (!res.ok) {
         rejectError = resData.error || 'Failed to reject request.';
       } else {
-        alert('Registration details change request rejected.');
+        showAlert('Registration details change request rejected.');
         closeRejectModal();
         await invalidateAll();
       }

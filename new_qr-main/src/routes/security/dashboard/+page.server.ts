@@ -27,7 +27,8 @@ export const load: PageServerLoad = async ({ locals }) => {
             todayLogsRes,
             flaggedRowsRes,
             complaintsCountsRes,
-            campusResults
+            campusResults,
+            violationRowsRes
         ] = await Promise.all([
             // 1. All currently active inside vehicles (where check_out is null)
             supabase
@@ -80,6 +81,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                     )
                 `)
                 .or(`check_in.gte.${today},created_at.gte.${today}`)
+                // Refused gate attempts are alerts, not visits
+                .neq('logged_status', 'denied')
                 .order('check_in', { ascending: false })
                 .limit(200),
 
@@ -105,7 +108,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         role
                     )
                 `)
-                .or('reason.not.is.null,logged_status.ilike.%denied%,logged_status.ilike.%flagged%')
+                .or('reason.not.is.null,logged_status.eq.denied')
                 .order('check_in', { ascending: false })
                 .limit(20),
 
@@ -139,7 +142,29 @@ export const load: PageServerLoad = async ({ locals }) => {
                         .maybeSingle()
                 ]);
                 return { name, paData: paRes.data, evData: evRes.data };
-            }))
+            })),
+
+            // 6. Violations recorded by OSA / Security (warnings and gate blocks)
+            supabase
+                .from('blocklist')
+                .select(`
+                    blocklist_id,
+                    violation_level,
+                    reason,
+                    block_by,
+                    recorded_at,
+                    blocked_until,
+                    vehicle_information:vehicle_id(
+                        plate_number
+                    ),
+                    registration:registration_id(
+                        first_name,
+                        last_name,
+                        role
+                    )
+                `)
+                .order('recorded_at', { ascending: false })
+                .limit(20)
         ]);
 
         const activeInsideLogs = activeInsideRes.data || [];
@@ -241,7 +266,27 @@ export const load: PageServerLoad = async ({ locals }) => {
             }
         });
 
-        const flaggedAlerts = flaggedRows
+        const violationLevelLabels: Record<string, string> = {
+            first_warning: '1st Warning',
+            second_warning: '2nd Warning',
+            gate_block: 'Gate Block'
+        };
+        const violationAlerts = (violationRowsRes.data || []).map((v: any) => {
+            const blockedUntil = v.blocked_until ? new Date(v.blocked_until) : null;
+            const by = v.block_by === 'osa_admin' ? 'OSA' : 'Security';
+            return {
+                id: `violation-${v.blocklist_id}`,
+                time: v.recorded_at,
+                reason: `Violation (${by}): ${v.reason}${blockedUntil ? ` - blocked until ${blockedUntil.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' })}` : ''}`,
+                plate: v.vehicle_information?.plate_number || 'No Plate',
+                name: `${v.registration?.first_name || ''} ${v.registration?.last_name || ''}`.trim() || 'Unknown',
+                role: v.registration?.role ? (v.registration.role.charAt(0).toUpperCase() + v.registration.role.slice(1)) : '-',
+                campus: 'All Campuses',
+                status: violationLevelLabels[v.violation_level] || 'Violation'
+            };
+        });
+
+        const gateAlerts = flaggedRows
             .filter((r: any) => {
                 const st = (r.logged_status || '').toLowerCase();
                 const reason = (r.reason || '').toLowerCase();
@@ -252,7 +297,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             .map((r: any) => ({
                 id: r.vehicle_log_id,
                 time: r.check_in || r.created_at || new Date().toISOString(),
-                reason: r.reason || (r.logged_status === 'Denied' ? 'QR Code Not Recognized / Denied' : r.logged_status) || 'Flagged Alert',
+                reason: r.reason || (r.logged_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.logged_status) || 'Flagged Alert',
                 plate: r.vehicle_information?.plate_number || 'No Plate',
                 name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || 'Guest / Unregistered',
                 role: r.registration?.role ? (r.registration.role.charAt(0).toUpperCase() + r.registration.role.slice(1)) : 'Visitor',
@@ -264,8 +309,13 @@ export const load: PageServerLoad = async ({ locals }) => {
                     if (low === 'main' || low.includes('main')) return 'Main Campus';
                     return raw.charAt(0).toUpperCase() + raw.slice(1);
                 })(),
-                status: r.logged_status || 'Flagged'
+                status: r.logged_status === 'denied' ? 'Denied' : (r.logged_status || 'Flagged')
             }));
+
+        // Gate events and recorded violations, newest first
+        const flaggedAlerts = [...gateAlerts, ...violationAlerts]
+            .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+            .slice(0, 20);
 
         let mainEvent = null;
         let rnpEvent = null;

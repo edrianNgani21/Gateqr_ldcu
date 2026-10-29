@@ -82,6 +82,44 @@
   // Workflow-specific labels per dashboard tab (e.g. PENDING DPT APRVL, OSA CHECKED, PAID)
   let workflowPills = $derived(getWorkflowStatusPills(tab, appStatus, data.role));
 
+  // Colored left edge follows the status shown on the card
+  let accentTone = $derived(
+    appStatus && ["rejected", "revoked", "expired"].includes(appStatus)
+      ? "danger"
+      : workflowPills?.[0]?.tone ?? statusVariant,
+  );
+
+  let regNo = $derived.by(() => {
+    const raw = String(data.registration_id ?? data.id ?? "").replace(/\D/g, "");
+    return raw || null;
+  });
+
+  // Detail fields grouped into sections; anything not listed here goes under Applicant
+  const vehicleKeys = ["vehicle", "color", "vehicle type", "plate", "brand", "type"];
+  let detailEntries = $derived(
+    Object.entries(defaults).filter(
+      ([key, val]) => val !== undefined && val !== null && val !== "-" && val !== "" && !excludedKeys.includes(key),
+    ),
+  );
+  // Raw database values (student, 2_wheels) shown as readable text
+  const titleCaseKeys = ["role", "vehicle type", "type", "color", "campus", "owner"];
+  function displayValue(key: string, val: any): string {
+    const text = String(val);
+    if (key === "vehicle type" || key === "type") {
+      if (/^2[_\s-]?wheel/i.test(text)) return "2 Wheels (Motorcycle)";
+      if (/^4[_\s-]?wheel/i.test(text)) return "4 Wheels (Car)";
+    }
+    if (titleCaseKeys.includes(key)) {
+      return text.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    return text;
+  }
+  // Long values get a full row on phones
+  const wideKeys = ["email", "department", "dept. email", "facebook", "address"];
+
+  let applicantEntries = $derived(detailEntries.filter(([key]) => !vehicleKeys.includes(key)));
+  let vehicleEntries = $derived(detailEntries.filter(([key]) => vehicleKeys.includes(key)));
+
   // Role badge colors
   const roleColors: Record<string, string> = {
     student: "#3b82f6",
@@ -92,8 +130,9 @@
   };
   let roleColor = $derived(roleColors[role] ?? "#6b7280");
 
-  // `id` is the registration_id; it is printed under the QR code instead of in the card details
-  const excludedKeys = ["id", "registration_id", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
+  // `id` is the registration_id: shown as "Reg. No." on the title line, not in the details.
+  // `name` is the title itself.
+  const excludedKeys = ["id", "registration_id", "name", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
     const rawCode = (uniqueCode && uniqueCode.trim()) || (qr && typeof qr === 'string' && !qr.trim().startsWith('http') ? qr.trim() : null);
@@ -119,7 +158,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="app-card" class:expanded class:selected class:selectable>
+<div class="app-card accent-{accentTone}" class:expanded class:selected class:selectable>
 
   <!-- ── Compact Summary Row (always visible) ── -->
   <div
@@ -151,7 +190,13 @@
 
     <!-- Name + meta -->
     <div class="summary-main">
-      <span class="summary-name">{data.name || '—'}</span>
+      <div class="summary-title">
+        {#if regNo}
+          <span class="reg-no">Reg. No. {regNo}</span>
+          <span class="title-sep" aria-hidden="true">—</span>
+        {/if}
+        <span class="summary-name">{data.name || 'Unnamed applicant'}</span>
+      </div>
       <div class="summary-meta">
         {#if (data.department || data.Department) && (data.department || data.Department) !== '-'}
           <span class="meta-chip">{data.department || data.Department}</span>
@@ -279,23 +324,47 @@
           </div>
         {/if}
 
-        <!-- Info grid -->
-        <div class="info-grid">
-          {#each Object.entries(defaults) as [key, val]}
-            {#if val !== undefined && val !== null && val !== '-' && !excludedKeys.includes(key)}
-              <div class="info-item">
-                <span class="info-label">{key}</span>
-                <span class="info-value">{val}</span>
+        <!-- Details, grouped -->
+        <div class="detail-groups">
+          {#if applicantEntries.length > 0}
+            <section class="detail-group">
+              <h4 class="group-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Applicant
+              </h4>
+              <div class="info-grid">
+                {#each applicantEntries as [key, val]}
+                  <div class="info-item" class:info-wide={wideKeys.includes(key)}>
+                    <span class="info-label">{key}</span>
+                    <span class="info-value">{displayValue(key, val)}</span>
+                  </div>
+                {/each}
               </div>
-            {/if}
-          {/each}
-          {#if rejectionReason && rejectionReason !== 'OVERDUE' && rejectionReason !== 'RESCHEDULED'}
-            <div class="info-item info-item-full reason-item">
-              <span class="info-label reason-label">{reasonLabel}</span>
-              <span class="info-value reason-value">{rejectionReason}</span>
-            </div>
+            </section>
+          {/if}
+          {#if vehicleEntries.length > 0}
+            <section class="detail-group">
+              <h4 class="group-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M6 17l1.5-6h9L18 17"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/></svg>
+                Vehicle
+              </h4>
+              <div class="info-grid">
+                {#each vehicleEntries as [key, val]}
+                  <div class="info-item" class:info-wide={wideKeys.includes(key)}>
+                    <span class="info-label">{key}</span>
+                    <span class="info-value">{displayValue(key, val)}</span>
+                  </div>
+                {/each}
+              </div>
+            </section>
           {/if}
         </div>
+        {#if rejectionReason && rejectionReason !== 'OVERDUE' && rejectionReason !== 'RESCHEDULED'}
+          <div class="info-item reason-item">
+            <span class="info-label reason-label">{reasonLabel}</span>
+            <span class="info-value reason-value">{rejectionReason}</span>
+          </div>
+        {/if}
 
         <!-- Receipt (uploaded by applicant) -->
         {#if data.receipt}
@@ -396,20 +465,29 @@
 <style>
   /* ─── Card Shell ─────────────────────────────────────────────────────── */
   .app-card {
+    --accent: var(--maroon, #6b1a2a);
     background: var(--surface);
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius-md, 10px);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow: var(--shadow-sm);
-    transition: border-color 0.18s, box-shadow 0.18s;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.04);
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+  }
+  .app-card.accent-success { --accent: #16a34a; }
+  .app-card.accent-warning { --accent: #d97706; }
+  .app-card.accent-danger  { --accent: #dc2626; }
+  .app-card:not(.expanded):hover {
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
   }
   .app-card.selected {
     border-color: var(--maroon);
     box-shadow: 0 0 0 2px rgba(107,26,42,0.12), var(--shadow-sm);
   }
   .app-card.expanded {
-    border-color: var(--maroon, #6b1a2a);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+    border-color: var(--border);
+    border-left-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
   }
 
   /* ─── Summary Row ─────────────────────────────────────────────────────── */
@@ -417,10 +495,10 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.65rem 1rem;
+    padding: 0.8rem 1rem;
     cursor: pointer;
     user-select: none;
-    min-height: 54px;
+    min-height: 60px;
     transition: background 0.15s;
     flex-wrap: wrap;
   }
@@ -460,7 +538,10 @@
       font-size: 0.825rem;
     }
     .info-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .info-wide {
+      grid-column: 1 / -1;
     }
     .qr-body {
       flex-direction: column;
@@ -512,13 +593,36 @@
     flex-direction: column;
     gap: 0.2rem;
   }
+  .summary-title {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .reg-no {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--maroon, #6b1a2a);
+    background: rgba(107, 26, 42, 0.08);
+    border: 1px solid rgba(107, 26, 42, 0.18);
+    padding: 0.1rem 0.45rem;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .title-sep {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+  }
   .summary-name {
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-size: 0.95rem;
+    font-weight: 700;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
   .summary-meta {
     display: flex;
@@ -665,22 +769,64 @@
     to   { opacity: 1; transform: translateY(0); }
   }
   .detail-inner {
-    padding: 1rem 1rem 0.75rem;
+    padding: 1rem 1.1rem 0.9rem;
     display: flex;
     flex-direction: column;
-    gap: 0.875rem;
+    gap: 1rem;
+  }
+
+  /* ─── Grouped details ───────────────────────────────────────────────── */
+  .detail-groups {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 0.75rem;
+  }
+  .detail-groups:has(> :only-child) {
+    grid-template-columns: 1fr;
+  }
+  .detail-group {
+    background: #fbf7f8;
+    border: 1px solid #ead9de;
+    border-radius: 12px;
+    padding: 0.8rem 0.85rem 0.85rem;
+    min-width: 0;
+  }
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0 0 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--maroon, #6b1a2a);
+  }
+  @media (max-width: 768px) {
+    .detail-groups {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* ─── Info Grid ──────────────────────────────────────────────────────── */
   .info-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 0.4rem 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.5rem;
   }
   .info-item {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+  /* Each detail field sits in its own small bordered tile */
+  .detail-group .info-item {
+    background: #ffffff;
+    border: 1px solid #ecdfe3;
+    border-radius: 8px;
+    padding: 0.5rem 0.65rem;
+    box-shadow: 0 1px 1px rgba(107, 26, 42, 0.03);
   }
   .info-item-full { grid-column: 1 / -1; }
   .info-label {
@@ -691,9 +837,9 @@
     letter-spacing: 0.06em;
   }
   .info-value {
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: 600;
     word-break: break-word;
   }
   .reason-item {

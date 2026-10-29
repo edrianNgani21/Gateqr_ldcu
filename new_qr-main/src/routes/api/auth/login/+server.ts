@@ -2,10 +2,9 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { env } from '$env/dynamic/private';
+import { issueSession, isTrustedDevice, startLoginConfirmation, formatManila } from '$lib/server/loginConfirmation';
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, url, getClientAddress }) => {
     try {
         const body = await request.json();
         const rawEmail = body.email;
@@ -25,7 +24,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         // Fetch user record
         const { data: userList, error: queryError } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, department_id, password_hash, is_active')
+            .select('user_id, email, user_type, identification, department_id, password_hash, is_active, login_locked_until')
             .ilike('email', email)
             .limit(1);
 
@@ -44,24 +43,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             return json({ error: 'Account is deactivated. Please contact OSA administration.' }, { status: 403 });
         }
 
-        // Verify password
-        let isPasswordValid = false;
-
-        if (user.password_hash) {
-            isPasswordValid = bcrypt.compareSync(password, user.password_hash);
-        } else if (email === 'aluban98304@liceo.edu.ph' && password === 'Admin123!') {
-            // Bootstrap fallback for default OSA Admin before/during manual migration
-            isPasswordValid = true;
-            try {
-                const newHash = bcrypt.hashSync('Admin123!', 10);
-                await supabase
-                    .from('users')
-                    .update({ password_hash: newHash, user_type: 'osa', identification: 'admin' })
-                    .eq('user_id', user.user_id);
-            } catch (syncErr) {
-                console.warn('[Login] Note: Could not auto-sync password_hash column:', syncErr);
-            }
+        // Locked after the owner chose "This is not me" on a sign-in confirmation email
+        if (user.login_locked_until && new Date(user.login_locked_until).getTime() > Date.now()) {
+            return json({
+                error: `This account is temporarily locked after a blocked sign-in attempt. Try again after ${formatManila(user.login_locked_until)}.`
+            }, { status: 423 });
         }
+
+        // Verify password
+        const isPasswordValid = user.password_hash ? bcrypt.compareSync(password, user.password_hash) : false;
 
         if (!isPasswordValid) {
             return json({ error: 'Invalid email or password' }, { status: 401 });
@@ -109,26 +99,29 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             redirectUrl = '/status';
         }
 
-        // Generate JWT session token
-        const token = jwt.sign(
-            {
-                email: user.email,
+        // Admins on a browser that hasn't confirmed a sign-in in the last 30 days must confirm by email first
+        if (role !== 'applicant' && !isTrustedDevice(cookies, user.user_id)) {
+            let ip: string | null = null;
+            try { ip = getClientAddress(); } catch { ip = null; }
+            const { expiresAt } = await startLoginConfirmation({
+                cookies,
+                origin: url.origin,
+                user: { user_id: user.user_id, email: user.email },
                 role,
-                user_type: user.user_type,
-                department_id: user.department_id || null,
-                user_id: user.user_id
-            },
-            env.JWT_SECRET as string,
-            { expiresIn: '7d' }
-        );
+                redirectUrl,
+                ip,
+                userAgent: request.headers.get('user-agent')
+            });
+            console.log(`[Login] Email confirmation required for ${user.email} (Role: ${role})`);
+            return json({ requires_confirmation: true, email: user.email, expires_at: expiresAt });
+        }
 
-        // Store HttpOnly session cookie
-        cookies.set('gateqr_session', token, {
-            path: '/',
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7 // 7 days
+        issueSession(cookies, {
+            user_id: user.user_id,
+            email: user.email,
+            role,
+            user_type: user.user_type,
+            department_id: user.department_id || null
         });
 
         console.log(`[Login] Successful login for ${user.email} (Role: ${role})`);

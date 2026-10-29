@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
@@ -68,17 +69,17 @@
                 await invalidateAll();
             } else {
                 const err = await res.json();
-                alert(err.error || 'Failed to save department');
+                showAlert(err.error || 'Failed to save department');
             }
         } catch(e) {
-            alert('Network error');
+            showAlert('Network error');
         } finally {
             loading = false;
         }
     }
 
     async function handleDeactivate(auto_id: number) {
-        if (!confirm('Are you sure you want to deactivate this department? This will hide it from new applications but preserve all existing data.')) return;
+        if (!await askConfirm('Are you sure you want to deactivate this department? This will hide it from new applications but preserve all existing data.')) return;
         try {
             const res = await fetch('/api/departments', {
                 method: 'DELETE',
@@ -88,10 +89,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                alert('Failed to deactivate department');
+                showAlert('Failed to deactivate department');
             }
         } catch(e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 
@@ -105,10 +106,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                alert('Failed to activate department');
+                showAlert('Failed to activate department');
             }
         } catch(e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 
@@ -640,6 +641,26 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .course-list-item {
+    gap: 0.75rem;
+  }
+
+  /* Phones: name on its own line, status and buttons underneath */
+  @media (max-width: 480px) {
+    .course-list-item {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .course-actions {
+      flex-wrap: wrap;
+    }
+    .course-action-btn {
+      flex: 1;
+      min-height: 36px;
+    }
   }
 
   .course-action-btn {

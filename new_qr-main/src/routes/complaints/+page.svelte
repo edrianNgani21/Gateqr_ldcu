@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import { onMount } from 'svelte';
     import { supabaseClient } from '$lib/supabaseClient';
@@ -41,7 +42,7 @@
 
     async function submitComplaint() {
         if (!message || message.trim() === '') {
-            alert('Please enter a message');
+            showAlert('Please enter a message');
             return;
         }
 
@@ -58,16 +59,16 @@
                 await loadComplaints(); // Refresh the list
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to submit incident report');
+                showAlert(json.error || 'Failed to submit incident report');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         }
         submitLoading = false;
     }
 
     async function deleteComplaint(id: number) {
-        if (!confirm('Are you sure you want to delete this incident report?')) return;
+        if (!await askConfirm('Are you sure you want to delete this incident report?')) return;
 
         try {
             const res = await fetch(`/api/complaints/${id}`, {
@@ -78,10 +79,10 @@
                 complaints = complaints.filter(c => c.complaint_id !== id);
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to delete incident report');
+                showAlert(json.error || 'Failed to delete incident report');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 </script>

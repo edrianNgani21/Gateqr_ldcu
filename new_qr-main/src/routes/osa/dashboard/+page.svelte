@@ -71,24 +71,20 @@
     let recentApplications = $derived(data.recentApplications || []);
 
 
-    const statusLabels: Record<string, string> = {
-        pending: 'Pending',
-        dept_val: 'Dept Validated',
-        dept_validated: 'Dept Validated',
-        osa_val: 'OSA Validated',
-        osa_validated: 'OSA Validated',
-        security_checked: 'Security Checked',
-        Sticker_Released: 'Sticker Released',
-        sticker_released: 'Sticker Released',
-        Sticker_Installed: 'Sticker Installed',
-        sticker_installed: 'Sticker Installed',
-        completed: 'Completed',
-        approved: 'Approved',
-        rejected: 'Rejected',
-        expired: 'Expired',
-        revoked: 'Revoked',
-        distributed: 'Distributed'
-    };
+    // Recent Activity: the stage each application is at, in plain words
+    function getStageLabel(app: any): { label: string; tone: string } {
+        const s = (app.status || '').toLowerCase();
+        if (['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(s)) return { label: 'Screening', tone: 'pending' };
+        if (s === 'osa_validated' || (s === 'distributed' && !app.osa_dist_at)) return { label: 'Hardcopy Submission', tone: 'pending' };
+        if (s === 'distributed') return { label: 'Security Review', tone: 'review' };
+        if (s === 'security_checked') return { label: 'For Payment', tone: 'review' };
+        if (s === 'receipt_submitted') return { label: 'For Release', tone: 'review' };
+        if (['completed', 'approved', 'sticker_installed', 'sticker_released'].includes(s)) return { label: 'Registered', tone: 'completed' };
+        if (s === 'rejected') return { label: 'Rejected', tone: 'rejected' };
+        if (s === 'revoked') return { label: 'Revoked', tone: 'revoked' };
+        if (s === 'expired') return { label: 'Expired', tone: 'revoked' };
+        return { label: app.status || 'Unknown', tone: 'pending' };
+    }
 
     const maxStatusCount = $derived(Math.max(...Object.values(statusBreakdown), 1));
 
@@ -315,13 +311,14 @@
                 {#if recentApplications.length > 0}
                     <div class="recent-list">
                         {#each recentApplications as app}
+                            {@const stage = getStageLabel(app)}
                             <div class="recent-item">
                                 <div class="recent-info">
                                     <div class="recent-email">{app.user?.email || 'Unknown'}</div>
                                     <div class="recent-dept">{app.department?.department || app.department?.department_name || 'No Department'}</div>
                                 </div>
-                                <div class="recent-status" class:status-pending={app.status === 'pending'} class:status-dept_val={app.status === 'dept_val'} class:status-osa_val={app.status === 'osa_val'} class:status-distributed={app.status === 'distributed'} class:status-completed={app.status === 'completed'} class:status-rejected={app.status === 'rejected'} class:status-revoked={app.status === 'revoked'}>
-                                    {statusLabels[app.status] || app.status}
+                                <div class="recent-status status-{stage.tone}">
+                                    {stage.label}
                                 </div>
                             </div>
                         {/each}
@@ -886,22 +883,10 @@
         border: 1px solid #FDE68A;
     }
 
-    .recent-status.status-dept_val {
+    .recent-status.status-review {
         background: #EFF6FF;
-        color: #3B82F6;
+        color: #1D4ED8;
         border: 1px solid #BFDBFE;
-    }
-
-    .recent-status.status-osa_val {
-        background: #F3E8FF;
-        color: #7C3AED;
-        border: 1px solid #DDD6FE;
-    }
-
-    .recent-status.status-distributed {
-        background: #ECFDF5;
-        color: #047857;
-        border: 1px solid #A7F3D0;
     }
 
     .recent-status.status-completed {

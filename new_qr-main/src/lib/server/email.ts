@@ -54,7 +54,7 @@ function escapeHtml(value: string): string {
 
 function detectTone(subject: string): EmailTone {
     const s = subject.toLowerCase();
-    if (/(reject|revok|delet|denied|blocked|retract)/.test(s)) return 'danger';
+    if (/(reject|revok|delet|denied|blocked|retract|violation)/.test(s)) return 'danger';
     if (/(approv|accept|complete|restor|unrevok|received|resolved|verified)/.test(s)) return 'success';
     return 'info';
 }

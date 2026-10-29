@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
   import { supabaseClient } from '$lib/supabaseClient';
@@ -195,13 +196,13 @@
   function printSelectedLogs() {
     const selectedLogsData = logs.filter((log: any) => selectedLogs.has(log.vehicle_log_id));
     if (selectedLogsData.length === 0) {
-      alert('Please select at least one log to print.');
+      showAlert('Please select at least one log to print.');
       return;
     }
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Please allow popups to print.');
+      showAlert('Please allow popups to print.');
       return;
     }
 

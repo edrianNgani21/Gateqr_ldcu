@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { onMount } from 'svelte';
@@ -54,10 +55,10 @@
                 complaints = complaints.map(c => c.complaint_id === id ? { ...c, status } : c);
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to update incident report');
+                showAlert(json.error || 'Failed to update incident report');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 
@@ -73,16 +74,16 @@
                 complaints = complaints.map(c => c.complaint_id === id ? { ...c, schedule } : c);
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to schedule meeting');
+                showAlert(json.error || 'Failed to schedule meeting');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 
     async function confirmSchedule(id: number, schedule: string) {
         if (!schedule) {
-            alert('Please select a date and time first');
+            showAlert('Please select a date and time first');
             return;
         }
 
@@ -95,13 +96,13 @@
             });
 
             if (res.ok) {
-                alert('Schedule confirmation email sent to reporter');
+                showAlert('Schedule confirmation email sent to reporter');
             } else {
                 const json = await res.json();
-                alert(json.error || 'Failed to send confirmation email');
+                showAlert(json.error || 'Failed to send confirmation email');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         } finally {
             confirmLoading = false;
         }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
@@ -51,7 +52,7 @@
         if (!newDeanEmail) return;
 
         if (!editingDeanId && (!newDeanPassword || newDeanPassword.length < 6)) {
-            alert('Password is required for new dean accounts (minimum 6 characters)');
+            showAlert('Password is required for new dean accounts (minimum 6 characters)');
             return;
         }
 
@@ -80,17 +81,17 @@
                 await invalidateAll();
             } else {
                 const data = await res.json();
-                alert('Failed to save dean: ' + (data.error || 'Unknown error'));
+                showAlert('Failed to save dean: ' + (data.error || 'Unknown error'));
             }
         } catch(e) {
-            alert('Network error');
+            showAlert('Network error');
         } finally {
             loading = false;
         }
     }
 
     async function handleDelete(user_id: number) {
-        if (!confirm('Are you sure you want to delete this dean account?')) return;
+        if (!await askConfirm('Are you sure you want to delete this dean account?')) return;
         try {
             const res = await fetch('/api/deans', {
                 method: 'DELETE',
@@ -100,10 +101,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                alert('Failed to delete dean');
+                showAlert('Failed to delete dean');
             }
         } catch(e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 </script>

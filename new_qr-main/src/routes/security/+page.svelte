@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
   import AppShell from "$lib/components/AppShell.svelte";
   import NavBar from "$lib/components/NavBar.svelte";
   import TabBar from "$lib/components/TabBar.svelte";
   import ApplicationCard from "$lib/components/ApplicationCard.svelte";
   import ActionBar from "$lib/components/ActionBar.svelte";
+  import ViolationModal from "$lib/components/ViolationModal.svelte";
+  import { printRegisteredVehicles } from "$lib/utils/printRecords";
   import { invalidateAll } from "$app/navigation";
   import { supabaseClient } from "$lib/supabaseClient";
 
@@ -37,6 +40,19 @@
 
   // â”€â”€ Vehicle Monitoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let vehicles = $state(data.vehicles);
+
+  // Record Violation modal (Registered Vehicles tab)
+  let violationTarget = $state<{ id: number; name: string; plate: string } | null>(null);
+
+  // Registered Vehicles: select records to print
+  let printSelectedIds = $state<Set<number>>(new Set());
+  let isRegisteredTab = $derived(tab === "Registered Vehicles" || tab === "Registered");
+
+  function togglePrintSelection(id: number, on: boolean) {
+    const next = new Set(printSelectedIds);
+    if (on) next.add(id); else next.delete(id);
+    printSelectedIds = next;
+  }
 
   // Sync vehicles state when data changes via invalidateAll
   $effect(() => {
@@ -92,7 +108,7 @@
 
   async function updateCapacity() {
     if (newCapacity < 0 || newCapacity > 10000) {
-      alert("Capacity must be between 0 and 10000");
+      showAlert("Capacity must be between 0 and 10000");
       return;
     }
 
@@ -110,13 +126,13 @@
       if (res.ok) {
         data.stats.maxCapacity = newCapacity;
         editingCapacity = false;
-        alert("Capacity updated successfully");
+        showAlert("Capacity updated successfully");
       } else {
         const json = await res.json();
-        alert(json.error || "Failed to update capacity");
+        showAlert(json.error || "Failed to update capacity");
       }
     } catch (e) {
-      alert("Network error");
+      showAlert("Network error");
     } finally {
       capacityLoading = false;
     }
@@ -356,7 +372,7 @@
 
   async function revokeQR(registrationId: number) {
     if (
-      !confirm(
+      !await askConfirm(
         "Are you sure you want to revoke this QR code? The vehicle will be denied access.",
       )
     )
@@ -377,18 +393,18 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        alert("Failed to revoke QR code.");
+        showAlert("Failed to revoke QR code.");
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      alert("Error revoking QR code.");
+      showAlert("Error revoking QR code.");
     }
   }
 
   async function unrevokeQR(registrationId: number) {
     if (
-      !confirm(
+      !await askConfirm(
         "Restore access for this vehicle? Their QR code will be reactivated.",
       )
     )
@@ -409,18 +425,18 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        alert("Failed to restore QR code.");
+        showAlert("Failed to restore QR code.");
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      alert("Error restoring QR code.");
+      showAlert("Error restoring QR code.");
     }
   }
 
   async function deleteApp(registrationId: number) {
     if (
-      !confirm("Are you sure you want to permanently delete this registration?")
+      !await askConfirm("Are you sure you want to permanently delete this registration?")
     )
       return;
     const previous = vehicles;
@@ -440,12 +456,12 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        alert("Failed to delete registration.");
+        showAlert("Failed to delete registration.");
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      alert("Error deleting registration.");
+      showAlert("Error deleting registration.");
     }
   }
 
@@ -549,13 +565,13 @@
       selectedLogs.has(log.vehicle_log_id),
     );
     if (selectedLogsData.length === 0) {
-      alert("Please select at least one log to print.");
+      showAlert("Please select at least one log to print.");
       return;
     }
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("Please allow popups to print.");
+      showAlert("Please allow popups to print.");
       return;
     }
 
@@ -705,10 +721,48 @@
     </div>
 
     <div class="cards-list">
+      {#if isRegisteredTab && displayedApps.length > 0}
+        {@const printable = displayedApps.filter((a: any) => printSelectedIds.has(a.registration_id))}
+        <div class="print-toolbar">
+          <span class="print-count"><strong>{printable.length}</strong> of {displayedApps.length} selected</span>
+          <div class="print-actions">
+            <button type="button" class="print-link" onclick={() => (printSelectedIds = new Set(displayedApps.map((a: any) => a.registration_id)))}>Select all</button>
+            {#if printable.length > 0}
+              <button type="button" class="print-link" onclick={() => (printSelectedIds = new Set())}>Clear</button>
+            {/if}
+            <button
+              type="button"
+              class="print-btn"
+              disabled={printable.length === 0}
+              onclick={() => printRegisteredVehicles(
+                printable.map((a: any) => ({
+                  regNo: a.registration_id,
+                  name: `${a.first_name || ""} ${a.last_name || ""}`.trim(),
+                  role: a.role,
+                  department: a.department_name,
+                  campus: a.campus,
+                  plate: a.vehicle_information?.plate_number,
+                  vehicle: [a.vehicle_information?.brand, a.vehicle_information?.color].filter(Boolean).join(" · "),
+                  type: a.vehicle_information?.type,
+                  expires: a.expires_at,
+                })),
+                data.userEmail || "Safety and Security",
+                "Safety and Security Office"
+              )}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Print Selected
+            </button>
+          </div>
+        </div>
+      {/if}
       {#each displayedApps as app}
         <ApplicationCard
           {tab}
           showDocs={true}
+          selectable={isRegisteredTab}
+          selected={printSelectedIds.has(app.registration_id)}
+          onselect={(on) => togglePrintSelection(app.registration_id, on)}
           data={{
             id: app.registration_id || "-",
             name: `${app.first_name} ${app.last_name}`,
@@ -725,13 +779,6 @@
             plate: app.vehicle_information?.plate_number || "-",
             owner: app.is_owner ? "Yes" : "No",
             status: (tab === "Document Review" && app.status === "distributed") ? "" : app.status,
-            "dean status": app.dept_val_at
-              ? "Approved"
-              : app.status === "rejected"
-                ? "Rejected"
-                : app.status === "dept_val"
-                  ? "Pending"
-                  : "N/A",
             crd: app.created_at,
             dpt: app.dept_val_at,
             osa: app.osa_val_at,
@@ -772,7 +819,13 @@
               status={app.status}
               expiresAt={app.expires_at}
               onaction={async (action, schedule) => {
-                if (action === "revoke") {
+                if (action === "record_violation") {
+                  violationTarget = {
+                    id: app.registration_id,
+                    name: `${app.first_name || ""} ${app.last_name || ""}`.trim(),
+                    plate: app.vehicle_information?.plate_number || "",
+                  };
+                } else if (action === "revoke") {
                   await revokeQR(app.registration_id);
                 } else if (action === "unrevoke") {
                   await unrevokeQR(app.registration_id);
@@ -805,11 +858,11 @@
                     } else {
                       vehicles = previousVehicles;
                       const errData = await res.json();
-                      alert(errData.error || "Failed to perform action.");
+                      showAlert(errData.error || "Failed to perform action.");
                     }
                   } catch (e) {
                     vehicles = previousVehicles;
-                    alert("Error performing action.");
+                    showAlert("Error performing action.");
                   }
                 } else if (action === "security_reject") {
                   const previousVehicles = vehicles;
@@ -839,11 +892,11 @@
                     } else {
                       vehicles = previousVehicles;
                       const errData = await res.json();
-                      alert(errData.error || "Failed to reject application.");
+                      showAlert(errData.error || "Failed to reject application.");
                     }
                   } catch (e) {
                     vehicles = previousVehicles;
-                    alert("Error rejecting application.");
+                    showAlert("Error rejecting application.");
                   }
                 }
               }}
@@ -1372,6 +1425,16 @@
         {/if}
       {/if}
     </div>
+  {/if}
+
+  {#if violationTarget}
+    <ViolationModal
+      registrationId={violationTarget.id}
+      applicantName={violationTarget.name}
+      plate={violationTarget.plate}
+      onclose={() => (violationTarget = null)}
+      onrecorded={() => invalidateAll()}
+    />
   {/if}
 </AppShell>
 
@@ -1997,6 +2060,75 @@
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+  }
+
+  /* Registered Vehicles print toolbar */
+  .print-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.85rem;
+    background: #ffffff;
+    border: 1px solid #E8D5DA;
+    border-radius: 12px;
+  }
+
+  .print-count {
+    font-size: 0.85rem;
+    color: #5C3A42;
+  }
+
+  .print-count strong {
+    color: #8B1A3C;
+  }
+
+  .print-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .print-link {
+    background: none;
+    border: none;
+    padding: 0.35rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #8B1A3C;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .print-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 40px;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #8B1A3C, #6B1A2A);
+    color: #E9C25E;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .print-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 480px) {
+    .print-toolbar { flex-direction: column; align-items: stretch; }
+    .print-actions { justify-content: space-between; }
+    .print-btn { flex: 1; justify-content: center; }
   }
 
   .card {

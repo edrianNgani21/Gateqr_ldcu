@@ -400,7 +400,7 @@
   const manageAppSubLinks = [
     { label: 'Screening of Applications', tab: 'validation', href: '/osa?tab=validation' },
     { label: 'Submission of Documents', tab: 'distribution', href: '/osa?tab=distribution' },
-    { label: 'Sticker Releasing', tab: 'release', href: '/osa?tab=release' },
+    { label: 'Releasing of Stickers', tab: 'release', href: '/osa?tab=release' },
     { label: 'Registered Vehicles', tab: 'registered', href: '/osa?tab=registered' },
     { label: 'Rejected or Revoked Accounts & Applications', tab: 'rejected', href: '/osa?tab=rejected' },
     { label: 'Profile Update Requests', path: '/osa/change-requests', href: '/osa/change-requests' }

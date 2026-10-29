@@ -18,6 +18,72 @@
   let loading = $state(false);
   let error = $state("");
 
+  // Admin sign-in waiting for the "Yes, this is me" email confirmation
+  let awaiting = $state<{ email: string; expiresAt: number } | null>(null);
+  let awaitNotice = $state("");
+  let secondsLeft = $state(0);
+
+  function maskEmail(email: string): string {
+    const [name, domain] = email.split("@");
+    if (!domain) return email;
+    return `${name.slice(0, 2)}${"•".repeat(Math.max(1, name.length - 2))}@${domain}`;
+  }
+
+  // Checks every few seconds while waiting; stops as soon as the email is answered or expires
+  $effect(() => {
+    if (!awaiting) return;
+    let stopped = false;
+    const expiresAt = awaiting.expiresAt;
+
+    const tick = () => {
+      secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    };
+    tick();
+    const clock = setInterval(tick, 1000);
+
+    const check = async () => {
+      if (stopped) return;
+      try {
+        const res = await fetch("/api/auth/login-confirmation");
+        const body = await res.json();
+        if (stopped) return;
+        if (body.status === "approved") {
+          stopped = true;
+          goto(body.redirectUrl || "/osa/dashboard");
+          return;
+        }
+        if (body.status === "denied") {
+          stopped = true;
+          awaiting = null;
+          error = "This sign-in was blocked from the confirmation email. The account is locked for 15 minutes.";
+          return;
+        }
+        if (body.status === "expired" || body.status === "none") {
+          stopped = true;
+          awaiting = null;
+          error = "The confirmation request expired. Please sign in again.";
+          return;
+        }
+      } catch {
+        // Temporary network issue: keep waiting
+      }
+      if (!stopped) timer = setTimeout(check, 3000);
+    };
+    let timer = setTimeout(check, 3000);
+
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      clearInterval(clock);
+    };
+  });
+
+  function cancelAwaiting() {
+    awaiting = null;
+    awaitNotice = "";
+    adminPassword = "";
+  }
+
   function switchMode(mode: 'apply' | 'admin') {
     activeMode = mode;
     error = "";
@@ -40,7 +106,10 @@
       });
 
       const data = await res.json();
-      if (res.ok) {
+      if (res.ok && data.requires_confirmation) {
+        awaiting = { email: data.email || adminEmail, expiresAt: new Date(data.expires_at).getTime() };
+        awaitNotice = "";
+      } else if (res.ok) {
         goto(data.redirectUrl || "/osa/dashboard");
       } else {
         error = data.error || "Invalid credentials. Please try again.";
@@ -262,6 +331,33 @@
               <path d="M9 18l6-6-6-6"/>
             </svg>
           </button>
+        </div>
+      {:else if awaiting}
+        <!-- VIEW 3: WAITING FOR EMAIL CONFIRMATION -->
+        <div class="confirm-wait" role="status" aria-live="polite">
+          <div class="confirm-icon" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+          </div>
+          <div class="header-badge admin-badge">One more step</div>
+          <h1 class="main-form-title">Check your email</h1>
+          <p class="main-form-subtitle">
+            For your security, we sent a sign-in confirmation to <strong>{maskEmail(awaiting.email)}</strong>.
+            Open it and choose <strong>"Yes, this is me"</strong>. This page will open your dashboard automatically.
+          </p>
+          <ul class="confirm-steps">
+            <li>Can't find it? Check your Spam or Promotions folder.</li>
+            <li>Once confirmed, this browser won't ask again for 30 days.</li>
+          </ul>
+          <div class="confirm-timer">
+            <span class="confirm-spinner" aria-hidden="true"></span>
+            {#if secondsLeft > 0}
+              Waiting for confirmation… link expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+            {:else}
+              The link has expired.
+            {/if}
+          </div>
+          {#if awaitNotice}<p class="confirm-notice">{awaitNotice}</p>{/if}
+          <button type="button" class="confirm-cancel" onclick={cancelAwaiting}>Use a different account</button>
         </div>
       {:else}
         <!-- VIEW 2: ADMIN LOGIN (REPLACES THE WHOLE LOGIN FORM) -->
@@ -797,6 +893,93 @@
   }
 
   /* ── Alert Messages ───────────────────────────────────────────────────────── */
+  /* Waiting for the sign-in confirmation email */
+  .confirm-wait {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .confirm-icon {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #FDFBF7;
+    background: linear-gradient(135deg, #6B1D2F 0%, #4A121E 100%);
+    border: 2px solid #D4AF37;
+    box-shadow: 0 8px 18px rgba(107, 29, 47, 0.3);
+  }
+
+  .confirm-steps {
+    margin: 0;
+    padding: 0.85rem 1rem 0.85rem 1.9rem;
+    border-radius: 12px;
+    background: #fbf7f8;
+    border: 1px solid #ecdfe3;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: #475569;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    width: 100%;
+  }
+
+  .confirm-timer {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    border-radius: 12px;
+    background: #FEF7E0;
+    border: 1px solid rgba(212, 166, 42, 0.45);
+    color: #92400E;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .confirm-spinner {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2.5px solid rgba(212, 166, 42, 0.3);
+    border-top-color: #D4A62A;
+    animation: confirm-spin 0.8s linear infinite;
+  }
+
+  @keyframes confirm-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .confirm-notice {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #166534;
+  }
+
+  .confirm-cancel {
+    align-self: stretch;
+    min-height: 44px;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #6B1D2F;
+    border: 1.5px solid #e2d3d8;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .confirm-cancel:hover {
+    background: #fbf7f8;
+  }
+
   .alert-box {
     display: flex;
     align-items: center;

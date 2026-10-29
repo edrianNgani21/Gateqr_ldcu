@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert } from '$lib/utils/dialog';
   import AppShell from "$lib/components/AppShell.svelte";
   import { invalidateAll } from "$app/navigation";
   import { startLiveSync } from "$lib/utils/liveSync";
@@ -11,9 +12,6 @@
   let apps = $derived(applicationsState);
 
   let searchQuery = $state("");
-  let roleFilter = $state("all");
-  let vehicleTypeFilter = $state("all");
-  let selectedCampus = $state("all");
   let approvingId = $state<number | null>(null);
   let showDocPopup = $state<string | null>(null);
 
@@ -53,49 +51,6 @@
 
   let displayedApps = $derived.by(() => {
     let filtered = currentTabApps;
-
-    if (roleFilter !== "all") {
-      filtered = filtered.filter((a: any) => {
-        const r = (a.role || "").toLowerCase().trim();
-        if (roleFilter === "student") return r === "student";
-        if (roleFilter === "staff") return r === "staff" || r === "employee";
-        if (roleFilter === "faculty") return r === "faculty";
-        if (roleFilter === "concessionnare" || roleFilter === "concessionaire") return r === "concessionaire" || r === "concessionnare" || r === "concecioonaire";
-        if (roleFilter === "supplier") return r === "supplier";
-        if (roleFilter === "administrator") return r === "administrator" || r === "admin";
-        if (roleFilter === "vps") return r === "vps";
-        return r === roleFilter.toLowerCase();
-      });
-    }
-
-    if (vehicleTypeFilter !== "all") {
-      filtered = filtered.filter((a: any) => {
-        const rawType = (a.vehicle_type || a.vehicle_information?.type || "").toLowerCase().trim();
-        if (vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
-          return rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike");
-        }
-        if (vehicleTypeFilter === "4 wheelers" || vehicleTypeFilter === "4-wheelers" || vehicleTypeFilter === "4-Wheeler / Car" || vehicleTypeFilter === "4-wheeler") {
-          return rawType.includes("4") || rawType.includes("car");
-        }
-        return rawType === vehicleTypeFilter.toLowerCase();
-      });
-    }
-
-    if (selectedCampus !== "all") {
-      filtered = filtered.filter((a: any) => {
-        const c = (a.campus || "").toLowerCase().trim();
-        if (selectedCampus === 'Main campus' || selectedCampus === 'main') {
-          return c.includes('main');
-        }
-        if (selectedCampus === 'rnp campus' || selectedCampus === 'rnp') {
-          return c.includes('rnp');
-        }
-        if (selectedCampus === 'Paseo' || selectedCampus === 'paseo') {
-          return c.includes('paseo');
-        }
-        return c === selectedCampus.toLowerCase().trim();
-      });
-    }
 
     if (searchQuery && searchQuery.trim()) {
       const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
@@ -147,11 +102,11 @@
       } else {
         applicationsState = previous;
         const err = await res.json();
-        alert(err.error || "Action failed");
+        showAlert(err.error || "Action failed");
       }
     } catch (e) {
       applicationsState = previous;
-      alert("Network error");
+      showAlert("Network error");
     } finally {
       approvingId = null;
     }
@@ -215,31 +170,7 @@
       {/if}
     </div>
 
-    <div class="filter-group">
-      <select bind:value={roleFilter} class="filter-btn">
-        <option value="all">All Roles</option>
-        <option value="student">Student</option>
-        <option value="staff">Staff</option>
-        <option value="faculty">Faculty</option>
-        <option value="concessionnare">Concessionaire</option>
-        <option value="supplier">Supplier</option>
-        <option value="administrator">Administrator</option>
-        <option value="vps">VPS</option>
-      </select>
 
-      <select bind:value={vehicleTypeFilter} class="filter-btn">
-        <option value="all">All Vehicles</option>
-        <option value="2 wheelers">2 Wheelers</option>
-        <option value="4 wheelers">4 Wheelers</option>
-      </select>
-
-      <select bind:value={selectedCampus} class="filter-btn">
-        <option value="all">All Campuses</option>
-        <option value="Main campus">Main campus</option>
-        <option value="rnp campus">rnp campus</option>
-        <option value="Paseo">Paseo</option>
-      </select>
-    </div>
   </div>
 
   <!-- Cards List showing only name, email, department, and Approve button -->
@@ -261,7 +192,7 @@
           </div>
           <div class="applicant-info">
             <div class="applicant-name-row">
-              <h3 class="applicant-name">{applicantName}</h3>
+              <h3 class="applicant-name">{#if appId}<span class="reg-no">Reg. No. {appId}</span> <span class="title-sep" aria-hidden="true">—</span> {/if}{applicantName}</h3>
               <span class="agreement-badge">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -538,48 +469,14 @@
     color: var(--text-primary);
   }
 
-  .filter-group {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-  }
 
-  .filter-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.85rem;
-    border: 1.5px solid #e2e8f0;
-    border-radius: 8px;
-    background: #ffffff;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.2s;
-    height: 42px;
-    box-sizing: border-box;
-  }
 
-  .filter-btn:hover {
-    border-color: #8B1A3C;
-  }
 
-  .filter-btn:focus {
-    border-color: #8B1A3C;
-    box-shadow: 0 0 0 2px rgba(139, 26, 60, 0.12);
-  }
 
   @media (max-width: 768px) {
     .controls-row {
       flex-direction: column;
       align-items: stretch;
-    }
-    .filter-group {
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      flex: 1 1 calc(50% - 0.5rem);
     }
   }
 
@@ -646,6 +543,23 @@
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+  }
+
+  .reg-no {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #6b1a2a;
+    background: rgba(107, 26, 42, 0.08);
+    border: 1px solid rgba(107, 26, 42, 0.18);
+    padding: 0.1rem 0.45rem;
+    border-radius: 6px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .title-sep {
+    color: #94a3b8;
+    font-weight: 400;
   }
 
   .applicant-name {
@@ -1028,10 +942,6 @@
     .applicant-avatar {
       display: none;
     }
-    .filter-btn {
-      flex: 1 1 100%;
-      width: 100%;
-    }
     .btn-doc-view {
       flex: 1 1 calc(50% - 0.5rem);
       justify-content: center;
@@ -1044,10 +954,6 @@
   }
 
   @media (max-width: 360px) {
-    .filter-group {
-      flex-direction: column;
-      width: 100%;
-    }
     .btn-doc-view {
       flex: 1 1 100%;
       width: 100%;

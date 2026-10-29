@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
 
@@ -38,7 +39,7 @@
     );
 
     async function revokeQR(vehicleId: number) {
-        if (!confirm('Are you sure you want to revoke this QR code? The vehicle will be denied access.')) return;
+        if (!await askConfirm('Are you sure you want to revoke this QR code? The vehicle will be denied access.')) return;
         try {
             const res = await fetch(`/api/monitor/revoke`, {
                 method: 'POST',
@@ -48,16 +49,16 @@
             if (res.ok) {
                 vehicles = vehicles.map((v: any) => v.vehicle_id === vehicleId ? { ...v, status: 'revoked' } : v);
             } else {
-                alert('Failed to revoke QR code.');
+                showAlert('Failed to revoke QR code.');
             }
         } catch (e) {
             console.error(e);
-            alert('Error revoking QR code.');
+            showAlert('Error revoking QR code.');
         }
     }
 
     async function unrevokeQR(vehicleId: number) {
-        if (!confirm('Restore access for this vehicle? Their QR code will be reactivated.')) return;
+        if (!await askConfirm('Restore access for this vehicle? Their QR code will be reactivated.')) return;
         try {
             const res = await fetch(`/api/monitor/revoke`, {
                 method: 'DELETE',
@@ -67,11 +68,11 @@
             if (res.ok) {
                 vehicles = vehicles.map((v: any) => v.vehicle_id === vehicleId ? { ...v, status: 'distributed' } : v);
             } else {
-                alert('Failed to restore QR code.');
+                showAlert('Failed to restore QR code.');
             }
         } catch (e) {
             console.error(e);
-            alert('Error restoring QR code.');
+            showAlert('Error restoring QR code.');
         }
     }
 </script>

@@ -15,7 +15,7 @@ function isVps(role: string | null | undefined): boolean {
  * OSA  Screening of Applications : PENDING DPT APRVL -> DPT APPROVE
  * OSA  Submission of Hardcopies  : PENDING
  * SEC  Document Review           : OSA CHECKED
- * OSA  Sticker Releasing         : CHECKED BY SECURITY + PAID  (VPS: CHECKED + PAID)
+ * OSA  Releasing of Stickers     : CHECKED BY SECURITY + PAID  (VPS: CHECKED + PAID)
  *
  * Returns null when the tab has no workflow-specific label, so the caller falls back to the raw status.
  */

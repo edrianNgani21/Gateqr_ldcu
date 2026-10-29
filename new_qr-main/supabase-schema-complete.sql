@@ -27,7 +27,7 @@ BEGIN
         'incident_report', 'complaint', 'parking_capacity', 'parking_availability', 'vehicle_log',
         'registration', 'vehicle_information', 'user_log',
         'system_settings', 'department', 'user', 'users',
-        'campus_events', 'campus_event', 'blocklist'
+        'campus_events', 'campus_event', 'blocklist', 'login_confirmation'
       )
   ) LOOP
     IF r.table_type = 'VIEW' THEN
@@ -53,6 +53,8 @@ DROP TYPE IF EXISTS campus_gate_enum CASCADE;
 DROP TYPE IF EXISTS change_request_status_enum CASCADE;
 DROP TYPE IF EXISTS form_status_enum CASCADE;
 DROP TYPE IF EXISTS blocklist_by_enum CASCADE;
+DROP TYPE IF EXISTS violation_level_enum CASCADE;
+DROP TYPE IF EXISTS login_confirmation_status_enum CASCADE;
 
 CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'osa', 'dean', 'Academic Head', 'Office Head');
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
@@ -67,7 +69,7 @@ CREATE TYPE registration_status_enum AS ENUM (
 -- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'vps';
 CREATE TYPE registration_role_enum  AS ENUM ('student', 'staff', 'faculty', 'administrator', 'concessionnaire', 'supplier', 'vps');
 CREATE TYPE vehicle_type_enum       AS ENUM ('2_wheels', '4_wheels');
-CREATE TYPE logged_status_enum      AS ENUM ('inside_campus', 'exited_campus');
+CREATE TYPE logged_status_enum      AS ENUM ('inside_campus', 'exited_campus', 'denied');  -- denied = flagged / refused gate attempt
 CREATE TYPE sticker_status_enum     AS ENUM ('registered', 'unregistered');
 CREATE TYPE complaint_status_enum   AS ENUM ('pending', 'resolved', 'Pending', 'Resolved');
 CREATE TYPE campus_gate_enum        AS ENUM ('main', 'rnp', 'paseo');
@@ -709,12 +711,13 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'status', 'EXPIRED', 'message', 'Sticker has expired.');
   END IF;
 
-  -- Blocklist applies to every campus gate (main, rnp, paseo)
+  -- Gate block (3rd violation level) applies to every campus gate (main, rnp, paseo)
   SELECT * INTO v_block
   FROM blocklist b
   WHERE (b.registration_id = v_reg.registration_id OR b.vehicle_id = v_reg.vehicle_information_id)
-    AND b.how_long > NOW()
-  ORDER BY b.how_long DESC
+    AND b.violation_level = 'gate_block'
+    AND b.blocked_until > NOW()
+  ORDER BY b.blocked_until DESC
   LIMIT 1;
 
   IF FOUND THEN
@@ -722,8 +725,8 @@ BEGIN
       'success', false,
       'status', 'BLOCKED',
       'message', 'Vehicle is blocked: ' || v_block.reason,
-      'blocked_until', v_block.how_long,
-      'seconds_remaining', GREATEST(0, EXTRACT(EPOCH FROM (v_block.how_long - NOW()))::BIGINT),
+      'blocked_until', v_block.blocked_until,
+      'seconds_remaining', GREATEST(0, EXTRACT(EPOCH FROM (v_block.blocked_until - NOW()))::BIGINT),
       'block_by', v_block.block_by::text
     );
   END IF;
@@ -1054,12 +1057,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_unique_qr_code
 -- ---------------------------------------------------------------------
 -- 16. BLOCKLIST (idempotent - safe to run alone on an existing database)
 -- ---------------------------------------------------------------------
--- A vehicle is denied entry at every campus gate (QR scan and manual plate lookup)
--- while NOW() < how_long. Rows are matched on registration_id OR vehicle_id.
+-- Each row is one violation recorded by OSA or Security on a registered vehicle.
+-- first_warning / second_warning are recorded and emailed to the applicant.
+-- gate_block denies entry at every campus gate (QR scan and manual plate lookup)
+-- while NOW() < blocked_until. Rows are matched on registration_id OR vehicle_id.
+-- The warning count never resets: after the first gate_block, any new violation is another gate_block.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'blocklist_by_enum') THEN
     CREATE TYPE blocklist_by_enum AS ENUM ('osa_admin', 'security_admin');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'violation_level_enum') THEN
+    CREATE TYPE violation_level_enum AS ENUM ('first_warning', 'second_warning', 'gate_block');
   END IF;
 END $$;
 
@@ -1067,17 +1076,22 @@ CREATE TABLE IF NOT EXISTS public.blocklist (
   blocklist_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   registration_id INTEGER REFERENCES public.registration (registration_id) ON DELETE CASCADE,
   vehicle_id      INTEGER REFERENCES public.vehicle_information (vehicle_information_id) ON DELETE CASCADE,
-  reason          TEXT              NOT NULL,
-  block_by        blocklist_by_enum NOT NULL,
-  "when"          TIMESTAMPTZ       NOT NULL DEFAULT NOW(),   -- when the block was created
-  how_long        TIMESTAMPTZ       NOT NULL,                 -- block expires at this date and time (set by admin)
-  CONSTRAINT blocklist_target_chk   CHECK (registration_id IS NOT NULL OR vehicle_id IS NOT NULL),
-  CONSTRAINT blocklist_duration_chk CHECK (how_long > "when")
+  violation_level violation_level_enum NOT NULL,
+  reason          TEXT                 NOT NULL,
+  evidence_image  TEXT,                                        -- optional photo URL
+  block_by        blocklist_by_enum    NOT NULL,
+  recorded_at     TIMESTAMPTZ          NOT NULL DEFAULT NOW(),  -- when the violation was recorded
+  blocked_until   TIMESTAMPTZ,                                  -- gate block ends (gate_block only, set by admin)
+  CONSTRAINT blocklist_target_chk    CHECK (registration_id IS NOT NULL OR vehicle_id IS NOT NULL),
+  CONSTRAINT blocklist_block_end_chk CHECK (
+    (violation_level = 'gate_block' AND blocked_until IS NOT NULL AND blocked_until > recorded_at)
+    OR (violation_level <> 'gate_block' AND blocked_until IS NULL)
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_blocklist_registration ON public.blocklist (registration_id);
 CREATE INDEX IF NOT EXISTS idx_blocklist_vehicle      ON public.blocklist (vehicle_id);
-CREATE INDEX IF NOT EXISTS idx_blocklist_how_long     ON public.blocklist (how_long DESC);
+CREATE INDEX IF NOT EXISTS idx_blocklist_blocked_until ON public.blocklist (blocked_until DESC) WHERE violation_level = 'gate_block';
 
 -- Fill in whichever id the admin left out so both match at the gate
 CREATE OR REPLACE FUNCTION trg_blocklist_fill_ids()
@@ -1103,14 +1117,15 @@ CREATE TRIGGER trg_blocklist_fill_ids
   BEFORE INSERT OR UPDATE ON public.blocklist
   FOR EACH ROW EXECUTE FUNCTION trg_blocklist_fill_ids();
 
--- Currently active blocks with time remaining
+-- Currently active gate blocks with time remaining
 CREATE OR REPLACE VIEW public.active_blocklist
 WITH (security_invoker = true) AS
 SELECT
   b.*,
-  GREATEST(0, EXTRACT(EPOCH FROM (b.how_long - NOW()))::BIGINT) AS seconds_remaining
+  GREATEST(0, EXTRACT(EPOCH FROM (b.blocked_until - NOW()))::BIGINT) AS seconds_remaining
 FROM public.blocklist b
-WHERE b.how_long > NOW();
+WHERE b.violation_level = 'gate_block'
+  AND b.blocked_until > NOW();
 
 ALTER TABLE public.blocklist ENABLE ROW LEVEL SECURITY;
 
@@ -1185,3 +1200,119 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------
+-- 18. PARKING LIMITS PER VEHICLE TYPE + ADMIN LOGIN EMAIL CONFIRMATION (idempotent)
+-- ---------------------------------------------------------------------
+-- A. Parking limits per vehicle type
+-- ---------------------------------------------------------------------
+-- parking_capacity (total) stays as capacity_2_wheels + capacity_4_wheels once both are set.
+ALTER TABLE public.parking_capacity ADD COLUMN IF NOT EXISTS capacity_2_wheels INTEGER CHECK (capacity_2_wheels >= 0);
+ALTER TABLE public.parking_capacity ADD COLUMN IF NOT EXISTS capacity_4_wheels INTEGER CHECK (capacity_4_wheels >= 0);
+ALTER TABLE public.parking_capacity ADD COLUMN IF NOT EXISTS occupied_2_wheels INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.parking_capacity ADD COLUMN IF NOT EXISTS occupied_4_wheels INTEGER NOT NULL DEFAULT 0;
+
+-- Snapshot written after every gate entry/exit. It used to reset capacity to a hard-coded 200,
+-- overwriting the limits Security had saved; it now carries the latest saved limits forward.
+CREATE OR REPLACE FUNCTION trg_sync_parking_availability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_gate       campus_gate_enum;
+  v_prev       RECORD;
+  v_cap2       INTEGER;
+  v_cap4       INTEGER;
+  v_capacity   INTEGER;
+  v_occ2       INTEGER := 0;
+  v_occ4       INTEGER := 0;
+  v_event_name VARCHAR(100);
+BEGIN
+  v_gate := COALESCE(NEW.campus_gate, 'main');
+
+  SELECT * INTO v_prev
+  FROM parking_capacity
+  WHERE campus_gate = v_gate
+  ORDER BY recorded_at DESC
+  LIMIT 1;
+
+  v_cap2 := v_prev.capacity_2_wheels;
+  v_cap4 := v_prev.capacity_4_wheels;
+  v_capacity := CASE
+    WHEN v_cap2 IS NOT NULL AND v_cap4 IS NOT NULL THEN v_cap2 + v_cap4
+    ELSE COALESCE(v_prev.parking_capacity, 200)
+  END;
+
+  -- Vehicles inside this gate, split by type (unknown type counts as 4-wheel)
+  SELECT
+    COUNT(*) FILTER (WHERE vi.type = '2_wheels'),
+    COUNT(*) FILTER (WHERE vi.type IS DISTINCT FROM '2_wheels')
+  INTO v_occ2, v_occ4
+  FROM (
+    SELECT DISTINCT ON (COALESCE(vl.registration_id::text, 'log' || vl.vehicle_log_id))
+      vl.vehicle_information_id
+    FROM vehicle_log vl
+    WHERE vl.campus_gate = v_gate
+      AND vl.check_out IS NULL
+      AND vl.logged_status = 'inside_campus'
+  ) inside
+  LEFT JOIN vehicle_information vi ON vi.vehicle_information_id = inside.vehicle_information_id;
+
+  SELECT event_name INTO v_event_name
+  FROM campus_event
+  WHERE campus_gate = v_gate
+    AND is_active = TRUE
+    AND NOW() BETWEEN start_date AND end_date
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  INSERT INTO parking_capacity (
+    vehicle_log_id, parking_capacity, capacity_2_wheels, capacity_4_wheels,
+    slot_occupied, slot_unoccupied, occupied_2_wheels, occupied_4_wheels,
+    recorded_at, campus_gate, event_name
+  ) VALUES (
+    NEW.vehicle_log_id, v_capacity, v_cap2, v_cap4,
+    v_occ2 + v_occ4, GREATEST(0, v_capacity - (v_occ2 + v_occ4)), v_occ2, v_occ4,
+    NOW(), v_gate, v_event_name
+  );
+
+  RETURN NEW;
+END;
+$$;
+
+-- ---------------------------------------------------------------------
+-- B. Admin login email confirmation ("Yes, this is me" / "This is not me")
+-- ---------------------------------------------------------------------
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'login_confirmation_status_enum') THEN
+    CREATE TYPE login_confirmation_status_enum AS ENUM ('pending', 'approved', 'denied', 'used');
+  END IF;
+END $$;
+
+-- One row per password login that needs the owner's email confirmation.
+-- Only SHA-256 hashes of the secrets are stored: email_token_hash for the link in the email,
+-- browser_token_hash for the waiting login screen (kept in an httpOnly cookie).
+CREATE TABLE IF NOT EXISTS public.login_confirmation (
+  login_confirmation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               INTEGER NOT NULL REFERENCES public.users (user_id) ON DELETE CASCADE,
+  email_token_hash      TEXT NOT NULL UNIQUE,
+  browser_token_hash    TEXT NOT NULL UNIQUE,
+  status                login_confirmation_status_enum NOT NULL DEFAULT 'pending',
+  session_role          TEXT NOT NULL,                 -- role / dashboard the session opens once confirmed
+  redirect_url          TEXT NOT NULL,
+  ip_address            TEXT,
+  user_agent            TEXT,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at            TIMESTAMPTZ NOT NULL,
+  decided_at            TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_confirmation_user ON public.login_confirmation (user_id, created_at DESC);
+
+-- Server-only table: no policies, so only the service role can read or write it
+ALTER TABLE public.login_confirmation ENABLE ROW LEVEL SECURITY;

@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { showAlert, askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import ActionBar from '$lib/components/ActionBar.svelte';
+    import ViolationModal from '$lib/components/ViolationModal.svelte';
+    import { printRegisteredVehicles } from '$lib/utils/printRecords';
     import { invalidateAll } from '$app/navigation';
     import { supabaseClient } from '$lib/supabaseClient';
 
@@ -26,7 +29,7 @@
     const tabLabels: Record<string, string> = {
         'validation':   'Screening of Applications',
         'distribution': 'Submission of Documents',
-        'release':      'Sticker Releasing',
+        'release':      'Releasing of Stickers',
         'registered':   'Registered Vehicles',
         'rejected':     'Rejected or Revoked Accounts & Applications'
     };
@@ -116,6 +119,10 @@
         selectedApplicationIds = new Set();
     }
 
+    let selectedApps = $derived(
+        getAppsForTab('validation').filter(a => selectedApplicationIds.has(a.id))
+    );
+
     function isAllSelected() {
         return displayedApps.length > 0 && displayedApps.every(app => selectedApplicationIds.has(app.id));
     }
@@ -126,7 +133,7 @@
 
     async function handleBulkAction(action: 'accept' | 'reject') {
         if (selectedApplicationIds.size === 0) {
-            alert('Please select at least one application');
+            showAlert('Please select at least one application');
             return;
         }
         bulkActionType = action;
@@ -159,18 +166,18 @@
             });
 
             if (res.ok) {
-                alert(`Successfully ${bulkActionType === 'accept' ? 'accepted' : 'rejected'} ${ids.length} application(s)`);
-                selectedApplicationIds.clear();
+                showAlert(`Successfully ${bulkActionType === 'accept' ? 'accepted' : 'rejected'} ${ids.length} application(s)`);
+                selectedApplicationIds = new Set();
                 bulkActionModalOpen = false;
                 bulkSchedule = '';
                 bulkReason = '';
                 await invalidateAll();
             } else {
                 const data = await res.json();
-                alert(`Error: ${data.error || 'Failed to process bulk action'}`);
+                showAlert(`Error: ${data.error || 'Failed to process bulk action'}`);
             }
         } catch (error) {
-            alert('Network error during bulk action');
+            showAlert('Network error during bulk action');
         } finally {
             bulkLoading = false;
         }
@@ -366,7 +373,52 @@
     let reasonError = $state('');
     let reasonLoading = $state(false);
 
+    // Registered Vehicles: select records to print
+    let printSelectedIds = $state<Set<number>>(new Set());
+    let printableApps = $derived(displayedApps.filter((a) => printSelectedIds.has(a.id)));
+
+    function togglePrintSelection(id: number, on: boolean) {
+        const next = new Set(printSelectedIds);
+        if (on) next.add(id); else next.delete(id);
+        printSelectedIds = next;
+    }
+
+    function selectAllForPrint() {
+        printSelectedIds = new Set(displayedApps.map((a) => a.id));
+    }
+
+    function printSelected() {
+        printRegisteredVehicles(
+            printableApps.map((a) => ({
+                regNo: a.id,
+                name: `${a.first_name || ''} ${a.last_name || ''}`.trim(),
+                role: a.role,
+                department: a.department_name,
+                campus: a.campus,
+                plate: a.vehicle_plate !== '-' ? a.vehicle_plate : null,
+                vehicle: [a.vehicle_make !== 'Unknown' ? a.vehicle_make : '', a.vehicle_color !== '-' ? a.vehicle_color : ''].filter(Boolean).join(' · '),
+                type: a.vehicle_type !== '-' ? a.vehicle_type : null,
+                expires: a.expires_at
+            })),
+            data.userEmail || 'OSA',
+            'Office of Student Affairs'
+        );
+    }
+
+    // Record Violation modal (Registered Vehicles tab)
+    let violationTarget = $state<{ id: number; name: string; plate: string } | null>(null);
+
     async function handleAction(registration_id: number, action: string) {
+        if (action === 'record_violation') {
+            const app = apps.find(a => (a.registration_id || a.id) === registration_id);
+            violationTarget = {
+                id: registration_id,
+                name: app ? `${app.first_name || ''} ${app.last_name || ''}`.trim() : '',
+                plate: app?.vehicle_plate && app.vehicle_plate !== '-' ? app.vehicle_plate : ''
+            };
+            return;
+        }
+
         if (action === 'accept' || action === 'reschedule') {
             // Return a promise that stays pending until the modal resolves or is cancelled.
             // This keeps ActionBar's loadingAction active (spinner + disabled) the whole time.
@@ -389,9 +441,9 @@
 
         let reason: string = '';
         if (action === 'proceed_overdue') {
-            if (!confirm(`Are you sure you want to proceed this application directly to Hardcopies Compliance?`)) return;
+            if (!await askConfirm(`Are you sure you want to proceed this application directly to Hardcopies Compliance?`)) return;
         } else if (action === 'delete' || action === 'unrevoke') {
-            if (!confirm(`Are you sure you want to ${action} this application?`)) return;
+            if (!await askConfirm(`Are you sure you want to ${action} this application?`)) return;
         }
 
         await submitAction(registration_id, action, reason);
@@ -436,7 +488,7 @@
         }
 
         if (!scheduleDateTime) {
-            alert('Please select a complete schedule');
+            showAlert('Please select a complete schedule');
             return;
         }
         if (pendingAction) {
@@ -473,13 +525,16 @@
 
             if (res.ok) {
                 selectedDistributionApp = null;
+                if (selectedApplicationIds.has(registration_id)) {
+                    selectedApplicationIds = new Set([...selectedApplicationIds].filter(x => x !== registration_id));
+                }
                 await invalidateAll();
             } else {
                 const err = await res.json();
-                alert(err.error || 'Action failed');
+                showAlert(err.error || 'Action failed');
             }
         } catch (e) {
-            alert('Network error');
+            showAlert('Network error');
         }
     }
 </script>
@@ -725,6 +780,21 @@
         {/if}
 
         <div class="applications-list" class:right-panel={tab === 'distribution'}>
+            {#if tab === 'registered' && displayedApps.length > 0}
+              <div class="print-toolbar">
+                <span class="print-count"><strong>{printableApps.length}</strong> of {displayedApps.length} selected</span>
+                <div class="print-actions">
+                  <button type="button" class="print-link" onclick={selectAllForPrint}>Select all</button>
+                  {#if printableApps.length > 0}
+                    <button type="button" class="print-link" onclick={() => (printSelectedIds = new Set())}>Clear</button>
+                  {/if}
+                  <button type="button" class="print-btn" onclick={printSelected} disabled={printableApps.length === 0}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                    Print Selected
+                  </button>
+                </div>
+              </div>
+            {/if}
             {#each displayedApps as app}
               {#if tab === 'distribution' || tab === 'overdue'}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -735,7 +805,6 @@
                       data={{
                       id: app.id || '-',
                       name: `${app.first_name} ${app.last_name}`,
-                      'dean approval': (app.status || '').toLowerCase() === 'pending' ? 'Pending' : 'Approved',
                       role: app.role,
                       campus: app.campus,
                       'year level': app.year_level || '-',
@@ -788,7 +857,6 @@
                   data={{
                   id: app.id || '-',
                   name: `${app.first_name} ${app.last_name}`,
-                  'dean approval': (app.status || '').toLowerCase() === 'pending' ? 'Pending' : 'Approved',
                   role: app.role,
                   campus: app.campus,
                   'year level': app.year_level || '-',
@@ -826,9 +894,9 @@
                     letter: app.doc_letter
                   }
                 }}
-                selectable={tab === 'validation'}
-                selected={selectedApplicationIds.has(app.id)}
-                onselect={(selected) => toggleSelection(app.id, selected)}
+                selectable={tab === 'validation' || tab === 'registered'}
+                selected={tab === 'registered' ? printSelectedIds.has(app.id) : selectedApplicationIds.has(app.id)}
+                onselect={(selected) => tab === 'registered' ? togglePrintSelection(app.id, selected) : toggleSelection(app.id, selected)}
                 showQR={true}
                 {tab}>
                   {#snippet children()}
@@ -870,28 +938,41 @@
             {/each}
         </div>
 
-        {#if tab === 'validation' && selectedApplicationIds.size > 0}
+        {#if tab === 'validation' && selectedApps.length > 0}
           <div class="selected-apps-table">
             <div class="table-header">
               <span class="table-title">Selected Applications</span>
-              <span class="table-count">{selectedApplicationIds.size}</span>
+              <div class="selected-header-right">
+                <span class="table-count">{selectedApps.length}</span>
+                <button type="button" class="selected-clear" onclick={deselectAll}>Clear</button>
+              </div>
             </div>
-            <table class="mini-table">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Department</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each displayedApps.filter(app => selectedApplicationIds.has(app.id)) as app}
-                  <tr>
-                    <td>{app.user_email}</td>
-                    <td>{app.department_name}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+            <div class="mini-card-list">
+              {#each selectedApps as app (app.id)}
+                {@const fullName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Unnamed applicant'}
+                <div class="mini-card">
+                  <div class="mini-avatar" aria-hidden="true">
+                    {fullName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
+                  </div>
+                  <div class="mini-main">
+                    <span class="mini-name"><span class="mini-reg">Reg. No. {app.id}</span> {fullName}</span>
+                    <span class="mini-meta">
+                      <span class="mini-dept">{app.department_name || 'No department'}</span>
+                      <span class="mini-role">{app.role || '—'}</span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    class="mini-remove"
+                    title="Remove from selection"
+                    aria-label="Remove {fullName} from selection"
+                    onclick={() => toggleSelection(app.id, false)}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              {/each}
+            </div>
             <div class="table-actions">
               <button class="table-btn table-accept" onclick={() => handleBulkAction('accept')}>
                 Accept All
@@ -906,14 +987,31 @@
     </div>
 </div>
 
+  {#if violationTarget}
+    <ViolationModal
+      registrationId={violationTarget.id}
+      applicantName={violationTarget.name}
+      plate={violationTarget.plate}
+      onclose={() => (violationTarget = null)}
+      onrecorded={() => invalidateAll()}
+    />
+  {/if}
+
   {#if scheduleModalOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-overlay" onclick={() => { if (!confirmLoading) cancelSchedule(); }} onkeydown={(e) => { if (e.key === 'Escape' && !confirmLoading) cancelSchedule(); }} role="dialog" aria-modal="true" tabindex="-1">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="modal-content" onclick={(e) => e.stopPropagation()}>
-        <h3>{pendingAction?.action === 'reschedule' ? 'Reschedule OSA Visit' : 'Accept & Schedule Application'}</h3>
-        <p>{pendingAction?.action === 'reschedule' ? 'Set a new OSA visit schedule for hardcopy submission' : 'Set an OSA visit schedule for hardcopy submission'}</p>
+        <div class="reason-modal-header schedule-modal-header">
+          <div class="reason-badge-icon is-schedule">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div class="reason-header-text">
+            <h3 class="reason-title">{pendingAction?.action === 'reschedule' ? 'Reschedule OSA Visit' : 'Accept & Schedule Application'}</h3>
+          </div>
+        </div>
+        <p class="schedule-modal-desc">{pendingAction?.action === 'reschedule' ? 'Set a new OSA visit schedule for hardcopy submission.' : 'Set an OSA visit schedule for hardcopy submission.'}</p>
         <div class="schedule-form">
           <div class="schedule-row">
             <div class="schedule-field">
@@ -955,8 +1053,19 @@
     <div class="modal-overlay" onclick={() => { if (!bulkLoading) cancelBulkAction(); }} onkeydown={(e) => { if (e.key === 'Escape' && !bulkLoading) cancelBulkAction(); }} role="dialog" aria-modal="true" tabindex="-1">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="modal-content" onclick={(e) => e.stopPropagation()}>
-        <h3>Selected application</h3>
-        <p>
+        <div class="reason-modal-header schedule-modal-header">
+          <div class="reason-badge-icon" class:is-schedule={bulkActionType === 'accept'}>
+            {#if bulkActionType === 'accept'}
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            {:else}
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            {/if}
+          </div>
+          <div class="reason-header-text">
+            <h3 class="reason-title">{bulkActionType === 'accept' ? 'Accept' : 'Reject'} {selectedApps.length} Selected Application{selectedApps.length === 1 ? '' : 's'}</h3>
+          </div>
+        </div>
+        <p class="schedule-modal-desc">
           {#if bulkActionType === 'accept'}
             Set a pickup schedule for all selected applications
           {:else}
@@ -1436,6 +1545,7 @@
 
   .selected-apps-table {
     width: 380px;
+    max-width: 100%;
     background: var(--surface);
     border: 2px solid var(--maroon);
     border-radius: 8px;
@@ -1470,32 +1580,208 @@
     font-weight: 700;
   }
 
-  .mini-table {
-    width: 100%;
-    border-collapse: collapse;
+  @media (max-width: 1024px) {
+    .selected-apps-table,
+    .schedule-calendar-panel {
+      width: 100%;
+    }
+  }
+
+  /* Registered Vehicles print toolbar */
+  .print-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .print-count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  .print-count strong {
+    color: var(--maroon);
+  }
+
+  .print-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .print-link {
+    background: none;
+    border: none;
+    padding: 0.35rem 0.4rem;
+    font-family: inherit;
     font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--maroon);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
-  .mini-table thead {
-    background: var(--maroon);
-    color: white;
+  .print-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 40px;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #8B1A3C, #6B1A2A);
+    color: #E9C25E;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
   }
 
-  .mini-table th {
-    padding: 0.5rem;
-    text-align: left;
-    font-weight: 600;
+  .print-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 480px) {
+    .print-toolbar { flex-direction: column; align-items: stretch; }
+    .print-actions { justify-content: space-between; }
+    .print-btn { flex: 1; justify-content: center; }
+  }
+
+  /* Selected Applications: small versions of the application card */
+  .selected-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .selected-clear {
+    background: none;
+    border: none;
+    padding: 0.2rem 0.35rem;
     font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--maroon);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
-  .mini-table td {
-    padding: 0.5rem;
-    border-bottom: 1px solid var(--border-light);
+  .mini-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .mini-card {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.65rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--maroon);
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .mini-avatar {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: var(--maroon);
+    background: rgba(107, 26, 42, 0.08);
+    border: 1px solid rgba(107, 26, 42, 0.18);
+  }
+
+  .mini-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .mini-name {
+    font-size: 0.8rem;
+    font-weight: 700;
     color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .mini-table tbody tr:last-child td {
-    border-bottom: none;
+  .mini-reg {
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: var(--maroon);
+    margin-right: 0.15rem;
+  }
+
+  .mini-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .mini-dept, .mini-role {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mini-dept {
+    color: var(--text-secondary);
+    background: var(--border-light, #f0f0f0);
+  }
+
+  .mini-role {
+    color: #1d4ed8;
+    background: #eff6ff;
+    text-transform: capitalize;
+  }
+
+  .mini-remove {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .mini-remove:hover {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #b91c1c;
   }
 
   .table-actions {
@@ -1535,6 +1821,7 @@
 
   .schedule-calendar-panel {
     width: 380px;
+    max-width: 100%;
     background: transparent;
     border: 1.5px solid var(--border);
     border-radius: 8px;
@@ -1632,6 +1919,7 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    margin-bottom: 1.25rem;
   }
 
   .schedule-row {
@@ -1647,9 +1935,10 @@
   }
 
   .schedule-label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
   }
 
   .filter-btn:focus {
@@ -1863,10 +2152,11 @@
   .modal-content {
     background: var(--surface);
     padding: 1.5rem;
-    border-radius: 16px;
+    border-radius: 18px;
+    border-top: 4px solid var(--maroon);
     width: 90%;
-    max-width: 400px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    max-width: 420px;
+    box-shadow: 0 24px 60px rgba(61, 8, 24, 0.28);
   }
 
   .modal-content h3 {
@@ -1885,7 +2175,7 @@
   .sched-input {
     width: 100%;
     padding: 0.75rem;
-    margin: 1rem 0;
+    margin: 0.4rem 0 0;
     border: 1.5px solid var(--border);
     border-radius: 8px;
     font-family: inherit;
@@ -2088,6 +2378,20 @@
     justify-content: center;
     flex-shrink: 0;
     border: 1px solid #fecaca;
+  }
+
+  .reason-badge-icon.is-schedule {
+    background: rgba(139, 26, 60, 0.08);
+    color: var(--maroon);
+    border-color: rgba(139, 26, 60, 0.2);
+  }
+
+  .schedule-modal-header {
+    margin-bottom: 0.6rem;
+  }
+
+  .schedule-modal-desc {
+    margin: 0 0 0.75rem !important;
   }
 
   .reason-badge-icon.is-revoke {
@@ -2335,9 +2639,22 @@
   }
 
   @media (max-width: 480px) {
+    /* Compact filters: two per row instead of three tall rows */
+    .filter-group {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.4rem;
+    }
+    .filter-group > .filter-btn:last-child:nth-child(odd) {
+      grid-column: 1 / -1;
+    }
     .filter-btn {
-      flex: 1 1 100%;
       width: 100%;
+      min-width: 0;
+      padding: 0.6rem 1.6rem 0.6rem 0.7rem;
+      font-size: 0.8rem;
+      background-position: right 0.5rem center;
+      text-overflow: ellipsis;
     }
     .preset-chips-wrap {
       flex-wrap: wrap;

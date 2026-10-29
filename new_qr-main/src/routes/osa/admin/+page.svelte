@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { askConfirm } from '$lib/utils/dialog';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { supabaseClient } from '$lib/supabaseClient';
@@ -228,7 +229,7 @@
     }
 
     async function deleteAdmin(userId: number) {
-        if (!confirm('Are you sure you want to delete this admin account?')) {
+        if (!await askConfirm('Are you sure you want to delete this admin account?')) {
             return;
         }
 
@@ -253,7 +254,7 @@
 
     async function toggleAdminStatus(userId: number, currentStatus: boolean) {
         const action = currentStatus ? 'deactivate' : 'activate';
-        if (!confirm(`Are you sure you want to ${action} this admin account?`)) {
+        if (!await askConfirm(`Are you sure you want to ${action} this admin account?`)) {
             return;
         }
 

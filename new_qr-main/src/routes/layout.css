@@ -1052,3 +1052,53 @@ button, .btn, [role="button"], a.btn {
   .sub-tab-btn { flex: 0 0 auto; }
   .table-actions > button { flex: 1 1 140px; }
 }
+
+/* ─── Shared polish (maroon & gold kept) ───────────────────────────────── */
+::selection {
+  background: var(--maroon-tint);
+  color: var(--maroon-deep);
+}
+
+/* One consistent keyboard focus ring for every control */
+:where(a, button, [role="button"], input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+:where(button, [role="button"], input, select, textarea):disabled {
+  cursor: not-allowed;
+}
+
+:where(button, a, [role="button"]) {
+  -webkit-tap-highlight-color: rgba(139, 26, 60, 0.12);
+}
+
+/* Slim, theme-colored scrollbars on panels and lists */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--maroon-tint) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--maroon-tint);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: #e5b8c5; }
+
+/* Phones: keep long words (emails, plates) and wide tables from pushing the page sideways */
+@media (max-width: 640px) {
+  table { max-width: 100%; }
+  :where(h1, h2, h3) { overflow-wrap: break-word; }
+}
+
+/* Buttons, badges, pills and chips may wrap between words but never split a word
+   (the body's overflow-wrap: anywhere was turning "Edit" into "E / di / t") */
+:where(button, [role="button"], a[class*="btn"], label, th,
+       [class*="badge"], [class*="pill"], [class*="chip"], [class*="tag"], [class*="status"]) {
+  overflow-wrap: normal;
+  word-break: normal;
+}

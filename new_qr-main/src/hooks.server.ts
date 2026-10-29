@@ -1,6 +1,7 @@
 import { type Handle, redirect } from '@sveltejs/kit';
 import jwt from 'jsonwebtoken';
 import { env } from '$env/dynamic/private';
+import { rewriteStorageUrls } from '$lib/server/files';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get('gateqr_session');
@@ -59,7 +60,21 @@ export const handle: Handle = async ({ event, resolve }) => {
 		throw redirect(303, '/login');
 	}
 
-	return await resolve(event);
+	// Uploaded files are private: point every storage link the browser receives at /files/
+	const response = await resolve(event, {
+		transformPageChunk: ({ html }) => rewriteStorageUrls(html)
+	});
+
+	const type = response.headers.get('content-type') || '';
+	if (type.includes('json') && !url.startsWith('/files/')) {
+		const body = await response.text();
+		const rewritten = rewriteStorageUrls(body);
+		const headers = new Headers(response.headers);
+		headers.delete('content-length');
+		return new Response(rewritten, { status: response.status, statusText: response.statusText, headers });
+	}
+
+	return response;
 };
 
 export const handleError = ({ error, event }: any) => {
