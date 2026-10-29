@@ -35,7 +35,7 @@
     "Rejected or Revoked Accounts & Applications": "Rejected or Revoked",
   };
 
-  // ── Vehicle Monitoring ──────────────────────────────────────────────────
+  // â”€â”€ Vehicle Monitoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let vehicles = $state(data.vehicles);
 
   // Sync vehicles state when data changes via invalidateAll
@@ -139,7 +139,7 @@
   }
 
 
-  // ── Photo modal ──────────────────────────────────────────────────────────
+  // â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let showModal = $state(false);
   let modalImage = $state("");
   function openPhoto(url: string | null) {
@@ -595,7 +595,7 @@
                                 <td>#${log.vehicle_log_id}</td>
                                 <td>${log.plate || log.vehicle_plate || 'No Plate'}</td>
                                 <td>${log.driver_name || log.name || 'Driver'} (${log.role || 'Visitor'})</td>
-                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
+                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : 'â€”'}</td>
                                 <td>${log.check_out ? new Date(log.check_out).toLocaleString() : "Still Inside"}</td>
                                 <td>${log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</td>
                             </tr>
@@ -615,7 +615,7 @@
 </script>
 
 <svelte:head>
-  <title>Application Review — Security | GateQR</title>
+  <title>Application Review â€” Security | GateQR</title>
   <meta
     name="description"
     content="Security vehicle monitoring dashboard for Liceo de Cagayan University."
@@ -665,7 +665,7 @@
         </svg>
         <input
           type="text"
-          placeholder="Search name, plate, vehicle…"
+          placeholder="Search name, plate, vehicleâ€¦"
           bind:value={searchQuery}
           class="search-input"
         />
@@ -674,7 +674,7 @@
             class="search-clear"
             onclick={() => {
               searchQuery = "";
-            }}>×</button
+            }}>Ã—</button
           >
         {/if}
       </div>
@@ -707,6 +707,7 @@
     <div class="cards-list">
       {#each displayedApps as app}
         <ApplicationCard
+          {tab}
           showDocs={true}
           data={{
             id: app.registration_id || "-",
@@ -723,7 +724,7 @@
             color: app.vehicle_information?.color || "-",
             plate: app.vehicle_information?.plate_number || "-",
             owner: app.is_owner ? "Yes" : "No",
-            status: app.status,
+            status: (tab === "Document Review" && app.status === "distributed") ? "" : app.status,
             "dean status": app.dept_val_at
               ? "Approved"
               : app.status === "rejected"
@@ -809,6 +810,40 @@
                   } catch (e) {
                     vehicles = previousVehicles;
                     alert("Error performing action.");
+                  }
+                } else if (action === "security_reject") {
+                  const previousVehicles = vehicles;
+                  vehicles = vehicles.map((v: any) =>
+                    v.registration_id === app.registration_id
+                      ? {
+                          ...v,
+                          status: "rejected",
+                          rejected_at: new Date().toISOString(),
+                          rejection_reason: schedule
+                        }
+                      : v,
+                  );
+
+                  try {
+                    const res = await fetch(`/api/monitor/actions`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        vehicle_id: app.registration_id,
+                        action: "security_reject",
+                        reason: schedule
+                      }),
+                    });
+                    if (res.ok) {
+                      invalidateAll();
+                    } else {
+                      vehicles = previousVehicles;
+                      const errData = await res.json();
+                      alert(errData.error || "Failed to reject application.");
+                    }
+                  } catch (e) {
+                    vehicles = previousVehicles;
+                    alert("Error rejecting application.");
                   }
                 }
               }}
@@ -917,7 +952,7 @@
           />
           <input
             type="text"
-            placeholder="Search…"
+            placeholder="Searchâ€¦"
             bind:value={searchQuery}
             oninput={onSearchInput}
             class="search-box"
@@ -940,7 +975,7 @@
       {#if loading}
         <div class="loading-row">
           <div class="spinner"></div>
-          Loading…
+          Loadingâ€¦
         </div>
       {:else}
         <div class="table-wrap">
@@ -991,7 +1026,7 @@
                   </td>
                   <td class="td-time">
                     <span class="time-main"
-                      >{log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</span
+                      >{log.check_in ? new Date(log.check_in).toLocaleString() : 'â€”'}</span
                     >
                   </td>
                   <td class="td-time">
@@ -1229,7 +1264,7 @@
           </select>
           <input
             type="text"
-            placeholder="Search name, plate, vehicle…"
+            placeholder="Search name, plate, vehicleâ€¦"
             bind:value={searchQuery}
             oninput={onSearchInput}
             class="search-box"
@@ -1240,7 +1275,7 @@
       {#if loading}
         <div class="loading-row">
           <div class="spinner"></div>
-          Loading…
+          Loadingâ€¦
         </div>
       {:else}
         <div class="table-wrap">
@@ -1361,7 +1396,7 @@
     margin: 0;
   }
 
-  /* ── Print / Tabs ────────────────────────────────────────────────────── */
+  /* â”€â”€ Print / Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
   .parking-info {
     display: flex;
@@ -1471,7 +1506,7 @@
     color: #16a34a;
   }
 
-  /* ── Controls ────────────────────────────────────────────────────────── */
+  /* â”€â”€ Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .controls-row {
     padding: 0.625rem 1rem;
     border-bottom: 1px solid var(--border);
@@ -1688,7 +1723,7 @@
     flex-shrink: 0;
   }
 
-  /* ── Loading ─────────────────────────────────────────────────────────── */
+  /* â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .loading-row {
     display: flex;
     align-items: center;
@@ -1712,7 +1747,7 @@
     }
   }
 
-  /* ── Table ───────────────────────────────────────────────────────────── */
+  /* â”€â”€ Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
   .td-time {
     min-width: 80px;
@@ -1781,7 +1816,7 @@
     text-decoration: underline;
   }
 
-  /* ── Chips ───────────────────────────────────────────────────────────── */
+  /* â”€â”€ Chips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .chip {
     display: inline-flex;
     align-items: center;
@@ -1798,7 +1833,7 @@
     font-size: 0.875rem;
   }
 
-  /* ── Paginator ───────────────────────────────────────────────────────── */
+  /* â”€â”€ Paginator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .paginator {
     display: flex;
     align-items: center;
@@ -1835,7 +1870,7 @@
     color: var(--text-dim);
   }
 
-  /* ── Photo modal ─────────────────────────────────────────────────────── */
+  /* â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .modal-backdrop {
     position: fixed;
     top: 0;
@@ -1957,7 +1992,7 @@
     border-radius: var(--radius-md);
   }
 
-  /* ── Additional styles for monitoring/history tabs ──────────────────────── */
+  /* â”€â”€ Additional styles for monitoring/history tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .cards-list {
     display: flex;
     flex-direction: column;
@@ -2041,7 +2076,7 @@
     background: var(--surface-hover);
   }
 
-  /* ── Chips ───────────────────────────────────────────────────────────── */
+  /* â”€â”€ Chips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .chip {
     display: inline-flex;
     align-items: center;
@@ -2058,7 +2093,7 @@
     font-size: 0.875rem;
   }
 
-  /* ── Paginator ───────────────────────────────────────────────────────── */
+  /* â”€â”€ Paginator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .paginator {
     display: flex;
     align-items: center;
@@ -2095,7 +2130,7 @@
     color: var(--text-dim);
   }
 
-  /* ── Photo modal ─────────────────────────────────────────────────────── */
+  /* â”€â”€ Photo modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .modal-backdrop {
     position: fixed;
     top: 0;
@@ -2234,7 +2269,7 @@
     text-decoration: underline;
   }
 
-  /* ── Print functionality styles ─────────────────────────────────────────── */
+  /* â”€â”€ Print functionality styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .print-btn {
     background: var(--maroon);
     color: white;
@@ -2437,3 +2472,4 @@
     }
   }
 </style>
+

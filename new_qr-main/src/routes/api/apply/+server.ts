@@ -285,12 +285,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 ? '2_wheels' 
                 : '4_wheels';
 
-        // 4. Format role enum ('student' | 'staff' | 'faculty')
-        let regRole: 'student' | 'staff' | 'faculty' = 'student';
-        const cleanRole = (role || '').toLowerCase();
-        if (cleanRole === 'faculty') regRole = 'faculty';
-        else if (cleanRole === 'staff' || cleanRole === 'employee') regRole = 'staff';
-        else regRole = 'student';
+        // 4. Format role enum ('student' | 'staff' | 'faculty' | 'administrator' | 'concessionnaire' | 'supplier' | 'vps')
+        let regRole: string = 'student';
+        const cleanRole = (role || '').trim().toLowerCase();
+        if (['student', 'staff', 'faculty', 'administrator', 'concessionnaire', 'supplier', 'vps'].includes(cleanRole)) {
+            regRole = cleanRole;
+        } else if (cleanRole === 'concessionaire') {
+            regRole = 'concessionnaire';
+        } else if (cleanRole === 'employee') {
+            regRole = 'staff';
+        } else {
+            regRole = 'student';
+        }
 
         // =====================================================================
         // RENEWAL WORKFLOW: Update SAME registration_id & vehicle_information_id

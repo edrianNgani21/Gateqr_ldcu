@@ -6,11 +6,27 @@ import fs from 'fs';
 // Cache for the cleaned logo with transparent outer background
 let cachedCleanLogoCanvas: any = null;
 
+function resolveLogoPath(): string | null {
+    const candidates = [
+        join(process.cwd(), 'static', 'liceo-logo.png'),
+        join(process.cwd(), 'new_qr-main', 'static', 'liceo-logo.png'),
+        'C:\\Users\\Leonardo Luban\\Desktop\\new_qr-main\\new_qr-main\\static\\liceo-logo.png',
+        'C:\\Users\\Leonardo Luban\\Desktop\\new_qr-main\\static\\liceo-logo.png',
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
 async function getCleanLogoCanvas(): Promise<any | null> {
     if (cachedCleanLogoCanvas) return cachedCleanLogoCanvas;
 
-    const logoPath = join(process.cwd(), 'static', 'liceo-logo.png');
-    if (!fs.existsSync(logoPath)) return null;
+    const logoPath = resolveLogoPath();
+    if (!logoPath) {
+        console.warn('[QR] liceo-logo.png not found in any candidate path');
+        return null;
+    }
 
     try {
         const rawLogo = await loadImage(logoPath);
@@ -20,33 +36,38 @@ async function getCleanLogoCanvas(): Promise<any | null> {
         const lCtx = logoCanvas.getContext('2d');
         lCtx.drawImage(rawLogo, 0, 0);
 
-        const imgData = lCtx.getImageData(0, 0, w, h);
-        const data = imgData.data;
+        try {
+            const imgData = lCtx.getImageData(0, 0, w, h);
+            const data = imgData.data;
 
-        // Flood fill from corners to make the outer white background transparent
-        // so that only the logo itself appears with no background
-        const visited = new Uint8Array(w * h);
-        const queue: [number, number][] = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]];
-        for (const [qx, qy] of queue) visited[qy * w + qx] = 1;
+            // Flood fill from corners to make the outer white background transparent
+            // so that only the logo itself appears with no background
+            const visited = new Uint8Array(w * h);
+            const queue: [number, number][] = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]];
+            for (const [qx, qy] of queue) visited[qy * w + qx] = 1;
 
-        while (queue.length > 0) {
-            const [x, y] = queue.pop()!;
-            const idx = (y * w + x) * 4;
-            if (data[idx] > 235 && data[idx + 1] > 235 && data[idx + 2] > 235) {
-                data[idx + 3] = 0;
-                const neighbors: [number, number][] = [
-                    [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]
-                ];
-                for (const [nx, ny] of neighbors) {
-                    if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny * w + nx]) {
-                        visited[ny * w + nx] = 1;
-                        queue.push([nx, ny]);
+            while (queue.length > 0) {
+                const [x, y] = queue.pop()!;
+                const idx = (y * w + x) * 4;
+                if (data[idx] > 235 && data[idx + 1] > 235 && data[idx + 2] > 235) {
+                    data[idx + 3] = 0;
+                    const neighbors: [number, number][] = [
+                        [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]
+                    ];
+                    for (const [nx, ny] of neighbors) {
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny * w + nx]) {
+                            visited[ny * w + nx] = 1;
+                            queue.push([nx, ny]);
+                        }
                     }
                 }
             }
+
+            lCtx.putImageData(imgData, 0, 0);
+        } catch (floodErr) {
+            console.warn('[QR] Flood fill failed, using raw logo:', floodErr);
         }
 
-        lCtx.putImageData(imgData, 0, 0);
         cachedCleanLogoCanvas = logoCanvas;
         return cachedCleanLogoCanvas;
     } catch (err) {

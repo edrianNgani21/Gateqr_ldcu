@@ -11,6 +11,10 @@
     onaction?: (action: string, schedule: string) => Promise<void> | void;
   } = $props();
 
+  // For Document Review reject flow
+  let showRejectInput = $state(false);
+  let rejectReason = $state('');
+
   let isExpired = $derived(expiresAt ? new Date(expiresAt) < new Date() : false);
   let loadingAction = $state<string | null>(null);
 
@@ -94,20 +98,61 @@
     </button>
 
   {:else if tab === 'Document Review'}
-    <button
-      class="action-btn btn-deliver"
-      onclick={() => act('security_check')}
-      disabled={!!loadingAction}
-      class:btn-loading={loadingAction === 'security_check'}
-    >
-      {#if loadingAction === 'security_check'}
-        {@render spinner()}
-        Checking…
-      {:else}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-        Checked
-      {/if}
-    </button>
+    {#if showRejectInput}
+      <div class="reject-input-wrap">
+        <textarea
+          class="reject-reason-input"
+          placeholder="Enter reason for sending back to OSA…"
+          bind:value={rejectReason}
+          rows={2}
+        ></textarea>
+        <div class="reject-input-actions">
+          <button
+            class="action-btn btn-reject"
+            onclick={() => {
+              if (!rejectReason.trim()) { alert('Please provide a reason.'); return; }
+              act('security_reject', rejectReason.trim());
+              showRejectInput = false;
+              rejectReason = '';
+            }}
+            disabled={!!loadingAction}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Confirm Reject
+          </button>
+          <button
+            class="action-btn btn-reschedule"
+            onclick={() => { showRejectInput = false; rejectReason = ''; }}
+            disabled={!!loadingAction}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    {:else}
+      <button
+        class="action-btn btn-reject"
+        onclick={() => (showRejectInput = true)}
+        disabled={!!loadingAction}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Reject
+      </button>
+      <button
+        class="action-btn btn-deliver"
+        onclick={() => act('security_check')}
+        disabled={!!loadingAction}
+        class:btn-loading={loadingAction === 'security_check'}
+      >
+        {#if loadingAction === 'security_check'}
+          {@render spinner()}
+          Processing…
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          Mark as done
+        {/if}
+      </button>
+    {/if}
 
   {:else if tab === 'release'}
     <button
@@ -121,7 +166,7 @@
         Releasing…
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-        Sticker Released
+        Release Sticker
       {/if}
     </button>
 
@@ -226,6 +271,36 @@
     display: flex;
     gap: 0.625rem;
     flex-wrap: wrap;
+  }
+
+  .reject-input-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .reject-reason-input {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 1.5px solid #fca5a5;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-family: inherit;
+    resize: vertical;
+    background: #fef2f2;
+    color: #1a202c;
+    outline: none;
+    box-sizing: border-box;
+  }
+  .reject-reason-input:focus {
+    border-color: #b91c1c;
+    box-shadow: 0 0 0 2px rgba(185,28,28,0.1);
+  }
+
+  .reject-input-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .action-btn {

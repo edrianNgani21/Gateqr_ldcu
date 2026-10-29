@@ -83,15 +83,12 @@
   const excludedKeys = ["documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
+    const rawCode = (uniqueCode && uniqueCode.trim()) || (qr && typeof qr === 'string' && !qr.trim().startsWith('http') ? qr.trim() : null);
+    if (rawCode) {
+      return `/api/qr?code=${encodeURIComponent(rawCode)}&role=${encodeURIComponent(role)}`;
+    }
     if (qr && typeof qr === 'string') {
       const trimmed = qr.trim();
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
-        return trimmed;
-      }
-      return `/api/qr?code=${encodeURIComponent(trimmed)}&role=${encodeURIComponent(role)}`;
-    }
-    if (uniqueCode && typeof uniqueCode === 'string') {
-      const trimmed = uniqueCode.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
         return trimmed;
       }
@@ -187,7 +184,7 @@
       {#if data.plate}
         <span class="plate-chip">{data.plate}</span>
       {/if}
-      {#if appStatus !== 'rejected' && appStatus !== 'revoked'}
+      {#if appStatus && appStatus !== '' && appStatus !== 'rejected' && appStatus !== 'revoked' && !(tab === 'Document Review' && (appStatus === 'distributed' || statusLabel === 'DISTRIBUTED'))}
         <span class="status-pill" style="background: {pill.bg}; color: {pill.text}; border-color: {pill.border};">
           {statusLabel}
         </span>

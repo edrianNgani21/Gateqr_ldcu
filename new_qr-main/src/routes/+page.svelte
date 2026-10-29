@@ -72,15 +72,8 @@
             const hasEnrollment = !!(files.enrollment.file || files.enrollment.url);
             const hasLetter = !!(files.letter.file || files.letter.url);
 
-            const isExternal = ['concessionnaire', 'supplier', 'visitor'].includes(role);
-            if (!hasOr || !hasCr) return false;
-            if (!isExternal || owner === 'no') {
-                if (!hasLicense) return false;
-            }
-            if (!hasId) return false;
-            if (['student', 'faculty'].includes(role)) {
-                if (!hasEnrollment) return false;
-            }
+            if (!hasOr || !hasCr || !hasLicense || !hasId) return false;
+            if (['student', 'faculty'].includes(role) && !hasEnrollment) return false;
             if (owner === 'yes' && !hasLetter) return false;
             return true;
         }
@@ -579,35 +572,20 @@
               <span>All submitted documents must be in PDF format. If you use CamScanner or any other scanning application, make sure to export or convert your scanned documents into a PDF file before uploading them to the system.</span>
             </div>
 
-            <!-- Liceo Documents -->
-            {#if !['visitor', 'concessionaire'].includes(role)}
+            <!-- Institutional Documents -->
+            {#if true}
               {@const showEnrollment = ['student', 'faculty'].includes(role)}
-              {@const showId = ['student', 'faculty', 'staff', 'employee'].includes(role)}
-              {@const tileCount = (showId ? 1 : 0) + (showEnrollment ? 1 : 0) + (owner === 'yes' ? 1 : 0)}
-              {#if tileCount > 0}
+              {@const tileCount = 1 + (showEnrollment ? 1 : 0) + (owner === 'yes' ? 1 : 0)}
               <div class="upload-section-block">
-                <h3 class="upload-section-heading">Liceo Institutional Documents</h3>
+                <h3 class="upload-section-heading">Institutional Documents</h3>
                 <div class="upload-tiles-grid" style="--cols: {Math.min(tileCount, 3)}">
-                  {#if showId}
-                    {@render uploadLabel(`${role === 'student' ? 'Student' : 'Employee'} ID`, 'id')}
-                  {/if}
+                  {@render uploadLabel(`${role === 'student' ? 'Student' : 'Employee'} ID`, 'id')}
                   {#if showEnrollment}
                     {@render uploadLabel(role === 'student' ? 'Enrollment Form' : 'Teaching Load', 'enrollment')}
                   {/if}
                   {#if owner === 'yes'}
                     {@render uploadLabel('Signed Letter / DOAS', 'letter')}
                   {/if}
-                </div>
-              </div>
-              {/if}
-            {/if}
-
-            {#if ['visitor', 'concessionaire'].includes(role) && owner === 'yes'}
-              <div class="upload-section-block">
-                <h3 class="upload-section-heading">Visitor / Concessionaire Documents</h3>
-                <div class="upload-tiles-grid" style="--cols: 2">
-                  {@render uploadLabel("Driver's License (LTO)", 'license')}
-                  {@render uploadLabel('Signed Letter / DOAS', 'letter')}
                 </div>
               </div>
             {/if}

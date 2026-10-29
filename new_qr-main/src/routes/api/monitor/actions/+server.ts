@@ -39,7 +39,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { vehicle_id, action } = await request.json();
+        const { vehicle_id, action, reason, schedule } = await request.json();
 
         if (!vehicle_id || !action) {
             return json({ error: 'Missing parameters' }, { status: 400 });
@@ -69,6 +69,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             notifType = 'security_checked';
             notifMessage = 'You can now pay at the cashier and upload your payment receipt.';
             emailSubject = 'Payment Required - Liceo GateQR';
+        } else if (action === 'security_reject') {
+            const rejectReason = (reason || schedule || '').trim();
+            if (!rejectReason) {
+                return json({ error: 'Rejection reason is required' }, { status: 400 });
+            }
+            updateData = {
+                status: 'rejected',
+                rejected_at: new Date().toISOString(),
+                rejection_reason: rejectReason
+            };
+            notifType = 'rejected';
+            notifMessage = `Your vehicle registration was rejected during Security Document Review. Reason: ${rejectReason}`;
+            emailSubject = 'Application Rejected - Liceo GateQR';
         } else {
             return json({ error: 'Invalid action' }, { status: 400 });
         }
