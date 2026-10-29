@@ -84,7 +84,7 @@
         Processing…
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        {#if tab === 'overdue'}Verify Hardcopy{:else if isVps}Check &amp; Send to Payment{:else}Forward to Security Admin{/if}
+        {#if tab === 'overdue'}Verify Hardcopy{:else if isVps}Mark as Checked{:else}Forward to Security Admin{/if}
       {/if}
     </button>
     <button
