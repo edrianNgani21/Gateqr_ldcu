@@ -343,10 +343,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 updated_at: new Date().toISOString()
             };
 
-            const { error: updateRegError } = await supabase
+            let { error: updateRegError } = await supabase
                 .from('registration')
                 .update(updateRegPayload)
                 .eq('registration_id', renewal_registration_id);
+
+            if (updateRegError && updateRegError.message?.includes('registration_role_enum')) {
+                updateRegPayload.role = 'staff';
+                const retryRes = await supabase
+                    .from('registration')
+                    .update(updateRegPayload)
+                    .eq('registration_id', renewal_registration_id);
+                updateRegError = retryRes.error;
+            }
 
             if (updateRegError) {
                 console.error('Error updating registration for renewal:', updateRegError);
@@ -554,9 +563,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         let insertError = insertRes.error;
         newRegData = insertRes.data;
 
-        if (insertError && (insertError.message?.includes('doc_id') || insertError.message?.includes('year_level'))) {
+        if (insertError && (insertError.message?.includes('doc_id') || insertError.message?.includes('year_level') || insertError.message?.includes('registration_role_enum'))) {
             if (insertError.message?.includes('doc_id')) delete regPayload.doc_id;
             if (insertError.message?.includes('year_level')) delete regPayload.year_level;
+            if (insertError.message?.includes('registration_role_enum')) regPayload.role = 'staff';
             const fallbackRes = await supabase
                 .from('registration')
                 .insert(regPayload)
