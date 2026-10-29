@@ -1,6 +1,7 @@
 <script lang="ts">
   import StatusBadge from "./StatusBadge.svelte";
   import DocumentGrid from "./DocumentGrid.svelte";
+  import { getWorkflowStatusPills } from "$lib/utils/statusLabels";
 
   let {
     tab = "validation",
@@ -25,7 +26,15 @@
   } = $props();
 
   let expanded = $state(startExpanded);
-  let effectiveShowQR = $derived(showQR);
+
+  // A real QR only exists once OSA has scheduled the application (moved to Submission of Hardcopies).
+  // Screening of Applications never shows one.
+  let hasRealQR = $derived.by(() => {
+    const unique = typeof data.qr_unique_code === 'string' ? data.qr_unique_code.trim() : '';
+    const qr = typeof data.qr_code === 'string' ? data.qr_code.trim() : '';
+    return (!!unique && unique.toUpperCase() !== 'PENDING') || (!!qr && qr.toUpperCase() !== 'PENDING');
+  });
+  let effectiveShowQR = $derived(showQR && tab !== 'validation' && hasRealQR);
 
   let showDocPopup = $state<string | null>(null);
 
@@ -70,6 +79,9 @@
   };
   let pill = $derived(statusColors[statusVariant] ?? statusColors.default);
 
+  // Workflow-specific labels per dashboard tab (e.g. PENDING DPT APRVL, OSA CHECKED, PAID)
+  let workflowPills = $derived(getWorkflowStatusPills(tab, appStatus, data.role));
+
   // Role badge colors
   const roleColors: Record<string, string> = {
     student: "#3b82f6",
@@ -80,12 +92,14 @@
   };
   let roleColor = $derived(roleColors[role] ?? "#6b7280");
 
-  const excludedKeys = ["documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
+  // `id` is the registration_id; it is printed under the QR code instead of in the card details
+  const excludedKeys = ["id", "registration_id", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
     const rawCode = (uniqueCode && uniqueCode.trim()) || (qr && typeof qr === 'string' && !qr.trim().startsWith('http') ? qr.trim() : null);
+    const regNo = String(data.registration_id ?? data.id ?? '').replace(/\D/g, '');
     if (rawCode) {
-      return `/api/qr?code=${encodeURIComponent(rawCode)}&role=${encodeURIComponent(role)}`;
+      return `/api/qr?code=${encodeURIComponent(rawCode)}&role=${encodeURIComponent(role)}${regNo ? `&label=${regNo}` : ''}`;
     }
     if (qr && typeof qr === 'string') {
       const trimmed = qr.trim();
@@ -184,7 +198,14 @@
       {#if data.plate}
         <span class="plate-chip">{data.plate}</span>
       {/if}
-      {#if appStatus && appStatus !== '' && appStatus !== 'rejected' && appStatus !== 'revoked' && !(tab === 'Document Review' && (appStatus === 'distributed' || statusLabel === 'DISTRIBUTED'))}
+      {#if workflowPills}
+        {#each workflowPills as wp}
+          {@const wpColors = statusColors[wp.tone] ?? statusColors.default}
+          <span class="status-pill" style="background: {wpColors.bg}; color: {wpColors.text}; border-color: {wpColors.border};">
+            {wp.label}
+          </span>
+        {/each}
+      {:else if appStatus && appStatus !== '' && appStatus !== 'rejected' && appStatus !== 'revoked' && !(tab === 'Document Review' && (appStatus === 'distributed' || statusLabel === 'DISTRIBUTED'))}
         <span class="status-pill" style="background: {pill.bg}; color: {pill.text}; border-color: {pill.border};">
           {statusLabel}
         </span>
@@ -320,11 +341,10 @@
                 onclick={() => (showDocPopup = qrImgUrl)}
                 title="Click to view full size QR code"
               >
-                <img src={qrImgUrl} alt="Vehicle QR Code" width="96" height="96" class="qr-img" />
+                <img src={qrImgUrl} alt="Vehicle QR Code" width="96" height="110" class="qr-img" style="object-fit: contain;" />
               </button>
               <div class="qr-meta">
-                <span class="qr-code-text">Code: {data.qr_unique_code || (data.qr_code && !data.qr_code.startsWith('http') ? data.qr_code : 'PENDING')}</span>
-                <a href={qrImgUrl} download={`gateqr-${data.qr_unique_code || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
+                <a href={qrImgUrl} download={`gateqr-${data.registration_id || data.id || 'code'}.png`} class="qr-download-btn">Download QR</a>
               </div>
             </div>
           </div>
@@ -740,17 +760,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-  }
-  .qr-code-text {
-    font-family: monospace;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--maroon);
-    background: #f8fafc;
-    padding: 2px 8px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    width: fit-content;
   }
   .qr-download-btn {
     display: inline-flex;

@@ -76,10 +76,16 @@ async function getCleanLogoCanvas(): Promise<any | null> {
     }
 }
 
-export async function generateStyledQRBuffer(qrData: string, role: string = 'student'): Promise<Buffer> {
+/**
+ * Render the role-colored QR with the Liceo logo in the center.
+ * When `label` is given (the registration_id number), it is printed in a strip below the QR.
+ */
+export async function generateStyledQRBuffer(qrData: string, role: string = 'student', label?: string | number | null): Promise<Buffer> {
     const qrSize = 400;
     const borderPadding = 20;
     const totalSize = qrSize + borderPadding * 2;
+    const labelText = label !== undefined && label !== null && String(label).trim() !== '' ? String(label).replace(/\D/g, '') : '';
+    const labelHeight = labelText ? 64 : 0;
 
     // 1. Generate QR Code image data URL with high error correction (H)
     const qrDataUrl = await QRCode.toDataURL(qrData, {
@@ -92,7 +98,7 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
         }
     });
 
-    const canvas = createCanvas(totalSize, totalSize);
+    const canvas = createCanvas(totalSize, totalSize + labelHeight);
     const ctx = canvas.getContext('2d');
 
     // 2. Determine border color based on role:
@@ -119,13 +125,28 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
 
     // Fill background with border color
     ctx.fillStyle = borderColor;
-    ctx.fillRect(0, 0, totalSize, totalSize);
+    ctx.fillRect(0, 0, totalSize, totalSize + labelHeight);
 
     // If dirty white (or light border), draw a subtle border around outer edge for visibility on white background
     if (borderColor === '#E5E0D8' || borderColor === '#ffffff') {
         ctx.strokeStyle = '#c4beb5';
         ctx.lineWidth = 2;
-        ctx.strokeRect(1, 1, totalSize - 2, totalSize - 2);
+        ctx.strokeRect(1, 1, totalSize - 2, totalSize + labelHeight - 2);
+    }
+
+    // Registration number strip below the QR (digits only)
+    if (labelText) {
+        const stripX = borderPadding;
+        const stripY = totalSize - borderPadding / 2;
+        const stripW = qrSize;
+        const stripH = labelHeight - borderPadding / 2;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(stripX, stripY, stripW, stripH);
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 38px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(labelText, totalSize / 2, stripY + stripH / 2 + 1);
     }
 
     // 3. Draw QR image inside the border
@@ -153,7 +174,7 @@ export async function generateStyledQRBuffer(qrData: string, role: string = 'stu
     return canvas.toBuffer('image/png');
 }
 
-export async function generateStyledQR(qrData: string, role: string = 'student', filepath: string): Promise<void> {
-    const buffer = await generateStyledQRBuffer(qrData, role);
+export async function generateStyledQR(qrData: string, role: string = 'student', filepath: string, label?: string | number | null): Promise<void> {
+    const buffer = await generateStyledQRBuffer(qrData, role, label);
     fs.writeFileSync(filepath, buffer);
 }

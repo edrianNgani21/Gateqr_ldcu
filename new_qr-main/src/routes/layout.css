@@ -1015,3 +1015,40 @@ table { max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+/* ─── Responsive buttons, modals & toolbars (phones → TVs) ─────────────── */
+button, .btn, [role="button"], a.btn {
+  touch-action: manipulation;
+  max-width: 100%;
+}
+
+/* Comfortable tap targets on touch screens */
+@media (pointer: coarse) {
+  button, .btn, select, input[type="checkbox"] + label {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Modals fit the screen and scroll instead of overflowing */
+  .modal-overlay { padding: 0.75rem !important; align-items: flex-start !important; overflow-y: auto; }
+  .modal-content {
+    width: 100% !important;
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    margin: auto 0;
+  }
+  .modal-actions { flex-direction: column-reverse !important; gap: 0.5rem !important; }
+  .modal-actions > button, .modal-actions > a { width: 100% !important; justify-content: center; }
+  .schedule-row[style*="grid"] { grid-template-columns: 1fr !important; }
+
+  /* Filter/search bars wrap instead of pushing the page sideways */
+  .filters-section, .filter-group, .sub-tabs-bar, .table-actions, .header-actions {
+    flex-wrap: wrap !important;
+  }
+  .filter-group > select, .filter-group > button { flex: 1 1 140px; min-width: 0; }
+  .sub-tabs-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .sub-tab-btn { flex: 0 0 auto; }
+  .table-actions > button { flex: 1 1 140px; }
+}

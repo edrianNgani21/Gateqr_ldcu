@@ -655,7 +655,7 @@
             showQR={true}
             {tab}>
               {#snippet children()}
-                <ActionBar {tab} status={app.status} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
+                <ActionBar {tab} status={app.status} role={app.role} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
               {/snippet}
             </ApplicationCard>
           </div>
@@ -777,7 +777,7 @@
                     {tab}>
                       {#snippet children()}
                         <div style="pointer-events: auto;">
-                          <ActionBar {tab} status={app.status} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
+                          <ActionBar {tab} status={app.status} role={app.role} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
                         </div>
                       {/snippet}
                     </ApplicationCard>
@@ -832,7 +832,7 @@
                 showQR={true}
                 {tab}>
                   {#snippet children()}
-                    <ActionBar {tab} status={app.status} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
+                    <ActionBar {tab} status={app.status} role={app.role} expiresAt={app.expires_at} onaction={(action) => handleAction(app.id, action)} />
                   {/snippet}
                 </ApplicationCard>
               {/if}

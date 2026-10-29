@@ -60,8 +60,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                         updateData.expires_at = new Date(expires_at).toISOString();
                     }
 
-                    if (!reg?.qr_code) {
+                    // /api/apply stores 'PENDING' until the application is scheduled
+                    if (!reg?.qr_code || reg.qr_code === 'PENDING') {
                         let uniqueCode = reg?.qr_unique_code;
+                        if (uniqueCode === 'PENDING') uniqueCode = null;
                         if (!uniqueCode) {
                             let isCodeUnique = false;
                             let attempts = 0;
@@ -79,7 +81,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                             }
                         }
                         const filename = `qr-codes/qr-${registration_id}-${Date.now()}.png`;
-                        const qrBuffer = await generateStyledQRBuffer(uniqueCode as string, reg?.role || 'student');
+                        const qrBuffer = await generateStyledQRBuffer(uniqueCode as string, reg?.role || 'student', registration_id);
                         const qrUrl = await uploadToStorage(filename, qrBuffer, 'image/png');
                         updateData.qr_code = qrUrl;
                         updateData.qr_unique_code = uniqueCode;

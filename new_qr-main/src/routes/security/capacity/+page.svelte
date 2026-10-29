@@ -28,6 +28,7 @@
     return startLiveSync({
       channelName: 'security-capacity-realtime',
       tables: ['parking_capacity', 'campus_event', 'vehicle_log'],
+      invalidate: false,
       onSync: () => {
         if (!editingCampus) {
           invalidateAll();

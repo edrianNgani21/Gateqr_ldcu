@@ -15,7 +15,7 @@ from gpiozero import AngularServo, Device
 from collections import deque
 import re
 from supabase import create_client, Client
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -156,6 +156,7 @@ class GateState:
     LOG_WARNING = "LOG_WARNING"  # Same-day double-in or double-out warning
     PROCESSING = "PROCESSING"   # QR detected, waiting for API response
     CAMPUS_FULL = "CAMPUS_FULL"
+    BLOCKED = "BLOCKED"         # Registration / vehicle is on the blocklist: entry denied
 
 class SideState:
     def __init__(self, gate_type):
@@ -169,6 +170,7 @@ class SideState:
         self.anomaly_desc = ""
         self.logged_status = None
         self.vehicle_data = {} # Holds vehicle information from separate table
+        self.block_info = None # Active blocklist row when state is BLOCKED
         self.prolong_ready_time = 0.0 # Cooldown timer for PROLONG scans (5s delay)
         self.scan_cooldown_end = 0.0  # Cooldown timer for Exit scanner (5s delay between scans)
         
@@ -659,6 +661,282 @@ def close_gate(side):
     latest_scanned_details = None
     print(f"DEBUG: Gate closed successfully")
 
+# ==============================================================================
+# REGISTERED VEHICLE CHECK (shared by QR scan and manual plate lookup)
+# ==============================================================================
+def parse_db_timestamp(value):
+    """Parse a Supabase timestamptz string into an aware UTC datetime (None if invalid)."""
+    if not value:
+        return None
+    try:
+        txt = str(value).strip().replace('Z', '+00:00').replace(' ', 'T', 1)
+        # Python < 3.11 only accepts 3 or 6 fractional second digits
+        txt = re.sub(r'\.(\d+)', lambda m: '.' + (m.group(1) + '000000')[:6], txt, count=1)
+        dt = datetime.fromisoformat(txt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+def format_remaining(until_value):
+    """Human readable time left until a blocklist how_long timestamp, e.g. '2d 03h 15m 20s'."""
+    until = parse_db_timestamp(until_value)
+    if not until:
+        return "N/A"
+    secs = int((until - datetime.now(timezone.utc)).total_seconds())
+    if secs <= 0:
+        return "EXPIRED"
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours:02d}h {mins:02d}m {secs:02d}s"
+    return f"{hours:02d}h {mins:02d}m {secs:02d}s"
+
+def get_active_block(registration_id, vehicle_id):
+    """Return the active blocklist row (latest how_long) for this registration or vehicle, else None.
+    The blocklist table is shared, so this applies at every campus gate."""
+    filters = []
+    try:
+        if registration_id:
+            filters.append(f"registration_id.eq.{int(registration_id)}")
+        if vehicle_id:
+            filters.append(f"vehicle_id.eq.{int(vehicle_id)}")
+    except (TypeError, ValueError):
+        pass
+    if not filters:
+        return None
+    try:
+        now_utc = datetime.now(timezone.utc)
+        res = supabase.table('blocklist').select('*')\
+            .or_(','.join(filters))\
+            .gt('how_long', now_utc.strftime('%Y-%m-%dT%H:%M:%SZ'))\
+            .order('how_long', desc=True).limit(1).execute()
+        for row in (res.data or []):
+            until = parse_db_timestamp(row.get('how_long'))
+            if until and until > now_utc:
+                return row
+    except Exception as e:
+        # Gate keeps working if the blocklist table is unreachable; the error is logged for the admin
+        print(f"DEBUG: Blocklist lookup failed: {e}")
+    return None
+
+def show_blocked(side, reg, block):
+    """Switch the gate to the BLOCKED screen and show the vehicle details with the block status."""
+    global latest_scanned_details
+    side.block_info = block
+    side.data = reg
+    first_n = reg.get('first_name', '')
+    last_n = reg.get('last_name', '')
+    v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+    v_color = side.vehicle_data.get('color') or ''
+    latest_scanned_details = {
+        "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
+        "name": f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A',
+        "role": (reg.get('role') or 'N/A').capitalize(),
+        "plate": side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A',
+        "brand": f"{v_brand} ({v_color})" if v_color else v_brand,
+        "type": side.vehicle_data.get('type') or reg.get('type') or 'N/A',
+        "status": "BLOCKED",
+        "time": datetime.now().strftime("%I:%M:%S %p")
+    }
+    print(f"[{side.type}] BLOCKED registration {reg.get('registration_id')}: {block.get('reason')} (until {block.get('how_long')})")
+    side.state = GateState.BLOCKED
+
+def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
+    """Decide what the gate shows for a registered vehicle: BLOCKED, duplicate-entry / wrong-campus
+    warnings, auto exit, or DETECTED (LET IN / DENY). Manual access passes auto_exit=False so the
+    guard always confirms with LET OUT / DENY."""
+    global latest_scanned_details
+    side.data = reg
+    side.block_info = None
+
+    # Get vehicle information from separate table (the manual plate lookup may already have it)
+    try:
+        print(f"DEBUG: Registration data: {reg}")
+        vehicle_info_id = reg.get('vehicle_information_id')
+        print(f"DEBUG: vehicle_information_id from registration: {vehicle_info_id}")
+        
+        if vehicle_data:
+            side.vehicle_data = vehicle_data
+        elif vehicle_info_id:
+            vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
+            print(f"DEBUG: Vehicle response data: {vehicle_response.data}")
+            if vehicle_response.data:
+                vehicle_data = vehicle_response.data[0]
+                # Store vehicle data in a separate field
+                side.vehicle_data = vehicle_data
+                print(f"DEBUG: Vehicle data loaded successfully: {vehicle_data}")
+            else:
+                print(f"DEBUG: No vehicle found with vehicle_information_id: {vehicle_info_id}")
+                side.vehicle_data = {}
+        else:
+            print(f"DEBUG: No vehicle_information_id in registration")
+            side.vehicle_data = {}
+    except Exception as e:
+        print(f"Error fetching vehicle information: {e}")
+        side.vehicle_data = {}
+    
+    # Blocklist check (all campuses). Applies to the entrance; a blocked vehicle already inside may still leave.
+    if side.type == 'in':
+        block = get_active_block(reg.get('registration_id'), side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'))
+        if block:
+            show_blocked(side, reg, block)
+            return
+
+    # Multi-campus duplicate entry check:
+    # Query recent logs for this registration across ALL campuses to detect if vehicle is currently inside
+    open_cross_log = None
+    try:
+        all_logs_res = supabase.table('vehicle_log').select('*')\
+            .eq('registration_id', reg['registration_id'])\
+            .order('created_at', desc=True).limit(5).execute()
+        if all_logs_res.data:
+            for l_row in all_logs_res.data:
+                st = str(l_row.get('logged_status', '')).strip().lower()
+                has_in = bool(l_row.get('check_in'))
+                has_out = bool(l_row.get('check_out'))
+                # Active entry: checked in, not checked out, and not explicitly exited/denied
+                if (has_in and not has_out) or st in ('inside', 'inside_campus'):
+                    if st not in ('exited', 'exit', 'denied', 'exited_campus'):
+                        open_cross_log = l_row
+                        break
+    except Exception as e:
+        print(f"DEBUG: Error checking multi-campus logs: {e}")
+        open_cross_log = None
+
+    # Simple logic: if QR code exists in database, it's REGISTERED
+    side.logged_status = "REGISTERED"
+    side.status_warning_pending = False
+
+    # Populate driver and vehicle details for dashboard and display
+    first_n = reg.get('first_name', '')
+    last_n = reg.get('last_name', '')
+    driver_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
+    role_name = (reg.get('role') or 'N/A').capitalize()
+    v_plate = side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
+    v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
+    v_type = side.vehicle_data.get('type') or reg.get('type') or 'N/A'
+    v_color = side.vehicle_data.get('color') or ''
+    full_brand = f"{v_brand} ({v_color})" if v_color else v_brand
+
+    # Identify current campus and active checked-in campus
+    current_gate, current_campus = get_campus_gate_and_name()
+    current_campus_norm = normalize_campus_name(current_campus)
+
+    # --- Multi-campus duplicate entry & wrong campus exit flagging ---
+    if open_cross_log:
+        active_campus_norm = normalize_campus_name(open_cross_log.get('campus'))
+        check_in_time = open_cross_log.get('check_in', '')
+        try:
+            dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
+            check_in_time = dt.strftime('%I:%M %p')
+        except:
+            pass
+
+        # Case 1: ENTRANCE CAMERA (side.type == 'in')
+        if side.type == 'in':
+            if active_campus_norm != current_campus_norm:
+                side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot enter {current_campus_norm.upper()}."
+                reason_text = f"Duplicate Entry: Currently checked in at {active_campus_norm}, attempted entry at {current_campus_norm}"
+            else:
+                side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {current_campus_norm.upper()} (Entered at {check_in_time})!"
+                reason_text = f"Duplicate Entry: Vehicle already inside {current_campus_norm}"
+
+            # Log the flagged violation to database
+            try:
+                supabase.table('vehicle_log').insert({
+                    "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
+                    "registration_id": reg['registration_id'],
+                    "check_in": datetime.now().isoformat(),
+                    "check_out": datetime.now().isoformat(),
+                    "logged_status": "Denied",
+                    "sticker_status": "registered",
+                    "campus_gate": current_gate,
+                    "campus": current_campus_norm,
+                    "reason": reason_text
+                }).execute()
+            except Exception as err:
+                print(f"DEBUG: Error logging duplicate entry violation: {err}")
+
+            latest_scanned_details = {
+                "gate": "ENTRANCE",
+                "name": driver_name,
+                "role": role_name,
+                "plate": v_plate,
+                "brand": full_brand,
+                "type": v_type,
+                "status": "FLAGGED (DUPLICATE ENTRY)",
+                "time": datetime.now().strftime("%I:%M:%S %p")
+            }
+
+            side.anomaly_id = open_cross_log.get('vehicle_log_id')
+            side.state = GateState.LOG_WARNING
+            return
+
+        # Case 2: EXIT CAMERA (side.type == 'out')
+        elif side.type == 'out':
+            if active_campus_norm != current_campus_norm:
+                side.anomaly_desc = f"WRONG CAMPUS EXIT VIOLATION: Checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot exit from {current_campus_norm.upper()}."
+                reason_text = f"Exited the wrong campus: Checked in at {active_campus_norm}, attempted exit at {current_campus_norm}"
+
+                # Log the flagged violation to database
+                try:
+                    supabase.table('vehicle_log').insert({
+                        "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
+                        "registration_id": reg['registration_id'],
+                        "check_in": datetime.now().isoformat(),
+                        "check_out": datetime.now().isoformat(),
+                        "logged_status": "Denied",
+                        "sticker_status": "registered",
+                        "campus_gate": current_gate,
+                        "campus": current_campus_norm,
+                        "reason": reason_text
+                    }).execute()
+                except Exception as err:
+                    print(f"DEBUG: Error logging wrong campus exit violation: {err}")
+
+                latest_scanned_details = {
+                    "gate": "EXIT",
+                    "name": driver_name,
+                    "role": role_name,
+                    "plate": v_plate,
+                    "brand": full_brand,
+                    "type": v_type,
+                    "status": "FLAGGED (WRONG CAMPUS EXIT)",
+                    "time": datetime.now().strftime("%I:%M:%S %p")
+                }
+
+                side.anomaly_id = open_cross_log.get('vehicle_log_id')
+                side.state = GateState.LOG_WARNING
+                return
+            else:
+                print(f"DEBUG: Active entry confirmed at {current_campus_norm}, proceeding with exit")
+
+    elif side.type == 'out' and not open_cross_log:
+        print(f"[{side.type}] No active entry record found, allowing exit anyway")
+
+    latest_scanned_details = {
+        "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
+        "name": driver_name,
+        "role": role_name,
+        "plate": v_plate,
+        "brand": full_brand,
+        "type": v_type,
+        "status": side.logged_status or "REGISTERED",
+        "time": datetime.now().strftime("%I:%M:%S %p")
+    }
+
+    # --- EXIT GATE: Auto-open for valid QR codes ---
+    if side.type == 'out' and auto_exit:
+        print(f"DEBUG: Exit gate - auto-opening for valid QR")
+        submit_entry_exit(side)
+        return
+
+    # --- Entrance gate: valid QR codes go to DETECTED state (REGISTERED) ---
+    side.state = GateState.DETECTED
+
 def process_qr(side, qr_text, frame):
     global latest_scanned_details
     try:
@@ -677,185 +955,8 @@ def process_qr(side, qr_text, frame):
                 side.data = qr_text
                 return
             
-            reg = response.data[0]
-            side.data = reg
-            
-            # Get vehicle information from separate table
-            try:
-                print(f"DEBUG: Registration data: {reg}")
-                vehicle_info_id = reg.get('vehicle_information_id')
-                print(f"DEBUG: vehicle_information_id from registration: {vehicle_info_id}")
-                
-                if vehicle_info_id:
-                    vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
-                    print(f"DEBUG: Vehicle response data: {vehicle_response.data}")
-                    if vehicle_response.data:
-                        vehicle_data = vehicle_response.data[0]
-                        # Store vehicle data in a separate field
-                        side.vehicle_data = vehicle_data
-                        print(f"DEBUG: Vehicle data loaded successfully: {vehicle_data}")
-                    else:
-                        print(f"DEBUG: No vehicle found with vehicle_information_id: {vehicle_info_id}")
-                        side.vehicle_data = {}
-                else:
-                    print(f"DEBUG: No vehicle_information_id in registration")
-                    side.vehicle_data = {}
-            except Exception as e:
-                print(f"Error fetching vehicle information: {e}")
-                side.vehicle_data = {}
-            
-            # Multi-campus duplicate entry check:
-            # Query recent logs for this registration across ALL campuses to detect if vehicle is currently inside
-            open_cross_log = None
-            try:
-                all_logs_res = supabase.table('vehicle_log').select('*')\
-                    .eq('registration_id', reg['registration_id'])\
-                    .order('created_at', desc=True).limit(5).execute()
-                if all_logs_res.data:
-                    for l_row in all_logs_res.data:
-                        st = str(l_row.get('logged_status', '')).strip().lower()
-                        has_in = bool(l_row.get('check_in'))
-                        has_out = bool(l_row.get('check_out'))
-                        # Active entry: checked in, not checked out, and not explicitly exited/denied
-                        if (has_in and not has_out) or st in ('inside', 'inside_campus'):
-                            if st not in ('exited', 'exit', 'denied', 'exited_campus'):
-                                open_cross_log = l_row
-                                break
-            except Exception as e:
-                print(f"DEBUG: Error checking multi-campus logs: {e}")
-                open_cross_log = None
+            evaluate_registered_vehicle(side, response.data[0])
 
-            # Simple logic: if QR code exists in database, it's REGISTERED
-            side.logged_status = "REGISTERED"
-            side.status_warning_pending = False
-
-            # Populate driver and vehicle details for dashboard and display
-            first_n = reg.get('first_name', '')
-            last_n = reg.get('last_name', '')
-            driver_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
-            role_name = (reg.get('role') or 'N/A').capitalize()
-            v_plate = side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
-            v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
-            v_type = side.vehicle_data.get('type') or reg.get('type') or 'N/A'
-            v_color = side.vehicle_data.get('color') or ''
-            full_brand = f"{v_brand} ({v_color})" if v_color else v_brand
-
-            # Identify current campus and active checked-in campus
-            current_gate, current_campus = get_campus_gate_and_name()
-            current_campus_norm = normalize_campus_name(current_campus)
-
-            # --- Multi-campus duplicate entry & wrong campus exit flagging ---
-            if open_cross_log:
-                active_campus_norm = normalize_campus_name(open_cross_log.get('campus'))
-                check_in_time = open_cross_log.get('check_in', '')
-                try:
-                    dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
-                    check_in_time = dt.strftime('%I:%M %p')
-                except:
-                    pass
-
-                # Case 1: ENTRANCE CAMERA (side.type == 'in')
-                if side.type == 'in':
-                    if active_campus_norm != current_campus_norm:
-                        side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot enter {current_campus_norm.upper()}."
-                        reason_text = f"Duplicate Entry: Currently checked in at {active_campus_norm}, attempted entry at {current_campus_norm}"
-                    else:
-                        side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {current_campus_norm.upper()} (Entered at {check_in_time})!"
-                        reason_text = f"Duplicate Entry: Vehicle already inside {current_campus_norm}"
-
-                    # Log the flagged violation to database
-                    try:
-                        supabase.table('vehicle_log').insert({
-                            "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
-                            "registration_id": reg['registration_id'],
-                            "check_in": datetime.now().isoformat(),
-                            "check_out": datetime.now().isoformat(),
-                            "logged_status": "Denied",
-                            "sticker_status": "registered",
-                            "campus_gate": current_gate,
-                            "campus": current_campus_norm,
-                            "reason": reason_text
-                        }).execute()
-                    except Exception as err:
-                        print(f"DEBUG: Error logging duplicate entry violation: {err}")
-
-                    latest_scanned_details = {
-                        "gate": "ENTRANCE",
-                        "name": driver_name,
-                        "role": role_name,
-                        "plate": v_plate,
-                        "brand": full_brand,
-                        "type": v_type,
-                        "status": "FLAGGED (DUPLICATE ENTRY)",
-                        "time": datetime.now().strftime("%I:%M:%S %p")
-                    }
-
-                    side.anomaly_id = open_cross_log.get('vehicle_log_id')
-                    side.state = GateState.LOG_WARNING
-                    return
-
-                # Case 2: EXIT CAMERA (side.type == 'out')
-                elif side.type == 'out':
-                    if active_campus_norm != current_campus_norm:
-                        side.anomaly_desc = f"WRONG CAMPUS EXIT VIOLATION: Checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot exit from {current_campus_norm.upper()}."
-                        reason_text = f"Exited the wrong campus: Checked in at {active_campus_norm}, attempted exit at {current_campus_norm}"
-
-                        # Log the flagged violation to database
-                        try:
-                            supabase.table('vehicle_log').insert({
-                                "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
-                                "registration_id": reg['registration_id'],
-                                "check_in": datetime.now().isoformat(),
-                                "check_out": datetime.now().isoformat(),
-                                "logged_status": "Denied",
-                                "sticker_status": "registered",
-                                "campus_gate": current_gate,
-                                "campus": current_campus_norm,
-                                "reason": reason_text
-                            }).execute()
-                        except Exception as err:
-                            print(f"DEBUG: Error logging wrong campus exit violation: {err}")
-
-                        latest_scanned_details = {
-                            "gate": "EXIT",
-                            "name": driver_name,
-                            "role": role_name,
-                            "plate": v_plate,
-                            "brand": full_brand,
-                            "type": v_type,
-                            "status": "FLAGGED (WRONG CAMPUS EXIT)",
-                            "time": datetime.now().strftime("%I:%M:%S %p")
-                        }
-
-                        side.anomaly_id = open_cross_log.get('vehicle_log_id')
-                        side.state = GateState.LOG_WARNING
-                        return
-                    else:
-                        print(f"DEBUG: Active entry confirmed at {current_campus_norm}, proceeding with exit")
-
-            elif side.type == 'out' and not open_cross_log:
-                print(f"[{side.type}] No active entry record found, allowing exit anyway")
-
-            latest_scanned_details = {
-                "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
-                "name": driver_name,
-                "role": role_name,
-                "plate": v_plate,
-                "brand": full_brand,
-                "type": v_type,
-                "status": side.logged_status or "REGISTERED",
-                "time": datetime.now().strftime("%I:%M:%S %p")
-            }
-
-            # --- EXIT GATE: Auto-open for valid QR codes ---
-            if side.type == 'out':
-                print(f"DEBUG: Exit gate - auto-opening for valid QR")
-                submit_entry_exit(side)
-                return
-
-            # --- Entrance gate: valid QR codes go to DETECTED state (REGISTERED) ---
-            side.state = GateState.DETECTED
-            
         except Exception as e:
             side.state = GateState.API_ERROR
             side.api_error = f"Supabase lookup error: {str(e)}"
@@ -865,6 +966,52 @@ def process_qr(side, qr_text, frame):
         side.state = GateState.API_ERROR
         side.api_error = str(e)
         side.snapshot = frame.copy()
+
+def lookup_registered_plate(side, plate_input):
+    """Manual access for registered vehicles: find the registration by plate number (or registration_id)
+    and run the exact same checks as a scanned QR (blocklist, duplicate entry, wrong campus exit),
+    ending on the LET IN / DENY screen with the vehicle details."""
+    try:
+        clean_input = re.sub(r'[\s\-]', '', plate_input).upper()
+        reg = None
+        matched_vehicle_data = {}
+
+        def _active(rows):
+            return [r for r in (rows or []) if str(r.get('status') or '').lower() not in ('rejected', 'revoked')]
+
+        # 1. Match vehicle_information.plate_number, ignoring spaces and hyphens
+        v_res = supabase.table('vehicle_information').select('*').execute()
+        for v_item in (v_res.data or []):
+            p_raw = str(v_item.get('plate_number') or '').strip().upper()
+            if re.sub(r'[\s\-]', '', p_raw) != clean_input:
+                continue
+            r_res = supabase.table('registration').select('*')\
+                .eq('vehicle_information_id', v_item['vehicle_information_id'])\
+                .order('created_at', desc=True).execute()
+            candidates = _active(r_res.data)
+            if candidates:
+                reg = candidates[0]
+                matched_vehicle_data = v_item
+                break
+
+        # 2. Fallback: the guard typed the registration number instead of a plate
+        if not reg and plate_input.isdigit():
+            r_res = supabase.table('registration').select('*').eq('registration_id', int(plate_input)).execute()
+            candidates = _active(r_res.data)
+            if candidates:
+                reg = candidates[0]
+
+        if not reg:
+            side.data = f"PLATE NOT FOUND: {plate_input}"
+            side.state = GateState.INVALID_QR
+            return
+
+        if side.snapshot is None:
+            side.snapshot = np.zeros((H//2, W, 3), dtype=np.uint8)
+        evaluate_registered_vehicle(side, reg, matched_vehicle_data, auto_exit=False)
+    except Exception as e:
+        side.state = GateState.API_ERROR
+        side.api_error = f"Lookup failed: {str(e)}"
 
 def submit_entry_exit(side):
     print(f"DEBUG: submit_entry_exit called for {side.type} gate")
@@ -1517,8 +1664,8 @@ def render_bottom_panel(display):
     
     # If the barrier is closed, the scanned QR code details display will disappear
     barrier_open_or_active = (
-        side_in.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING) or
-        side_out.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING)
+        side_in.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING, GateState.BLOCKED) or
+        side_out.state in (GateState.TIMEOUT, GateState.PROLONG, GateState.DETECTED, GateState.PROCESSING, GateState.LOG_WARNING, GateState.WARNING, GateState.BLOCKED)
     )
     global latest_scanned_details
     if not barrier_open_or_active:
@@ -1528,7 +1675,7 @@ def render_bottom_panel(display):
         gate_txt = latest_scanned_details.get('gate', 'GATE')
         t_txt = latest_scanned_details.get('time', '')
         st_txt = latest_scanned_details.get('status', 'OK')
-        if "FLAGGED" in st_txt.upper() or "DENIED" in st_txt.upper() or "WARNING" in st_txt.upper():
+        if "FLAGGED" in st_txt.upper() or "DENIED" in st_txt.upper() or "WARNING" in st_txt.upper() or "BLOCKED" in st_txt.upper():
             st_col = (0, 0, 220)
         elif ("REG" in st_txt.upper() or "APP" in st_txt.upper() or "INSIDE" in st_txt.upper()):
             st_col = (20, 140, 30)
@@ -1548,7 +1695,12 @@ def render_bottom_panel(display):
         brand_txt = latest_scanned_details.get('brand', 'N/A')
         draw_text(display, f"Vehicle: {brand_txt}", (box_x + 20, box_y + 205), 0.70, (40, 45, 55), 1)
         
-        draw_text(display, "* Realtime registration record synced & verified with Supabase", (box_x + 20, box_y + 250), 0.58, (110, 115, 125), 1)
+        if st_txt.upper() == "BLOCKED":
+            blocked_side = side_in if side_in.state == GateState.BLOCKED else side_out
+            remaining = format_remaining((blocked_side.block_info or {}).get('how_long'))
+            draw_text(display, f"BLOCKED - Time remaining: {remaining}", (box_x + 20, box_y + 250), 0.68, (0, 0, 220), 2)
+        else:
+            draw_text(display, "* Realtime registration record synced & verified with Supabase", (box_x + 20, box_y + 250), 0.58, (110, 115, 125), 1)
     else:
         draw_text(display, "NO QR CODE SCANNED YET", (box_x + 25, box_y + 105), 0.82, (120, 125, 135), 2)
         draw_text(display, "Point any vehicle QR sticker to the active camera scanner.", (box_x + 25, box_y + 145), 0.65, (75, 80, 90), 1)
@@ -1657,6 +1809,35 @@ def render_side(img, side, offset_x=0):
             draw_btn(img, (box_x + 25, H//2 - 65, 260, 48), "OVERRIDE & LET IN", (0, 140, 255))
         
         draw_btn(img, (box_x + 305, H//2 - 65, 160, 48), "DENY (SKIP)", (0, 0, 200))
+
+    elif side.state == GateState.BLOCKED:
+        block = side.block_info or {}
+        box_x = 25
+        box_y = 55
+        box_w = W - 50
+        box_h = H//2 - 75
+
+        overlay = img.copy()
+        cv2.rectangle(overlay, (box_x, box_y), (box_x + box_w, box_y + box_h), (10, 10, 70), -1)
+        cv2.addWeighted(overlay, 0.92, img, 0.08, 0, img)
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + box_h), (0, 0, 255), 4)
+        cv2.rectangle(img, (box_x, box_y), (box_x + box_w, box_y + 55), (0, 0, 200), -1)
+        draw_text(img, "BLOCKED", (box_x + 20, box_y + 42), 1.3, (255, 255, 255), 4)
+        draw_text(img, "ENTRY DENIED", (box_x + 230, box_y + 40), 0.85, (200, 220, 255), 2)
+
+        # Live countdown, recomputed every frame
+        remaining = format_remaining(block.get('how_long'))
+        until_dt = parse_db_timestamp(block.get('how_long'))
+        until_txt = until_dt.astimezone().strftime('%b %d, %Y %I:%M %p') if until_dt else 'N/A'
+        by_txt = str(block.get('block_by') or 'N/A').replace('_', ' ').upper()
+        reason_txt = str(block.get('reason') or 'No reason given')
+
+        draw_text(img, f"Time remaining : {remaining}", (box_x + 25, box_y + 95), 0.9, (0, 220, 255), 2)
+        draw_text(img, f"Blocked until  : {until_txt}", (box_x + 25, box_y + 130), 0.65, (230, 230, 230), 1)
+        draw_text(img, f"Reason         : {reason_txt[:70]}", (box_x + 25, box_y + 160), 0.65, (230, 230, 230), 1)
+        draw_text(img, f"Blocked by     : {by_txt}", (box_x + 25, box_y + 190), 0.65, (230, 230, 230), 1)
+
+        draw_btn(img, (box_x + 25, H//2 - 65, 200, 48), "DENY ENTRY", (0, 0, 200))
 
     elif side.state == GateState.API_ERROR:
         draw_text(img, "API ERROR", (25, 80), 0.8, (0,0,255), 2)
@@ -1894,6 +2075,11 @@ def mouse_callback(event, x, y, flags, param):
         elif in_rect(x, y, (290, H//2 - 65, 110, 48)):
             close_gate(side)
 
+    elif side.state == GateState.BLOCKED:
+        if in_rect(x, y, (25 + 25, H//2 - 65, 200, 48)):  # DENY ENTRY
+            side.block_info = None
+            close_gate(side)
+
     elif side.state == GateState.LOG_WARNING:
         # Buttons on enhanced duplicate entry banner
         box_x = 25
@@ -1937,201 +2123,8 @@ def mouse_callback(event, x, y, flags, param):
         if in_rect(x, y, (25, H//2 - 65, 120, 48)): # LOOKUP
             plate_input = side.form_data[0].strip()
             if plate_input:
-                try:
-                    clean_input = re.sub(r'[\s\-]', '', plate_input).upper()
-                    reg = None
-                    matched_vehicle_data = {}
-
-                    # 1. Search in vehicle_information table by plate_number (ignoring hyphens and spaces)
-                    try:
-                        v_res = supabase.table('vehicle_information').select('*').execute()
-                        if v_res.data:
-                            for v_item in v_res.data:
-                                p_raw = str(v_item.get('plate_number') or '').strip().upper()
-                                if re.sub(r'[\s\-]', '', p_raw) == clean_input:
-                                    matched_vehicle_data = v_item
-                                    # Find active registration with this vehicle_information_id
-                                    r_res = supabase.table('registration').select('*')\
-                                        .eq('vehicle_information_id', v_item['vehicle_information_id'])\
-                                        .not_in('status', ['rejected', 'revoked'])\
-                                        .execute()
-                                    if r_res.data:
-                                        reg = r_res.data[0]
-                                    break
-                    except Exception as ve:
-                        print(f"DEBUG: Error querying vehicle_information: {ve}")
-
-                    # 2. Fallback: Search directly in registration table if plate stored there or by registration_id
-                    if not reg:
-                        try:
-                            r_all = supabase.table('registration').select('*').not_in('status', ['rejected', 'revoked']).execute()
-                            if r_all.data:
-                                for r_item in r_all.data:
-                                    p_raw = str(r_item.get('plate_number') or r_item.get('vehicle_plate') or '').strip().upper()
-                                    if p_raw and re.sub(r'[\s\-]', '', p_raw) == clean_input:
-                                        reg = r_item
-                                        v_id = r_item.get('vehicle_information_id')
-                                        if v_id and not matched_vehicle_data:
-                                            v_sub = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_id).execute()
-                                            if v_sub.data:
-                                                matched_vehicle_data = v_sub.data[0]
-                                        break
-                                    # Also allow fallback match on registration_id
-                                    if str(r_item.get('registration_id')) == plate_input:
-                                        reg = r_item
-                                        break
-                        except Exception as re_err:
-                            print(f"DEBUG: Error querying registration fallback: {re_err}")
-
-                    if reg:
-                        side.data = reg
-                        side.snapshot = side.snapshot if side.snapshot is not None else np.zeros((H//2, W, 3), dtype=np.uint8)
-                        side.logged_status = "REGISTERED"
-                        side.vehicle_data = matched_vehicle_data
-                        if not side.vehicle_data and reg.get('vehicle_information_id'):
-                            try:
-                                v_res = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', reg.get('vehicle_information_id')).execute()
-                                if v_res.data:
-                                    side.vehicle_data = v_res.data[0]
-                            except:
-                                side.vehicle_data = {}
-                        
-                        # Cross-campus open log check for duplicate entry
-                        open_cross_log = None
-                        try:
-                            all_logs_res = supabase.table('vehicle_log').select('*')\
-                                .eq('registration_id', reg['registration_id'])\
-                                .order('created_at', desc=True).limit(5).execute()
-                            if all_logs_res.data:
-                                for l_row in all_logs_res.data:
-                                    st = str(l_row.get('logged_status', '')).strip().lower()
-                                    has_in = bool(l_row.get('check_in'))
-                                    has_out = bool(l_row.get('check_out'))
-                                    if (has_in and not has_out) or st in ('inside', 'inside_campus'):
-                                        if st not in ('exited', 'exit', 'denied', 'exited_campus'):
-                                            open_cross_log = l_row
-                                            break
-                        except:
-                            open_cross_log = None
-
-                        side.logged_status = "REGISTERED"
-                        side.status_warning_pending = False
-
-                        current_gate, current_campus = get_campus_gate_and_name()
-                        current_campus_norm = normalize_campus_name(current_campus)
-
-                        first_n = reg.get('first_name', '')
-                        last_n = reg.get('last_name', '')
-                        driver_name = f"{first_n} {last_n}".strip() or reg.get('name') or 'N/A'
-                        role_name = (reg.get('role') or 'N/A').capitalize()
-                        v_plate = side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
-                        v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
-                        v_type = side.vehicle_data.get('type') or reg.get('type') or 'N/A'
-                        v_color = side.vehicle_data.get('color') or ''
-                        full_brand = f"{v_brand} ({v_color})" if v_color else v_brand
-
-                        if open_cross_log:
-                            active_campus_norm = normalize_campus_name(open_cross_log.get('campus'))
-                            check_in_time = open_cross_log.get('check_in', '')
-                            try:
-                                dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
-                                check_in_time = dt.strftime('%I:%M %p')
-                            except:
-                                pass
-
-                            if side.type == 'in':
-                                if active_campus_norm != current_campus_norm:
-                                    side.anomaly_desc = f"DUPLICATE ENTRY VIOLATION: Currently checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot enter {current_campus_norm.upper()}."
-                                    reason_text = f"Duplicate Entry: Currently checked in at {active_campus_norm}, attempted entry at {current_campus_norm}"
-                                else:
-                                    side.anomaly_desc = f"DUPLICATE ENTRY: Vehicle already INSIDE {current_campus_norm.upper()} (Entered at {check_in_time})!"
-                                    reason_text = f"Duplicate Entry: Vehicle already inside {current_campus_norm}"
-
-                                try:
-                                    supabase.table('vehicle_log').insert({
-                                        "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
-                                        "registration_id": reg['registration_id'],
-                                        "check_in": datetime.now().isoformat(),
-                                        "check_out": datetime.now().isoformat(),
-                                        "logged_status": "Denied",
-                                        "sticker_status": "registered",
-                                        "campus_gate": current_gate,
-                                        "campus": current_campus_norm,
-                                        "reason": reason_text
-                                    }).execute()
-                                except: pass
-
-                                latest_scanned_details = {
-                                    "gate": "ENTRANCE",
-                                    "name": driver_name,
-                                    "role": role_name,
-                                    "plate": v_plate,
-                                    "brand": full_brand,
-                                    "type": v_type,
-                                    "status": "FLAGGED (DUPLICATE ENTRY)",
-                                    "time": datetime.now().strftime("%I:%M:%S %p")
-                                }
-                                side.anomaly_id = open_cross_log.get('vehicle_log_id')
-                                side.state = GateState.LOG_WARNING
-                            elif side.type == 'out' and active_campus_norm != current_campus_norm:
-                                side.anomaly_desc = f"WRONG CAMPUS EXIT VIOLATION: Checked in at {active_campus_norm.upper()} (at {check_in_time})! Cannot exit from {current_campus_norm.upper()}."
-                                reason_text = f"Exited the wrong campus: Checked in at {active_campus_norm}, attempted exit at {current_campus_norm}"
-                                try:
-                                    supabase.table('vehicle_log').insert({
-                                        "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
-                                        "registration_id": reg['registration_id'],
-                                        "check_in": datetime.now().isoformat(),
-                                        "check_out": datetime.now().isoformat(),
-                                        "logged_status": "Denied",
-                                        "sticker_status": "registered",
-                                        "campus_gate": current_gate,
-                                        "campus": current_campus_norm,
-                                        "reason": reason_text
-                                    }).execute()
-                                except: pass
-
-                                latest_scanned_details = {
-                                    "gate": "EXIT",
-                                    "name": driver_name,
-                                    "role": role_name,
-                                    "plate": v_plate,
-                                    "brand": full_brand,
-                                    "type": v_type,
-                                    "status": "FLAGGED (WRONG CAMPUS EXIT)",
-                                    "time": datetime.now().strftime("%I:%M:%S %p")
-                                }
-                                side.anomaly_id = open_cross_log.get('vehicle_log_id')
-                                side.state = GateState.LOG_WARNING
-                            else:
-                                latest_scanned_details = {
-                                    "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
-                                    "name": driver_name,
-                                    "role": role_name,
-                                    "plate": v_plate,
-                                    "brand": full_brand,
-                                    "type": v_type,
-                                    "status": "REGISTERED",
-                                    "time": datetime.now().strftime("%I:%M:%S %p")
-                                }
-                                side.state = GateState.DETECTED
-                        else:
-                            latest_scanned_details = {
-                                "gate": "ENTRANCE" if side.type == 'in' else "EXIT",
-                                "name": driver_name,
-                                "role": role_name,
-                                "plate": v_plate,
-                                "brand": full_brand,
-                                "type": v_type,
-                                "status": "REGISTERED",
-                                "time": datetime.now().strftime("%I:%M:%S %p")
-                            }
-                            side.state = GateState.DETECTED
-                    else:
-                        side.state = GateState.INVALID_QR
-                        side.data = f"PLATE NOT FOUND: {plate_input}"
-                except Exception as e:
-                    side.state = GateState.API_ERROR
-                    side.api_error = f"Lookup failed: {str(e)}"
+                side.state = GateState.PROCESSING
+                threading.Thread(target=lookup_registered_plate, args=(side, plate_input), daemon=True).start()
         elif in_rect(x, y, (160, H//2 - 65, 100, 48)):
             close_gate(side)
             

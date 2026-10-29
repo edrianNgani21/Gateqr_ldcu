@@ -125,19 +125,26 @@
 
   function handleDigitInput(index: number, e: Event) {
     const input = e.target as HTMLInputElement;
-    const val = input.value.replace(/\D/g, "");
+    let val = input.value.replace(/\D/g, "");
 
     if (val.length === 0) {
       digits[index] = "";
+      input.value = "";
       return;
     }
 
-    // If user pasted or typed multiple digits in one box
+    // Typing over a filled box: keep only the newly typed digit
+    if (val.length === 2 && digits[index]) {
+      val = val[0] === digits[index] ? val[1] : val[0];
+    }
+
+    // Pasted, autofilled, or typed faster than focus moved: spread digits across the boxes
     if (val.length > 1) {
       const chars = val.split("");
       for (let i = 0; i < 6 && index + i < 6; i++) {
         if (chars[i]) digits[index + i] = chars[i];
       }
+      input.value = digits[index];
       const nextIdx = Math.min(5, index + chars.length);
       if (inputRefs[nextIdx]) inputRefs[nextIdx].focus();
       if (digits.every(d => d !== "")) {
@@ -148,6 +155,7 @@
 
     // Single digit input
     digits[index] = val;
+    input.value = val;
     error = "";
 
     // Automatically shift to next box
@@ -347,7 +355,7 @@
                 type="text"
                 inputmode="numeric"
                 pattern="[0-9]*"
-                maxlength="1"
+                maxlength="6"
                 value={digit}
                 oninput={(e) => handleDigitInput(idx, e)}
                 onkeydown={(e) => handleKeyDown(idx, e)}
@@ -634,7 +642,13 @@
 
   .otp-box {
     width: 100%;
+    min-width: 0;
     height: 60px;
+    /* The global input[type="text"] rule adds side padding that clipped the digit in narrow boxes */
+    padding: 0;
+    line-height: normal;
+    -webkit-text-fill-color: currentColor;
+    caret-color: #6B1D2F;
     text-align: center;
     font-size: 1.75rem;
     font-weight: 800;
@@ -927,6 +941,10 @@
   }
 
   @media (max-width: 480px) {
+    .otp-page {
+      padding: 1rem;
+    }
+
     .otp-card {
       padding: 1.75rem 1rem;
     }
@@ -939,6 +957,17 @@
       height: 52px;
       font-size: 1.45rem;
       border-radius: 9px;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .otp-boxes-grid {
+      gap: 0.25rem;
+    }
+
+    .otp-box {
+      height: 46px;
+      font-size: 1.25rem;
     }
 
     .circle-shuffle-stage {

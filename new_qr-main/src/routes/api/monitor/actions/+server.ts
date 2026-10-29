@@ -67,7 +67,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 status: 'security_checked'
             };
             notifType = 'security_checked';
-            notifMessage = 'You can now pay at the cashier and upload your payment receipt.';
+            notifMessage = 'Safety and Security has checked your documents. You can now pay at the cashier and upload your payment receipt.';
             emailSubject = 'Payment Required - Liceo GateQR';
         } else if (action === 'security_reject') {
             const rejectReason = (reason || schedule || '').trim();

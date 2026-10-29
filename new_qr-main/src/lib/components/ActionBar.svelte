@@ -2,11 +2,13 @@
   let {
     tab,
     status = '',
+    role = '',
     expiresAt = null,
     onaction
   }: {
     tab: string;
     status?: string;
+    role?: string | null;
     expiresAt?: string | null;
     onaction?: (action: string, schedule: string) => Promise<void> | void;
   } = $props();
@@ -16,6 +18,8 @@
   let rejectReason = $state('');
 
   let isExpired = $derived(expiresAt ? new Date(expiresAt) < new Date() : false);
+  // VPS skips Security document review: OSA checks the hardcopies and sends the applicant straight to payment
+  let isVps = $derived((role || '').toLowerCase().trim() === 'vps');
   let loadingAction = $state<string | null>(null);
 
   async function act(action: string, schedule: string = '') {
@@ -79,7 +83,7 @@
         Processing…
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        Verify Hardcopy
+        {#if tab === 'overdue'}Verify Hardcopy{:else if isVps}Check &amp; Send to Payment{:else}Forward to Security Admin{/if}
       {/if}
     </button>
     <button
@@ -148,8 +152,8 @@
           {@render spinner()}
           Processing…
         {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          Mark as done
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Check
         {/if}
       </button>
     {/if}
@@ -317,6 +321,11 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+    min-height: 44px;
+    min-width: 0;
+    text-align: center;
+    line-height: 1.25;
+    white-space: normal;
   }
 
   .action-btn:disabled {

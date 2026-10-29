@@ -5,9 +5,11 @@ import QRCode from 'qrcode';
 export const GET: RequestHandler = async ({ url }) => {
     const code = url.searchParams.get('code') || url.searchParams.get('text') || 'PENDING';
     const role = url.searchParams.get('role') || 'student';
+    // Registration number printed below the QR (digits only)
+    const label = (url.searchParams.get('label') || '').replace(/\D/g, '') || null;
 
     try {
-        const buffer = await generateStyledQRBuffer(code, role);
+        const buffer = await generateStyledQRBuffer(code, role, label);
         return new Response(new Uint8Array(buffer), {
             status: 200,
             headers: {

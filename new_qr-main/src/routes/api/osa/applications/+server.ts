@@ -130,7 +130,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
             const qrData = uniqueCode;
             const filename = `qr-codes/qr-${registration_id}-${Date.now()}.png`;
-            const qrBuffer = await generateStyledQRBuffer(qrData, reg.role);
+            const qrBuffer = await generateStyledQRBuffer(qrData, reg.role, registration_id);
             const qrUrl = await uploadToStorage(filename, qrBuffer, 'image/png');
 
             let finalExpiresAt: string;
@@ -163,8 +163,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             await sendEmail(
                 reg.user.email,
                 'Application Approved & Scheduled - Liceo GateQR',
-                `Congrats your registration has been accepted. You are scheduled to visit OSA to pass the notarized filled up hardcopied agreements and notarized requirements, and receive your QR sticker code. Schedule: ${new Date(schedule).toLocaleString()}.`,
-                `<p>Congrats your registration has been accepted. You are scheduled to visit OSA to pass the notarized filled up hardcopied agreements and notarized requirements, and receive your QR sticker code.</p><p>Schedule: <strong>${new Date(schedule).toLocaleString()}</strong>.</p>`
+                `Congratulations! Your vehicle sticker application (Registration No. ${registration_id}) has been accepted by OSA. Please visit the Office of Student Affairs on ${new Date(schedule).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Asia/Manila' })} and bring the notarized, filled-out hardcopy agreement and requirements.`,
+                `<p style="margin:0 0 12px;">Congratulations! Your vehicle sticker application has been <strong>accepted by OSA</strong>.</p>
+                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 12px;font-size:14px;">
+                   <tr><td style="padding:6px 0;color:#64748B;width:140px;">Registration No.</td><td style="padding:6px 0;font-weight:700;color:#6B1D2F;">${registration_id}</td></tr>
+                   <tr><td style="padding:6px 0;color:#64748B;">OSA visit schedule</td><td style="padding:6px 0;font-weight:700;color:#6B1D2F;">${new Date(schedule).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Asia/Manila' })}</td></tr>
+                 </table>
+                 <p style="margin:0 0 6px;"><strong>Please bring:</strong></p>
+                 <ul style="margin:0;padding-left:20px;">
+                   <li>Notarized, filled-out hardcopy agreement</li>
+                   <li>Notarized hardcopies of your submitted requirements</li>
+                 </ul>`
             );
 
             // Create notification for the applicant and OSA admin
@@ -266,15 +275,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 await sendEmail(
                     reg.user.email,
                     'Payment Required - Liceo GateQR',
-                    'You can now pay at the cashier and upload your payment receipt.',
-                    '<p>You can now pay at the cashier and upload your payment receipt.</p>'
+                    'OSA has checked your hardcopy documents. You can now pay at the cashier, then log in to GateQR and upload a photo of your payment receipt.',
+                    '<p style="margin:0 0 12px;">OSA has <strong>checked your hardcopy documents</strong>.</p><p style="margin:0 0 6px;"><strong>Next steps:</strong></p><ol style="margin:0;padding-left:20px;"><li>Pay the sticker fee at the cashier.</li><li>Log in to GateQR and upload a clear photo of your payment receipt.</li></ol>'
                 );
             } else {
                 await sendEmail(
                     reg.user.email,
                     'Hardcopy Documents Received - Liceo GateQR',
-                    'Your hardcopy documents have been received by OSA and are now under review by Safety and Security.',
-                    '<p>Your hardcopy documents have been <strong>received by OSA</strong> and are now under review by Safety and Security.</p>'
+                    'Your hardcopy documents have been checked by OSA and forwarded to Safety and Security for document review. We will email you once you can proceed to payment.',
+                    '<p style="margin:0 0 12px;">Your hardcopy documents have been <strong>checked by OSA</strong> and forwarded to <strong>Safety and Security</strong> for document review.</p><p style="margin:0;">We will email you as soon as you can proceed to payment.</p>'
                 );
             }
 
@@ -355,7 +364,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     reg.user.email,
                     'Application Completed - Liceo GateQR',
                     'Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.',
-                    '<p>Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.</p>'
+                    '<p style="margin:0 0 12px;">Your vehicle sticker application is <strong>complete</strong>.</p><ol style="margin:0;padding-left:20px;"><li>Claim your sticker at the Office of Student Affairs.</li><li>Proceed to the Security Office to have it installed on your vehicle.</li></ol>'
                 );
 
                 if (reg.user?.user_id) {
@@ -376,7 +385,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     reg.user.email,
                     'Application Completed - Liceo GateQR',
                     'Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.',
-                    '<p>Your application has been completed. You can now claim your sticker at the Office of Student Affairs and go to the Security Office to get it installed on your vehicle.</p>'
+                    '<p style="margin:0 0 12px;">Your vehicle sticker application is <strong>complete</strong>.</p><ol style="margin:0;padding-left:20px;"><li>Claim your sticker at the Office of Student Affairs.</li><li>Proceed to the Security Office to have it installed on your vehicle.</li></ol>'
                 );
                 if (reg.user?.user_id) {
                     const actorId = locals.user?.user_id;

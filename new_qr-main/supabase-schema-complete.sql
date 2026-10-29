@@ -27,7 +27,7 @@ BEGIN
         'incident_report', 'complaint', 'parking_capacity', 'parking_availability', 'vehicle_log',
         'registration', 'vehicle_information', 'user_log',
         'system_settings', 'department', 'user', 'users',
-        'campus_events', 'campus_event'
+        'campus_events', 'campus_event', 'blocklist'
       )
   ) LOOP
     IF r.table_type = 'VIEW' THEN
@@ -52,6 +52,7 @@ DROP TYPE IF EXISTS complaint_status_enum CASCADE;
 DROP TYPE IF EXISTS campus_gate_enum CASCADE;
 DROP TYPE IF EXISTS change_request_status_enum CASCADE;
 DROP TYPE IF EXISTS form_status_enum CASCADE;
+DROP TYPE IF EXISTS blocklist_by_enum CASCADE;
 
 CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'osa', 'dean', 'Academic Head', 'Office Head');
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
@@ -676,6 +677,7 @@ DECLARE
   v_gate       campus_gate_enum := 'main';
   v_inside     BOOLEAN;
   v_log_id     INTEGER;
+  v_block      RECORD;
 BEGIN
   -- Parse gate
   IF LOWER(p_gate_text) LIKE '%rnp%' THEN
@@ -705,6 +707,25 @@ BEGIN
 
   IF v_reg.expires_at IS NOT NULL AND v_reg.expires_at < NOW() THEN
     RETURN jsonb_build_object('success', false, 'status', 'EXPIRED', 'message', 'Sticker has expired.');
+  END IF;
+
+  -- Blocklist applies to every campus gate (main, rnp, paseo)
+  SELECT * INTO v_block
+  FROM blocklist b
+  WHERE (b.registration_id = v_reg.registration_id OR b.vehicle_id = v_reg.vehicle_information_id)
+    AND b.how_long > NOW()
+  ORDER BY b.how_long DESC
+  LIMIT 1;
+
+  IF FOUND THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'status', 'BLOCKED',
+      'message', 'Vehicle is blocked: ' || v_block.reason,
+      'blocked_until', v_block.how_long,
+      'seconds_remaining', GREATEST(0, EXTRACT(EPOCH FROM (v_block.how_long - NOW()))::BIGINT),
+      'block_by', v_block.block_by::text
+    );
   END IF;
 
   -- 2. Check if already inside
@@ -1030,3 +1051,137 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_unique_qr_code
   ON public.registration (qr_unique_code) 
   WHERE qr_unique_code IS NOT NULL;
 
+-- ---------------------------------------------------------------------
+-- 16. BLOCKLIST (idempotent - safe to run alone on an existing database)
+-- ---------------------------------------------------------------------
+-- A vehicle is denied entry at every campus gate (QR scan and manual plate lookup)
+-- while NOW() < how_long. Rows are matched on registration_id OR vehicle_id.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'blocklist_by_enum') THEN
+    CREATE TYPE blocklist_by_enum AS ENUM ('osa_admin', 'security_admin');
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.blocklist (
+  blocklist_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  registration_id INTEGER REFERENCES public.registration (registration_id) ON DELETE CASCADE,
+  vehicle_id      INTEGER REFERENCES public.vehicle_information (vehicle_information_id) ON DELETE CASCADE,
+  reason          TEXT              NOT NULL,
+  block_by        blocklist_by_enum NOT NULL,
+  "when"          TIMESTAMPTZ       NOT NULL DEFAULT NOW(),   -- when the block was created
+  how_long        TIMESTAMPTZ       NOT NULL,                 -- block expires at this date and time (set by admin)
+  CONSTRAINT blocklist_target_chk   CHECK (registration_id IS NOT NULL OR vehicle_id IS NOT NULL),
+  CONSTRAINT blocklist_duration_chk CHECK (how_long > "when")
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocklist_registration ON public.blocklist (registration_id);
+CREATE INDEX IF NOT EXISTS idx_blocklist_vehicle      ON public.blocklist (vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_blocklist_how_long     ON public.blocklist (how_long DESC);
+
+-- Fill in whichever id the admin left out so both match at the gate
+CREATE OR REPLACE FUNCTION trg_blocklist_fill_ids()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.vehicle_id IS NULL AND NEW.registration_id IS NOT NULL THEN
+    SELECT vehicle_information_id INTO NEW.vehicle_id
+    FROM registration WHERE registration_id = NEW.registration_id;
+  ELSIF NEW.registration_id IS NULL AND NEW.vehicle_id IS NOT NULL THEN
+    SELECT registration_id INTO NEW.registration_id
+    FROM registration WHERE vehicle_information_id = NEW.vehicle_id
+    ORDER BY created_at DESC LIMIT 1;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_blocklist_fill_ids ON public.blocklist;
+CREATE TRIGGER trg_blocklist_fill_ids
+  BEFORE INSERT OR UPDATE ON public.blocklist
+  FOR EACH ROW EXECUTE FUNCTION trg_blocklist_fill_ids();
+
+-- Currently active blocks with time remaining
+CREATE OR REPLACE VIEW public.active_blocklist
+WITH (security_invoker = true) AS
+SELECT
+  b.*,
+  GREATEST(0, EXTRACT(EPOCH FROM (b.how_long - NOW()))::BIGINT) AS seconds_remaining
+FROM public.blocklist b
+WHERE b.how_long > NOW();
+
+ALTER TABLE public.blocklist ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "OSA and Security read blocklist" ON public.blocklist;
+CREATE POLICY "OSA and Security read blocklist"
+  ON public.blocklist FOR SELECT TO authenticated
+  USING (
+    is_osa_admin((SELECT auth.jwt() ->> 'email'))
+    OR is_security_admin((SELECT auth.jwt() ->> 'email'))
+  );
+
+DROP POLICY IF EXISTS "OSA and Security manage blocklist" ON public.blocklist;
+CREATE POLICY "OSA and Security manage blocklist"
+  ON public.blocklist FOR ALL TO authenticated
+  USING (
+    is_osa_admin((SELECT auth.jwt() ->> 'email'))
+    OR is_security_admin((SELECT auth.jwt() ->> 'email'))
+  )
+  WITH CHECK (
+    is_osa_admin((SELECT auth.jwt() ->> 'email'))
+    OR is_security_admin((SELECT auth.jwt() ->> 'email'))
+  );
+
+ALTER TABLE public.blocklist REPLICA IDENTITY FULL;
+DO $$
+BEGIN
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.blocklist; EXCEPTION WHEN duplicate_object THEN NULL; END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 17. REALTIME DASHBOARD BROADCAST (idempotent)
+-- ---------------------------------------------------------------------
+-- The web app's browser client uses the anon key, so RLS (TO authenticated) hides
+-- postgres_changes events from it. This trigger broadcasts only the table name and
+-- operation (no row data) on the public 'gateqr-sync' topic; dashboards reload their
+-- own data from the server when they receive it. Replaces client-side polling.
+CREATE OR REPLACE FUNCTION public.gateqr_broadcast_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  BEGIN
+    PERFORM realtime.send(
+      jsonb_build_object('table', TG_TABLE_NAME, 'op', TG_OP),
+      'db_change',
+      'gateqr-sync',
+      false
+    );
+  EXCEPTION WHEN OTHERS THEN
+    -- Never block a write because realtime is unavailable
+    NULL;
+  END;
+  RETURN NULL;
+END;
+$$;
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'registration', 'vehicle_log', 'incident_report', 'modification_request',
+    'parking_capacity', 'campus_event', 'department', 'form_settings', 'blocklist'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_%s_broadcast ON public.%I', t, t);
+    EXECUTE format(
+      'CREATE TRIGGER trg_%s_broadcast AFTER INSERT OR UPDATE OR DELETE ON public.%I
+         FOR EACH STATEMENT EXECUTE FUNCTION public.gateqr_broadcast_change()',
+      t, t
+    );
+  END LOOP;
+END $$;

@@ -40,8 +40,94 @@ if (gmailPass) {
 // Resend client fallback
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
+type EmailTone = 'success' | 'danger' | 'info';
+
+const toneStyles: Record<EmailTone, { accent: string; soft: string; text: string; label: string }> = {
+    success: { accent: '#16A34A', soft: '#F0FDF4', text: '#166534', label: 'Update' },
+    danger: { accent: '#DC2626', soft: '#FEF2F2', text: '#991B1B', label: 'Action Needed' },
+    info: { accent: '#D4AF37', soft: '#FFF9E6', text: '#92400E', label: 'Notice' }
+};
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+function detectTone(subject: string): EmailTone {
+    const s = subject.toLowerCase();
+    if (/(reject|revok|delet|denied|blocked|retract)/.test(s)) return 'danger';
+    if (/(approv|accept|complete|restor|unrevok|received|resolved|verified)/.test(s)) return 'success';
+    return 'info';
+}
+
 /**
- * Universal email sender supporting Gmail SMTP (Nodemailer) and Resend API
+ * Wrap a plain HTML fragment in the GateQR maroon & gold email layout.
+ * Uses tables and inline styles so it renders consistently in Gmail, Outlook and mobile clients.
+ */
+export function renderBrandedEmail(subject: string, bodyHtml: string): string {
+    const tone = toneStyles[detectTone(subject)];
+    const title = escapeHtml(subject.replace(/\s*[-—]\s*Liceo GateQR\s*$/i, ''));
+    const preheader = escapeHtml(bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120));
+    const portalUrl = env.PUBLIC_APP_URL || env.ORIGIN || '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F5EFE6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1E293B;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${preheader}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5EFE6;">
+    <tr>
+      <td align="center" style="padding:28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background-color:#FFFFFF;border-radius:16px;overflow:hidden;border:1px solid #E7DCCB;">
+          <tr>
+            <td style="background-color:#6B1D2F;background-image:linear-gradient(135deg,#7A1734 0%,#4A121E 100%);padding:28px 28px 24px;text-align:center;border-bottom:4px solid #D4AF37;">
+              <div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#F3E5AB;margin:0 0 6px;">Liceo de Cagayan University</div>
+              <div style="font-size:22px;font-weight:800;color:#FFFFFF;margin:0;letter-spacing:-0.3px;">GateQR Vehicle Sticker Portal</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px;">
+              <span style="display:inline-block;background-color:${tone.soft};color:${tone.text};border:1px solid ${tone.accent};font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:4px 12px;border-radius:999px;">${tone.label}</span>
+              <h1 style="font-size:20px;line-height:1.3;font-weight:800;color:#6B1D2F;margin:14px 0 0;">${title}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 28px 8px;">
+              <div style="border-left:4px solid ${tone.accent};background-color:#FFFDF8;border-radius:8px;padding:16px 18px;font-size:15px;line-height:1.65;color:#334155;">
+                ${bodyHtml}
+              </div>
+            </td>
+          </tr>
+          ${portalUrl ? `<tr>
+            <td align="center" style="padding:18px 28px 6px;">
+              <a href="${escapeHtml(portalUrl)}" style="display:inline-block;background-color:#6B1D2F;color:#FFFFFF;text-decoration:none;font-size:14px;font-weight:700;padding:12px 26px;border-radius:10px;border:1px solid #D4AF37;">Open GateQR Portal</a>
+            </td>
+          </tr>` : ''}
+          <tr>
+            <td style="padding:20px 28px 26px;">
+              <p style="font-size:12px;line-height:1.6;color:#64748B;margin:0;">This is an automated message from GateQR. For questions, reply to this email or visit the Office of Student Affairs.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#FAF6EF;border-top:1px solid #E7DCCB;padding:18px 24px;text-align:center;font-size:12px;line-height:1.6;color:#94A3B8;">
+              <div style="color:#6B1D2F;font-weight:700;">Office of Student Affairs &amp; Safety and Security Department</div>
+              <div>Liceo de Cagayan University, Rodelsa Hall, Cagayan de Oro City</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Universal email sender supporting Gmail SMTP (Nodemailer) and Resend API.
+ * HTML fragments are wrapped in the branded GateQR layout; full documents are sent as-is.
  */
 export async function sendEmail(
     to: string,
@@ -57,7 +143,8 @@ export async function sendEmail(
         }
 
         const replyTo = fromOrReplyTo || osaEmail;
-        const htmlBody = html || `<p>${text.replace(/\n/g, '<br>')}</p>`;
+        const fragment = html || `<p style="margin:0;">${escapeHtml(text).replace(/\n/g, '<br>')}</p>`;
+        const htmlBody = /^\s*<!DOCTYPE/i.test(fragment) ? fragment : renderBrandedEmail(subject, fragment);
 
         // 1. Try sending directly through Gmail SMTP if configured
         if (transporter && gmailPass) {
