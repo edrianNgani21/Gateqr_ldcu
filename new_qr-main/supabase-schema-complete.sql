@@ -59,6 +59,11 @@ CREATE TYPE registration_status_enum AS ENUM (
   'pending', 'dept_validated', 'osa_validated', 'distributed',
   'security_checked', 'receipt_submitted', 'completed', 'approved', 'rejected', 'expired', 'revoked'
 );
+-- Migration SQL for existing databases:
+-- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'administrator';
+-- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'concessionnaire';
+-- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'supplier';
+-- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'vps';
 CREATE TYPE registration_role_enum  AS ENUM ('student', 'staff', 'faculty', 'administrator', 'concessionnaire', 'supplier', 'vps');
 CREATE TYPE vehicle_type_enum       AS ENUM ('2_wheels', '4_wheels');
 CREATE TYPE logged_status_enum      AS ENUM ('inside_campus', 'exited_campus');
