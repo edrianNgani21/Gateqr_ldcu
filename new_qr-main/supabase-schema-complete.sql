@@ -152,6 +152,8 @@ CREATE TABLE registration (
   rejected_at            TIMESTAMPTZ,             -- Rejection timestamp
   rejection_reason       TEXT,                    -- Specific reason why application was rejected
   revoke_reason          TEXT,                    -- Specific reason why registration was revoked
+  signed_agreement_form  TEXT,                    -- Hardcopy Agreement Form to Park signed by the Department Head (uploaded by applicant)
+  agreement_reminder_sent_at TIMESTAMPTZ,         -- When the pending Department Head approval reminder email was sent
   created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );

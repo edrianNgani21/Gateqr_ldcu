@@ -38,7 +38,7 @@ export async function canAccessFile(user: { role: string; user_id?: number; emai
 
     const { data: regs } = await supabaseAdmin
         .from('registration')
-        .select('registration_id, doc_id, agreement_form, school_id, enrollment_form, drivers_license, receipt, qr_code, vehicle_information:vehicle_information_id("or", cr, authorization_letter)')
+        .select('registration_id, doc_id, agreement_form, signed_agreement_form, school_id, enrollment_form, drivers_license, receipt, qr_code, vehicle_information:vehicle_information_id("or", cr, authorization_letter)')
         .eq('user_id', user.user_id);
     if (!regs || regs.length === 0) return false;
     if (JSON.stringify(regs).includes(path)) return true;

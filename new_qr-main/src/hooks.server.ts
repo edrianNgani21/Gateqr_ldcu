@@ -2,6 +2,7 @@ import { type Handle, redirect } from '@sveltejs/kit';
 import jwt from 'jsonwebtoken';
 import { env } from '$env/dynamic/private';
 import { rewriteStorageUrls } from '$lib/server/files';
+import { sendAgreementRemindersThrottled } from '$lib/server/agreementReminder';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get('gateqr_session');
@@ -26,6 +27,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const url = event.url.pathname;
+
+	// Email applicants still pending Department Head approval after 24 hours (throttled; the daily cron is the backup)
+	if (!url.startsWith('/files/') && !url.startsWith('/api/cron/')) {
+		await sendAgreementRemindersThrottled();
+	}
 
 	// Protect OSA routes (OSA only)
 	if (url.startsWith('/osa')) {

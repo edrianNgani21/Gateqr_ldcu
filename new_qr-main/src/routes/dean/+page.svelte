@@ -245,6 +245,20 @@
                 </svg>
                 <span>Enrollment Form</span>
               </button>
+
+              {#if isValidDoc(app.signed_agreement_form)}
+                <button
+                  type="button"
+                  class="btn-doc-view has-doc"
+                  onclick={() => openDoc(app.signed_agreement_form)}
+                  title="View Signed Agreement Form to Park"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                  <span>Signed Agreement Form</span>
+                </button>
+              {/if}
             </div>
           </div>
         </div>

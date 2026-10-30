@@ -717,7 +717,8 @@
                 or: app.doc_or,
                 cr: app.doc_cr,
                 license: app.doc_license,
-                letter: app.doc_letter
+                letter: app.doc_letter,
+                agreement: app.signed_agreement_form
               }
             }}
             startExpanded={true}
@@ -855,7 +856,8 @@
                         or: app.doc_or,
                         cr: app.doc_cr,
                         license: app.doc_license,
-                        letter: app.doc_letter
+                        letter: app.doc_letter,
+                        agreement: app.signed_agreement_form
                       }
                     }}
                     showQR={true}
@@ -909,7 +911,8 @@
                     or: app.doc_or,
                     cr: app.doc_cr,
                     license: app.doc_license,
-                    letter: app.doc_letter
+                    letter: app.doc_letter,
+                    agreement: app.signed_agreement_form
                   }
                 }}
                 selectable={tab === 'validation' || tab === 'registered'}

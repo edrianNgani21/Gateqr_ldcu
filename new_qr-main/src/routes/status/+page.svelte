@@ -82,6 +82,64 @@
         }
     }
 
+    // Signed Agreement Form to Park upload (shown after the 24-hour pending Department Head reminder email)
+    let showSignedAgreementUpload = $derived(
+        !!app &&
+        (app.status || '').toLowerCase() === 'pending' &&
+        !!app.agreement_reminder_sent_at &&
+        ['student', 'faculty', 'staff', 'supplier', 'concessionnaire', 'concessionaire', 'employee'].includes((app.role || '').toLowerCase().trim())
+    );
+    let agreementFile = $state<File | null>(null);
+    let agreementPreview = $state<string | null>(null);
+    let agreementLoading = $state(false);
+    let agreementError = $state('');
+
+    function handleAgreementChange(e: Event) {
+        const input = e.target as HTMLInputElement;
+        agreementError = '';
+        if (agreementPreview) URL.revokeObjectURL(agreementPreview);
+        agreementPreview = null;
+        if (input.files && input.files[0]) {
+            const f = input.files[0];
+            if (!['image/jpeg', 'image/png', 'application/pdf'].includes(f.type)) {
+                showAlert('Only JPG, PNG, or PDF files are allowed.');
+                input.value = '';
+                agreementFile = null;
+                return;
+            }
+            agreementFile = f;
+            if (f.type.startsWith('image/')) agreementPreview = URL.createObjectURL(f);
+        } else {
+            agreementFile = null;
+        }
+    }
+
+    async function confirmSignedAgreement() {
+        if (!agreementFile) {
+            agreementError = 'Please select the signed Agreement Form to Park first.';
+            return;
+        }
+        agreementLoading = true;
+        agreementError = '';
+        try {
+            const formData = new FormData();
+            formData.append('signed_agreement', agreementFile);
+            const res = await fetch('/api/signed-agreement', { method: 'POST', body: formData });
+            const resData = await res.json();
+            if (!res.ok) {
+                agreementError = resData.error || 'Failed to upload the signed Agreement Form to Park.';
+            } else {
+                agreementFile = null;
+                agreementPreview = null;
+                await invalidateAll();
+            }
+        } catch (e: any) {
+            agreementError = e.message || 'Network error.';
+        } finally {
+            agreementLoading = false;
+        }
+    }
+
     // Vehicle change modal state
     let changeModalOpen = $state(false);
     let changeReason = $state('');
@@ -288,6 +346,38 @@
           <div class="ps-info">
             <span class="ps-label">Step 1 — Department Head or Dean Approval</span>
             <span class="ps-desc">Wait for your Department Head or Dean to approve your Parking Agreement Form.</span>
+            {#if showSignedAgreementUpload}
+              <div class="receipt-upload">
+                <p style="font-size: 0.85rem; color: #92400E; margin: 0.5rem 0;">Your Agreement Form to Park is still pending approval from your Department Head. We recommend that you print a hard copy of the Agreement Form to Park, have it signed by your Department Head, and upload the signed copy below (JPG, PNG, or PDF).</p>
+                <input
+                  id="signed-agreement-input"
+                  type="file"
+                  accept="image/jpeg,image/png,application/pdf"
+                  onchange={handleAgreementChange}
+                  disabled={agreementLoading}
+                />
+                {#if agreementPreview}
+                  <img src={agreementPreview} alt="Signed Agreement Form to Park preview" style="max-width: 220px; max-height: 220px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 0.5rem; display: block;" />
+                {:else if agreementFile}
+                  <p style="font-size: 0.8rem; margin: 0.5rem 0 0 0;">Selected: {agreementFile.name}</p>
+                {/if}
+                {#if agreementError}
+                  <p style="color: #dc2626; font-size: 0.8rem; margin: 0.5rem 0 0 0;">{agreementError}</p>
+                {/if}
+                <button
+                  id="confirm-signed-agreement-btn"
+                  type="button"
+                  class="btn-reapply"
+                  style="margin-top: 0.75rem; cursor: pointer; border: none;"
+                  onclick={confirmSignedAgreement}
+                  disabled={agreementLoading || !agreementFile}
+                >
+                  {agreementLoading ? 'Uploading…' : 'Confirm'}
+                </button>
+              </div>
+            {:else if app.signed_agreement_form}
+              <div class="sched-pill sched-done">Signed Agreement Form to Park submitted</div>
+            {/if}
           </div>
         </div>
 

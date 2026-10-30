@@ -340,6 +340,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 rejected_at: null,
                 revoke_reason: null,
                 revoke_at: null,
+                signed_agreement_form: null,
+                agreement_reminder_sent_at: null,
                 updated_at: new Date().toISOString()
             };
 
