@@ -35,6 +35,8 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             .from('vehicle_log')
             .select(`
                 vehicle_log_id,
+                deleted_owner_name,
+                deleted_plate,
                 vehicle_information:vehicle_information_id(plate_number),
                 registration:registration_id(first_name, last_name, role),
                 guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
@@ -56,6 +58,8 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                 .from('vehicle_log')
                 .select(`
                     vehicle_log_id,
+                    deleted_owner_name,
+                    deleted_plate,
                     vehicle_information:vehicle_information_id(plate_number),
                     registration:registration_id(first_name, last_name, role),
                     guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
@@ -100,8 +104,8 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             else if (rawRole === 'administrator' || rawRole === 'admin') role = 'Administrator';
             else if (rawRole) role = rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
 
-            let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || 'Driver';
-            let plate = row.vehicle_information?.plate_number || 'No Plate';
+            let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || row.deleted_owner_name || 'Driver';
+            let plate = row.vehicle_information?.plate_number || row.deleted_plate || 'No Plate';
 
             if (isVip) {
                 role = 'VIP';

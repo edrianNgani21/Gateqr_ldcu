@@ -24,13 +24,13 @@ export const load: PageServerLoad = async ({ locals }) => {
             statusBreakdownResult,
             recentApplicationsResult
         ] = await Promise.all([
-            supabase.from('registration').select('*', { count: 'exact', head: true }),
+            supabase.from('registration').select('*', { count: 'exact', head: true }).neq('status', 'deleted'),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'osa_validated', 'security_checked']).is('sticker_released_at', null),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
             supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
             supabase.from('department').select('*', { count: 'exact', head: true }),
-            supabase.from('registration').select('status').order('created_at', { ascending: false }),
+            supabase.from('registration').select('status').neq('status', 'deleted').order('created_at', { ascending: false }),
             supabase.from('registration').select(`
                 *,
                 user:user_id(email),
@@ -39,7 +39,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     academic_department,
                     administrative_department
                 )
-            `).order('created_at', { ascending: false }).limit(5)
+            `).neq('status', 'deleted').order('created_at', { ascending: false }).limit(5)
         ]);
 
         const totalApplications = totalApplicationsResult?.count || 0;

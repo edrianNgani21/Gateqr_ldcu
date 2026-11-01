@@ -71,7 +71,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         const { data: reg } = await supabase
             .from('registration')
-            .select('registration_id, vehicle_information_id, status, first_name, last_name, user:user_id(email, user_id), vehicle_information:vehicle_information_id(plate_number)')
+            .select('registration_id, vehicle_information_id, status, first_name, last_name, user:user_id(email, user_id), vehicle_information:vehicle_information_id(plate_number)').neq('status', 'deleted')
             .eq('registration_id', registrationId)
             .maybeSingle();
 

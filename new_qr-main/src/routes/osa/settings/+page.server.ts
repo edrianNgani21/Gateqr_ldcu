@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     const { data: userRow } = await supabase
         .from('users')
-        .select('user_id, email, user_type, identification, is_active, created_at, security_pin_hash')
+        .select('user_id, email, user_type, identification, is_active, created_at, auth_user_id')
         .eq('user_id', locals.user.user_id)
         .single();
 
@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             identification: userRow?.identification || 'Admin',
             created_at: userRow?.created_at || null,
             is_active: userRow?.is_active ?? true,
-            has_pin: !!userRow?.security_pin_hash
+            google_linked: !!userRow?.auth_user_id
         }
     };
 };

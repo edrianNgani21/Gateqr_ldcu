@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { showAlert, askConfirm, askReason } from '$lib/utils/dialog';
   import AppShell from "$lib/components/AppShell.svelte";
   import NavBar from "$lib/components/NavBar.svelte";
   import TabBar from "$lib/components/TabBar.svelte";
@@ -441,10 +441,12 @@
   }
 
   async function deleteApp(registrationId: number) {
-    if (
-      !await askConfirm("Are you sure you want to permanently delete this registration?")
-    )
-      return;
+    // The record moves to OSA's Recently Deleted (it can be restored there); the applicant is emailed the reason
+    const reason = await askReason(
+      "This registration moves to Recently Deleted, where the OSA administrator can restore it. The applicant is emailed this reason and can apply again.",
+      { title: "Delete registration", confirmLabel: "Delete", placeholder: "e.g. Vehicle sold, duplicate registration..." },
+    );
+    if (!reason) return;
     const previous = vehicles;
     vehicles = vehicles.filter(
       (v: any) => v.registration_id !== registrationId,
@@ -456,13 +458,15 @@
         body: JSON.stringify({
           registration_id: registrationId,
           action: "delete",
+          reason,
         }),
       });
       if (res.ok) {
         invalidateAll();
       } else {
         vehicles = previous;
-        showAlert("Failed to delete registration.");
+        const body = await res.json().catch(() => ({}));
+        showAlert(body.error || "Failed to delete registration.");
       }
     } catch (e) {
       vehicles = previous;

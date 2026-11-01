@@ -65,7 +65,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     color,
                     type
                 )
-            `)
+            `).neq('status', 'deleted')
             .eq('department_id', departmentIdForQuery)
             .order('created_at', { ascending: false });
 

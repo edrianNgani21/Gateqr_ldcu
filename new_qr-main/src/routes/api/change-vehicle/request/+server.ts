@@ -114,7 +114,7 @@ export async function POST({ request, locals }: RequestEvent) {
         // Get registration
         let regQuery = supabaseAdmin
             .from('registration')
-            .select('*, vehicle_information:vehicle_information_id(*)')
+            .select('*, vehicle_information:vehicle_information_id(*)').neq('status', 'deleted')
             .eq('user_id', userData.user_id);
 
         if (registration_id) {

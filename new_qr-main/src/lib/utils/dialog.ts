@@ -6,14 +6,17 @@ import { writable } from 'svelte/store';
 export type DialogTone = 'error' | 'success' | 'info' | 'warning';
 
 export interface DialogState {
-    kind: 'alert' | 'confirm';
+    kind: 'alert' | 'confirm' | 'prompt';
     tone: DialogTone;
     title: string;
     message: string;
     detail?: string;
     confirmLabel: string;
     cancelLabel: string;
-    resolve: (ok: boolean) => void;
+    /** prompt only: the text box shown under the message (a non-empty answer is required) */
+    inputLabel?: string;
+    inputPlaceholder?: string;
+    resolve: (ok: boolean, value?: string) => void;
 }
 
 export const dialogState = writable<DialogState | null>(null);
@@ -28,10 +31,10 @@ function open(state: DialogState) {
 }
 
 /** Called by AppDialog when the user closes the card. */
-export function closeDialog(ok: boolean) {
+export function closeDialog(ok: boolean, value?: string) {
     let current: DialogState | null = null;
     dialogState.subscribe((v) => (current = v))();
-    (current as DialogState | null)?.resolve(ok);
+    (current as DialogState | null)?.resolve(ok, value);
     dialogState.set(queue.shift() ?? null);
 }
 
@@ -97,6 +100,26 @@ export function askConfirm(
             confirmLabel: options.confirmLabel ?? (danger ? 'Yes, continue' : 'Confirm'),
             cancelLabel: options.cancelLabel ?? 'Cancel',
             resolve
+        })
+    );
+}
+
+/** Ask for a required reason; resolves the trimmed text, or null when cancelled. */
+export function askReason(
+    message: string,
+    options: { title?: string; confirmLabel?: string; inputLabel?: string; placeholder?: string } = {}
+): Promise<string | null> {
+    return new Promise((resolve) =>
+        open({
+            kind: 'prompt',
+            tone: 'warning',
+            title: options.title ?? 'Reason required',
+            message,
+            confirmLabel: options.confirmLabel ?? 'Continue',
+            cancelLabel: 'Cancel',
+            inputLabel: options.inputLabel ?? 'Reason',
+            inputPlaceholder: options.placeholder ?? 'Type the reason...',
+            resolve: (ok, value) => resolve(ok && value?.trim() ? value.trim() : null)
         })
     );
 }

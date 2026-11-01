@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import bcrypt from 'bcryptjs';
+import { env } from '$env/dynamic/private';
 import { sendEmailAsync } from '$lib/server/email';
 
 const PRIMARY_OSA_EMAIL = 'aluban98304@liceo.edu.ph';
@@ -115,8 +115,9 @@ function getAdminRoleDetails(cleanType: string, departmentData: any) {
     };
 }
 
-function sendAdminWelcomeEmail(user: any, rawPassword: string, cleanType: string) {
+function sendAdminWelcomeEmail(user: any, cleanType: string) {
     const roleDetails = getAdminRoleDetails(cleanType, user.department);
+    const loginUrl = `${(env.PUBLIC_APP_URL || env.ORIGIN || '').replace(/\/+$/, '')}/login`;
     const subject = `GateQR Administrator Account Provisioned — ${roleDetails.roleTitle}`;
 
     const text = `Welcome to Liceo GateQR!\n\n` +
@@ -125,11 +126,11 @@ function sendAdminWelcomeEmail(user: any, rawPassword: string, cleanType: string
         `-----------------------------------------\n` +
         `Admin Type: ${roleDetails.adminType}\n` +
         `Login Email: ${user.email}\n` +
-        `Temporary Password: ${rawPassword}\n` +
-        `Portal URL: /login\n` +
+        `Sign-in: Google account of this email (no password)\n` +
+        `Portal URL: ${loginUrl}\n` +
         `-----------------------------------------\n\n` +
-        `Security Best Practices:\n` +
-        `Upon logging in, please visit Settings to configure your 4-digit security PIN and update your temporary password to ensure full account protection.\n\n` +
+        `How to sign in:\n` +
+        `Open the portal, choose Admin Login, then "Sign in with Google" using ${user.email}. Google confirms it's you; turn on 2-Step Verification in your Google account so new sign-ins need your approval on your phone.\n\n` +
         `Office of Student Affairs & Safety and Security Department\n` +
         `Liceo de Cagayan University`;
 
@@ -185,8 +186,8 @@ function sendAdminWelcomeEmail(user: any, rawPassword: string, cleanType: string
               <span class="cred-value">${user.email}</span>
             </div>
             <div class="cred-row">
-              <span class="cred-label">Assigned Password:</span>
-              <span class="cred-value" style="color: #7A1734;">${rawPassword}</span>
+              <span class="cred-label">Sign-in:</span>
+              <span class="cred-value" style="font-family: inherit;">Google account of this email (no password)</span>
             </div>
             <div class="cred-row">
               <span class="cred-label">Assigned Portal:</span>
@@ -195,9 +196,10 @@ function sendAdminWelcomeEmail(user: any, rawPassword: string, cleanType: string
           </div>
 
           <div class="notice-box">
-            <div class="notice-title">Security Best Practices</div>
+            <div class="notice-title">How to sign in</div>
             <p class="notice-text">
-              Upon logging in, please visit <strong>Settings</strong> to configure your 4-digit security PIN and update your temporary password to ensure full account protection.
+              Open <a href="${loginUrl}">${loginUrl}</a>, choose <strong>Admin Login</strong>, then <strong>Sign in with Google</strong> using ${user.email}.
+              Google confirms it's you. Turn on 2-Step Verification in your Google account so new sign-ins need your approval on your phone.
             </p>
           </div>
         </div>
@@ -228,31 +230,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }, { status: 403 });
         }
 
-        const { email, user_type, password, pin, department_id } = await request.json();
+        const { email, user_type, department_id } = await request.json();
 
         if (!email || !user_type) {
             return json({ error: 'Missing required fields: email and admin type are required' }, { status: 400 });
-        }
-
-        // 4-Digit PIN Verification Check
-        const { data: requester, error: requesterError } = await supabase
-            .from('users')
-            .select('user_id, email, security_pin_hash')
-            .eq('user_id', locals.user.user_id)
-            .single();
-
-        if (requesterError || !requester) {
-            return json({ error: 'Failed to verify admin credentials' }, { status: 500 });
-        }
-
-        if (requester.security_pin_hash) {
-            if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin.trim())) {
-                return json({ error: 'Please enter your 4-digit security PIN to authorize adding an admin' }, { status: 400 });
-            }
-
-            if (!bcrypt.compareSync(pin.trim(), requester.security_pin_hash)) {
-                return json({ error: 'Incorrect 4-digit security PIN. Authorization denied.' }, { status: 401 });
-            }
         }
 
         // Map incoming adminType to valid PostgreSQL types and identification
@@ -285,17 +266,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User with this email already exists' }, { status: 400 });
         }
 
-        const rawPassword = (password && typeof password === 'string' && password.trim().length >= 6)
-            ? password.trim()
-            : 'Admin123!';
-        const password_hash = bcrypt.hashSync(rawPassword, 10);
-
         // Create new admin user in users table
         const insertPayload: any = {
             email: email.trim().toLowerCase(),
             user_type: dbUserType,
             identification: dbIdentification,
-            password_hash,
             is_active: true
         };
         if (department_id) {
@@ -335,8 +310,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 { user_type: dbUserType, identification: dbIdentification, department_id }
             );
 
-            // Dispatch welcome email with role-specific message, login email, password and Admin Type
-            sendAdminWelcomeEmail(newUser, rawPassword, cleanType);
+            // Welcome email: role, login email and how to sign in with Google
+            sendAdminWelcomeEmail(newUser, cleanType);
         }
 
         console.log(`[Admin] New ${dbUserType} (${dbIdentification}) created (${newUser.email}) by primary admin ${callerEmail}`);

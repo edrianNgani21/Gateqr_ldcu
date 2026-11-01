@@ -2,11 +2,10 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import QRCode from 'qrcode';
-import { join } from 'path';
-import fs from 'fs';
 import { sendEmail } from '$lib/server/email';
 import { generateStyledQR, generateStyledQRBuffer } from '$lib/server/qr';
-import { uploadToStorage, deleteFromStorage } from '$lib/server/storage';
+import { uploadToStorage } from '$lib/server/storage';
+import { moveToRecycleBin } from '$lib/server/recycleBin';
 
 async function createNotification(
     userId: number,
@@ -65,7 +64,7 @@ export const GET: RequestHandler = async ({ locals }) => {
                 user:user_id(
                     email
                 )
-            `)
+            `).neq('status', 'deleted')
             .order('created_at', { ascending: false });
 
         const applications = rows?.map(row => ({
@@ -98,7 +97,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     email,
                     user_id
                 )
-            `)
+            `).neq('status', 'deleted')
             .eq('registration_id', registration_id)
             .single();
 
@@ -650,48 +649,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
         else if (action === 'delete') {
-            const files = [reg.doc_id, reg.doc_load, reg.doc_or, reg.doc_cr, reg.doc_license, reg.doc_letter, reg.qr_code].filter(Boolean);
-            for (const file of files) {
-                if (file.startsWith('http://') || file.startsWith('https://')) {
-                    await deleteFromStorage(file);
-                } else {
-                    const filepath = join(process.cwd(), 'static', file);
-                    try {
-                        if (fs.existsSync(filepath)) {
-                            fs.unlinkSync(filepath);
-                        }
-                    } catch (e) {
-                        console.error('Failed to delete file', filepath, e);
-                    }
-                }
+            // Deletion moves the application to Recently Deleted (OSA can restore it); the applicant is emailed
+            if (!reason || typeof reason !== 'string' || !reason.trim()) {
+                return json({ error: 'Please give a reason for deleting this application.' }, { status: 400 });
             }
-            
-            // Pre-emptively clean up related records to prevent foreign key errors
-            await supabase.from('modification_request').delete().eq('registration_id', registration_id);
-            await supabase.from('vehicle_log').delete().eq('registration_id', registration_id);
-            await supabase.from('incident_report').delete().eq('registration_id', registration_id);
+            await moveToRecycleBin(registration_id, reason, {
+                user_id: locals.user?.user_id,
+                email: locals.user?.email,
+                role: locals.user?.role
+            });
 
-            const { error: deleteError } = await supabase
-                .from('registration')
-                .delete()
-                .eq('registration_id', registration_id);
-
-            if (deleteError) throw deleteError;
-
-            await sendEmail(
-                reg.user.email,
-                'Application Deleted - Liceo GateQR',
-                'Your vehicle sticker application has been permanently deleted by OSA.',
-                '<p>Your vehicle sticker application has been <strong>permanently deleted</strong> by OSA.</p>'
-            );
-
-            // Create notification for the applicant and OSA admin
             const actorId = locals.user?.user_id;
             if (reg.user?.user_id) {
                 await createNotification(
                     reg.user.user_id,
                     'application_deleted',
-                    'Your vehicle registration application record has been permanently deleted by OSA.',
+                    `Your vehicle registration was deleted. Reason: ${reason.trim()}`,
                     actorId,
                     'delete_application',
                     'registration',
@@ -703,7 +676,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 await createNotification(
                     actorId,
                     'application_deleted',
-                    `Successfully deleted application record for ${reg.user.email}.`,
+                    `Moved the application of ${reg.user?.email || `Reg. No. ${registration_id}`} to Recently Deleted.`,
                     actorId,
                     'delete_application_success',
                     'registration',

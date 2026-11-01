@@ -27,7 +27,7 @@ BEGIN
         'incident_report', 'complaint', 'parking_capacity', 'parking_availability', 'vehicle_log',
         'registration', 'vehicle_information', 'user_log',
         'system_settings', 'department', 'user', 'users',
-        'campus_events', 'campus_event', 'blocklist', 'login_confirmation'
+        'campus_events', 'campus_event', 'blocklist', 'login_confirmation', 'recycle_bin'
       )
   ) LOOP
     IF r.table_type = 'VIEW' THEN
@@ -61,7 +61,7 @@ CREATE TYPE user_type_enum          AS ENUM ('applicant', 'safety_security', 'os
 CREATE TYPE identification_enum     AS ENUM ('admin', 'staff', 'faculty', 'student');
 CREATE TYPE registration_status_enum AS ENUM (
   'pending', 'dept_validated', 'osa_validated', 'distributed',
-  'security_checked', 'receipt_submitted', 'completed', 'approved', 'rejected', 'expired', 'revoked'
+  'security_checked', 'receipt_submitted', 'completed', 'approved', 'rejected', 'expired', 'revoked', 'deleted'
 );
 -- Migration SQL for existing databases:
 -- ALTER TYPE registration_role_enum ADD VALUE IF NOT EXISTS 'administrator';
@@ -1288,39 +1288,10 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------
--- B. Admin login email confirmation ("Yes, this is me" / "This is not me")
+-- B. Admin sign-in is Google only: the old email-confirmation table is removed
 -- ---------------------------------------------------------------------
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'login_confirmation_status_enum') THEN
-    CREATE TYPE login_confirmation_status_enum AS ENUM ('pending', 'approved', 'denied', 'used');
-  END IF;
-END $$;
-
--- One row per password login that needs the owner's email confirmation.
--- Only SHA-256 hashes of the secrets are stored: email_token_hash for the link in the email,
--- browser_token_hash for the waiting login screen (kept in an httpOnly cookie).
-CREATE TABLE IF NOT EXISTS public.login_confirmation (
-  login_confirmation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id               INTEGER NOT NULL REFERENCES public.users (user_id) ON DELETE CASCADE,
-  email_token_hash      TEXT NOT NULL UNIQUE,
-  browser_token_hash    TEXT NOT NULL UNIQUE,
-  status                login_confirmation_status_enum NOT NULL DEFAULT 'pending',
-  session_role          TEXT NOT NULL,                 -- role / dashboard the session opens once confirmed
-  redirect_url          TEXT NOT NULL,
-  ip_address            TEXT,
-  user_agent            TEXT,
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at            TIMESTAMPTZ NOT NULL,
-  decided_at            TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_login_confirmation_user ON public.login_confirmation (user_id, created_at DESC);
-
--- Server-only table: no policies, so only the service role can read or write it
-ALTER TABLE public.login_confirmation ENABLE ROW LEVEL SECURITY;
+DROP TABLE IF EXISTS public.login_confirmation;
+DROP TYPE IF EXISTS login_confirmation_status_enum;
 
 -- ---------------------------------------------------------------------
 -- 19. GATE ALERTS ON vehicle_log (idempotent)
@@ -1330,7 +1301,7 @@ ALTER TABLE public.login_confirmation ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'flagged_alert_enum') THEN
-    CREATE TYPE flagged_alert_enum AS ENUM ('double_access', 'wrong_campus_exit', 'blocked', 'revoked', 'not_registered');
+    CREATE TYPE flagged_alert_enum AS ENUM ('double_access', 'wrong_campus_exit', 'blocked', 'revoked', 'not_registered', 'deleted');
   END IF;
 END $$;
 
@@ -1338,3 +1309,46 @@ ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS flagged_alert flagged_al
 
 CREATE INDEX IF NOT EXISTS idx_vehicle_log_flagged_alert
   ON public.vehicle_log (check_in DESC) WHERE flagged_alert IS NOT NULL;
+
+-- ---------------------------------------------------------------------
+-- 20. RECENTLY DELETED / RECYCLE BIN (idempotent)
+-- ---------------------------------------------------------------------
+-- On an existing database run these two lines on their own first: Postgres cannot use a
+-- new enum value in the same transaction that adds it.
+ALTER TYPE public.registration_status_enum ADD VALUE IF NOT EXISTS 'deleted';
+ALTER TYPE public.flagged_alert_enum ADD VALUE IF NOT EXISTS 'deleted';
+
+-- A deleted registration stays in place with status 'deleted' (hidden from every list) so its
+-- vehicle_log history keeps working, and frees the applicant's slot so they can apply again.
+DROP INDEX IF EXISTS public.idx_registration_unique_active_user;
+CREATE UNIQUE INDEX idx_registration_unique_active_user ON public.registration (user_id)
+  WHERE status NOT IN ('rejected', 'revoked', 'deleted');
+DROP INDEX IF EXISTS public.idx_registration_unique_active_school_id;
+CREATE UNIQUE INDEX idx_registration_unique_active_school_id ON public.registration (school_id)
+  WHERE status NOT IN ('rejected', 'revoked', 'deleted');
+
+-- Who deleted it, when and why, plus a copy. Only the primary OSA admin restores or purges (server-side check).
+CREATE TABLE IF NOT EXISTS public.recycle_bin (
+  recycle_bin_id      SERIAL PRIMARY KEY,
+  registration_id     INTEGER NOT NULL UNIQUE REFERENCES public.registration(registration_id) ON DELETE CASCADE,
+  previous_status     TEXT NOT NULL,
+  reason              TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+  deleted_by_user_id  INTEGER REFERENCES public.users(user_id) ON DELETE SET NULL,
+  deleted_by_email    TEXT,
+  deleted_by_role     TEXT NOT NULL,
+  deleted_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  snapshot            JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_recycle_bin_deleted_at ON public.recycle_bin (deleted_at DESC);
+ALTER TABLE public.recycle_bin ENABLE ROW LEVEL SECURITY;  -- server (service role) only
+
+DROP TRIGGER IF EXISTS trg_recycle_bin_broadcast ON public.recycle_bin;
+CREATE TRIGGER trg_recycle_bin_broadcast AFTER INSERT OR UPDATE OR DELETE ON public.recycle_bin
+  FOR EACH STATEMENT EXECUTE FUNCTION public.gateqr_broadcast_change();
+
+-- Permanent delete copies the owner onto the gate history before the registration link is cleared
+ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS deleted_owner_name TEXT;
+ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS deleted_plate TEXT;
+ALTER TABLE public.vehicle_log DROP CONSTRAINT IF EXISTS vehicle_log_owner_chk;
+ALTER TABLE public.vehicle_log ADD CONSTRAINT vehicle_log_owner_chk
+  CHECK (registration_id IS NOT NULL OR guest_id IS NOT NULL OR vip_access IS TRUE OR deleted_owner_name IS NOT NULL);

@@ -6,11 +6,6 @@
   // First to show is "apply" as requested: "the first to show is the Apply For Sticker"
   let activeMode = $state<'apply' | 'admin'>('apply');
 
-  // Admin Login state
-  let adminEmail = $state("");
-  let adminPassword = $state("");
-  let showPassword = $state(false);
-
   // Applicant Apply for Sticker state
   let applicantEmail = $state("");
   let alreadyRegisteredNotice = $state("");
@@ -18,110 +13,13 @@
   let loading = $state(false);
   let error = $state("");
 
-  // Admin sign-in waiting for the "Yes, this is me" email confirmation
-  let awaiting = $state<{ email: string; expiresAt: number } | null>(null);
-  let awaitNotice = $state("");
-  let secondsLeft = $state(0);
-
-  function maskEmail(email: string): string {
-    const [name, domain] = email.split("@");
-    if (!domain) return email;
-    return `${name.slice(0, 2)}${"•".repeat(Math.max(1, name.length - 2))}@${domain}`;
-  }
-
-  // Checks every few seconds while waiting; stops as soon as the email is answered or expires
-  $effect(() => {
-    if (!awaiting) return;
-    let stopped = false;
-    const expiresAt = awaiting.expiresAt;
-
-    const tick = () => {
-      secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-    };
-    tick();
-    const clock = setInterval(tick, 1000);
-
-    const check = async () => {
-      if (stopped) return;
-      try {
-        const res = await fetch("/api/auth/login-confirmation");
-        const body = await res.json();
-        if (stopped) return;
-        if (body.status === "approved") {
-          stopped = true;
-          goto(body.redirectUrl || "/osa/dashboard");
-          return;
-        }
-        if (body.status === "denied") {
-          stopped = true;
-          awaiting = null;
-          error = "This sign-in was blocked from the confirmation email. The account is locked for 15 minutes.";
-          return;
-        }
-        if (body.status === "expired" || body.status === "none") {
-          stopped = true;
-          awaiting = null;
-          error = "The confirmation request expired. Please sign in again.";
-          return;
-        }
-      } catch {
-        // Temporary network issue: keep waiting
-      }
-      if (!stopped) timer = setTimeout(check, 3000);
-    };
-    let timer = setTimeout(check, 3000);
-
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      clearInterval(clock);
-    };
-  });
-
-  function cancelAwaiting() {
-    awaiting = null;
-    awaitNotice = "";
-    adminPassword = "";
-  }
-
   function switchMode(mode: 'apply' | 'admin') {
     activeMode = mode;
     error = "";
     alreadyRegisteredNotice = "";
   }
 
-  // Handle Admin Login
-  async function handleAdminLogin(e: Event) {
-    e.preventDefault();
-    if (!adminEmail || !adminPassword) return;
-
-    loading = true;
-    error = "";
-
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.requires_confirmation) {
-        awaiting = { email: data.email || adminEmail, expiresAt: new Date(data.expires_at).getTime() };
-        awaitNotice = "";
-      } else if (res.ok) {
-        goto(data.redirectUrl || "/osa/dashboard");
-      } else {
-        error = data.error || "Invalid credentials. Please try again.";
-      }
-    } catch (err) {
-      error = "A network error occurred. Please check your connection.";
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Admin Google sign-in (Supabase Auth Google provider)
+  // Admin sign-in is Google only; Google itself confirms it's the account owner (password, 2-Step Verification prompt)
   async function handleGoogleLogin() {
     loading = true;
     error = "";
@@ -332,40 +230,13 @@
             </svg>
           </button>
         </div>
-      {:else if awaiting}
-        <!-- VIEW 3: WAITING FOR EMAIL CONFIRMATION -->
-        <div class="confirm-wait" role="status" aria-live="polite">
-          <div class="confirm-icon" aria-hidden="true">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-          </div>
-          <div class="header-badge admin-badge">One more step</div>
-          <h1 class="main-form-title">Check your email</h1>
-          <p class="main-form-subtitle">
-            For your security, we sent a sign-in confirmation to <strong>{maskEmail(awaiting.email)}</strong>.
-            Open it and choose <strong>"Yes, this is me"</strong>. This page will open your dashboard automatically.
-          </p>
-          <ul class="confirm-steps">
-            <li>Can't find it? Check your Spam or Promotions folder.</li>
-            <li>Once confirmed, this browser won't ask again for 30 days.</li>
-          </ul>
-          <div class="confirm-timer">
-            <span class="confirm-spinner" aria-hidden="true"></span>
-            {#if secondsLeft > 0}
-              Waiting for confirmation… link expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
-            {:else}
-              The link has expired.
-            {/if}
-          </div>
-          {#if awaitNotice}<p class="confirm-notice">{awaitNotice}</p>{/if}
-          <button type="button" class="confirm-cancel" onclick={cancelAwaiting}>Use a different account</button>
-        </div>
       {:else}
         <!-- VIEW 2: ADMIN LOGIN (REPLACES THE WHOLE LOGIN FORM) -->
         <div class="form-header">
           <div class="header-badge admin-badge">Administrator Access</div>
           <h1 class="main-form-title">Admin Login</h1>
           <p class="main-form-subtitle">
-            Enter your institutional administrator or officer credentials to access the dashboard.
+            Sign in with your registered institutional email to access your dashboard.
           </p>
         </div>
 
@@ -378,101 +249,15 @@
           </div>
         {/if}
 
-        <form class="auth-form" onsubmit={handleAdminLogin}>
-          <div class="input-group">
-            <label for="admin-email" class="input-label">Admin Email</label>
-            <div class="input-field-wrap">
-              <svg class="field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
-              </svg>
-              <input
-                id="admin-email"
-                type="email"
-                inputmode="email"
-                bind:value={adminEmail}
-                placeholder="e.g. admin@liceo.edu.ph"
-                autocomplete="email"
-                required
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          <div class="input-group">
-            <label for="admin-password" class="input-label">Password</label>
-            <div class="input-field-wrap">
-              <svg class="field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-              </svg>
-              <input
-                id="admin-password"
-                type={showPassword ? "text" : "password"}
-                bind:value={adminPassword}
-                placeholder="Enter your password"
-                autocomplete="current-password"
-                required
-                disabled={loading}
-              />
-              <button
-                type="button"
-                class="btn-pwd-toggle"
-                onclick={() => showPassword = !showPassword}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {#if showPassword}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                    <line x1="1" y1="1" x2="23" y2="23"/>
-                  </svg>
-                {:else}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                    <circle cx="12" cy="12" r="3"/>
-                  </svg>
-                {/if}
-              </button>
-            </div>
-          </div>
-
-          <div class="form-action-row">
-            <button type="submit" class="btn-primary-pill" disabled={loading}>
-              <span>{loading ? "Signing in..." : "LOG IN AS ADMIN"}</span>
-              {#if !loading}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <path d="M5 12h14M12 5l7 7-7 7"/>
-                </svg>
-              {/if}
-            </button>
-          </div>
-        </form>
-
-        <!-- Google sign-in (reuses existing switch-button styling) -->
-        <div class="switch-section">
-          <div class="divider-line">
-            <span>OR</span>
-          </div>
-          <button
-            type="button"
-            class="btn-admin-switch"
-            onclick={handleGoogleLogin}
-            disabled={loading}
-          >
-            <div class="switch-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M16 12h-4"/>
-                <path d="M17 9.5A6 6 0 1 0 17 14.5"/>
-              </svg>
-            </div>
-            <div class="switch-label-group">
-              <span class="switch-primary">Sign in with Google</span>
-              <span class="switch-secondary">Use your registered institutional email</span>
-            </div>
-            <svg class="switch-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M9 18l6-6-6-6"/>
+        <div class="form-action-row">
+          <button type="button" class="btn-google" onclick={handleGoogleLogin} disabled={loading}>
+            <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/>
+              <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+              <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+              <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/>
             </svg>
+            <span>{loading ? "Signing in..." : "Sign in with Google"}</span>
           </button>
         </div>
 
@@ -739,25 +524,6 @@
     color: #6b1a2a;
   }
 
-  .btn-pwd-toggle {
-    position: absolute;
-    right: 0.85rem;
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    cursor: pointer;
-    padding: 0.35rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 6px;
-    transition: color 0.2s;
-  }
-
-  .btn-pwd-toggle:hover {
-    color: #6b1a2a;
-  }
-
   .form-action-row {
     margin-top: 0.5rem;
   }
@@ -892,94 +658,38 @@
     color: #6b1a2a;
   }
 
-  /* ── Alert Messages ───────────────────────────────────────────────────────── */
-  /* Waiting for the sign-in confirmation email */
-  .confirm-wait {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .confirm-icon {
-    width: 58px;
-    height: 58px;
-    border-radius: 16px;
+  /* Google sign-in */
+  .btn-google {
+    width: 100%;
+    height: 52px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #FDFBF7;
-    background: linear-gradient(135deg, #6B1D2F 0%, #4A121E 100%);
-    border: 2px solid #D4AF37;
-    box-shadow: 0 8px 18px rgba(107, 29, 47, 0.3);
-  }
-
-  .confirm-steps {
-    margin: 0;
-    padding: 0.85rem 1rem 0.85rem 1.9rem;
-    border-radius: 12px;
-    background: #fbf7f8;
-    border: 1px solid #ecdfe3;
-    font-size: 0.85rem;
-    line-height: 1.55;
-    color: #475569;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    width: 100%;
-  }
-
-  .confirm-timer {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    width: 100%;
-    padding: 0.7rem 0.9rem;
-    border-radius: 12px;
-    background: #FEF7E0;
-    border: 1px solid rgba(212, 166, 42, 0.45);
-    color: #92400E;
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-
-  .confirm-spinner {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    border: 2.5px solid rgba(212, 166, 42, 0.3);
-    border-top-color: #D4A62A;
-    animation: confirm-spin 0.8s linear infinite;
-  }
-
-  @keyframes confirm-spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .confirm-notice {
-    margin: 0;
-    font-size: 0.82rem;
-    color: #166534;
-  }
-
-  .confirm-cancel {
-    align-self: stretch;
-    min-height: 44px;
-    border-radius: 12px;
+    gap: 0.75rem;
     background: #ffffff;
-    color: #6B1D2F;
-    border: 1.5px solid #e2d3d8;
+    color: #1e293b;
     font-family: inherit;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 700;
+    border: 1.5px solid #dadce0;
+    border-radius: 999px;
     cursor: pointer;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+    transition: all 0.22s ease;
   }
 
-  .confirm-cancel:hover {
-    background: #fbf7f8;
+  .btn-google:hover:not(:disabled) {
+    border-color: #d4a62a;
+    box-shadow: 0 6px 16px rgba(212, 166, 42, 0.2);
+    transform: translateY(-1px);
   }
 
+  .btn-google:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  /* ── Alert Messages ───────────────────────────────────────────────────────── */
   .alert-box {
     display: flex;
     align-items: center;

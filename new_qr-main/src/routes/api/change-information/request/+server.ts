@@ -25,7 +25,7 @@ export async function POST({ request, locals }: RequestEvent) {
         // Get the user's current registration
         const { data: registrations, error: regError } = await supabaseAdmin
             .from('registration')
-            .select('*')
+            .select('*').neq('status', 'deleted')
             .eq('user_id', userData.user_id)
             .order('created_at', { ascending: false })
             .limit(1)

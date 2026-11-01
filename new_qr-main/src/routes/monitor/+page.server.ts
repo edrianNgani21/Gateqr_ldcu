@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 academic_department,
                 administrative_department
             )
-        `)
+        `).neq('status', 'deleted')
         .order('created_at', { ascending: false });
 
     const vehicles = (rows || []).map(row => ({

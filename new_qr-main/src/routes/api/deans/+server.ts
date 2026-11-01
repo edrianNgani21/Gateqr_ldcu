@@ -1,7 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import bcrypt from 'bcryptjs';
 
 async function createNotification(
     userId: number,
@@ -105,17 +104,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { email, department_id, password } = await request.json();
+        // Deans sign in with the Google account of this email (no password)
+        const { email, department_id } = await request.json();
 
         if (!email) {
             return json({ error: 'Email is required' }, { status: 400 });
         }
-
-        if (!password || typeof password !== 'string' || password.trim().length < 6) {
-            return json({ error: 'Password is required and must be at least 6 characters' }, { status: 400 });
-        }
-
-        const password_hash = bcrypt.hashSync(password.trim(), 10);
 
         // Check if user already exists
         const { data: existingUser } = await supabase
@@ -134,7 +128,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     user_type: 'dean',
                     identification: 'faculty',
                     department_id: department_id || null,
-                    password_hash,
                     is_active: true
                 })
                 .eq('user_id', existingUser.user_id);
@@ -142,7 +135,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (updateUserError) throw updateUserError;
             userId = existingUser.user_id;
         } else {
-            // Create new user as dean with password
+            // Create new user as dean
             const { data: newUser, error: createUserError } = await supabase
                 .from('users')
                 .insert({
@@ -150,7 +143,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     user_type: 'dean',
                     identification: 'faculty',
                     department_id: department_id || null,
-                    password_hash,
                     is_active: true
                 })
                 .select('user_id')
@@ -183,7 +175,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     }
 
     try {
-        const { user_id, email, department_id, password } = await request.json();
+        const { user_id, email, department_id } = await request.json();
 
         if (!user_id) {
             return json({ error: 'User ID is required' }, { status: 400 });
@@ -205,14 +197,12 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         
         if (email && email !== currentDean.email) {
             updates.email = email.trim().toLowerCase();
+            // New email = new Google account; the old one can no longer sign in
+            updates.auth_user_id = null;
         }
         
         if (department_id !== undefined) {
             updates.department_id = department_id || null;
-        }
-
-        if (password && typeof password === 'string' && password.trim().length >= 6) {
-            updates.password_hash = bcrypt.hashSync(password.trim(), 10);
         }
 
         // Update user in users table

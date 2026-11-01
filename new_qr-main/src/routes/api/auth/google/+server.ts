@@ -9,7 +9,7 @@ import { env } from '$env/dynamic/private';
  * The browser completes Google OAuth through Supabase Auth and sends us the resulting
  * access token. We verify it with Supabase, match the verified email against the
  * existing `users` table (the admin allowlist), link `auth_user_id`, and issue the
- * same `gateqr_session` cookie the password login uses.
+ * `gateqr_session` cookie. Google sign-in is the only admin login (no passwords).
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
     try {
@@ -50,7 +50,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             return json({ error: 'Account is deactivated. Please contact OSA administration.' }, { status: 403 });
         }
 
-        // Map user_type and identification to system role (same rules as password login)
+        // Map user_type and identification to system role (OSA, Security, Dean, Administrative)
         let role = 'applicant';
         let redirectUrl = '/status';
 

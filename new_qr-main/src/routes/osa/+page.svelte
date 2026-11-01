@@ -431,7 +431,7 @@
             });
         }
 
-        if (action === 'reject' || action === 'revoke') {
+        if (action === 'reject' || action === 'revoke' || action === 'delete') {
             const app = apps.find(a => (a.registration_id || a.id) === registration_id);
             const applicantName = app ? `${app.first_name || ''} ${app.last_name || ''}`.trim() : '';
             return new Promise<void>((resolve) => {
@@ -445,7 +445,7 @@
         let reason: string = '';
         if (action === 'proceed_overdue') {
             if (!await askConfirm(`Are you sure you want to proceed this application directly to Hardcopies Compliance?`)) return;
-        } else if (action === 'delete' || action === 'unrevoke') {
+        } else if (action === 'unrevoke') {
             if (!await askConfirm(`Are you sure you want to ${action} this application?`)) return;
         }
 
@@ -1157,9 +1157,11 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="modal-content reason-modal-card" onclick={(e) => e.stopPropagation()}>
         <div class="reason-modal-header">
-          <div class="reason-badge-icon" class:is-revoke={reasonAction.action === 'revoke'}>
+          <div class="reason-badge-icon" class:is-revoke={reasonAction.action !== 'reject'}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              {#if reasonAction.action === 'revoke'}
+              {#if reasonAction.action === 'delete'}
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              {:else if reasonAction.action === 'revoke'}
                 <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
               {:else}
                 <circle cx="12" cy="12" r="10"/>
@@ -1170,7 +1172,7 @@
           </div>
           <div class="reason-header-text">
             <h3 class="reason-title">
-              {reasonAction.action === 'revoke' ? 'Revoke Application / Sticker' : 'Reject Application'}
+              {reasonAction.action === 'delete' ? 'Delete Application' : reasonAction.action === 'revoke' ? 'Revoke Application / Sticker' : 'Reject Application'}
             </h3>
             {#if reasonAction.applicantName}
               <span class="reason-applicant-badge">{reasonAction.applicantName}</span>
@@ -1186,7 +1188,9 @@
         </div>
 
         <p class="reason-subtitle">
-          {reasonAction.action === 'revoke'
+          {reasonAction.action === 'delete'
+            ? 'The application moves to Recently Deleted, where the primary OSA administrator can restore it. The applicant is emailed this reason and may apply again.'
+            : reasonAction.action === 'revoke'
             ? 'Provide an official explanation for revoking this registered vehicle. This reason will be logged and visible in application records.'
             : 'Specify why this application is being rejected. This explanation will be displayed directly to the applicant on their status dashboard.'}
         </p>
@@ -1195,7 +1199,12 @@
         <div class="reason-presets-section">
           <span class="presets-label">QUICK TEMPLATES</span>
           <div class="presets-chips">
-            {#if reasonAction.action === 'revoke'}
+            {#if reasonAction.action === 'delete'}
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Duplicate registration'}>Duplicate</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Vehicle sold or no longer used on campus'}>Vehicle No Longer Used</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Applicant is no longer enrolled / employed at the university'}>No Longer Affiliated</button>
+              <button type="button" class="preset-chip" onclick={() => reasonText = 'Registration created by mistake'}>Created by Mistake</button>
+            {:else if reasonAction.action === 'revoke'}
               <button type="button" class="preset-chip" onclick={() => reasonText = 'Expired Registration / Semester Renewal Required'}>Expired Registration</button>
               <button type="button" class="preset-chip" onclick={() => reasonText = 'Unauthorized Vehicle / Transfer Violation'}>Transfer Violation</button>
               <button type="button" class="preset-chip" onclick={() => reasonText = 'Campus Traffic & Safety Regulation Violation'}>Traffic Violation</button>
@@ -1217,7 +1226,7 @@
             id="reason-textarea"
             class="reason-textarea"
             bind:value={reasonText}
-            placeholder={reasonAction.action === 'revoke' ? 'State the specific reason for revoking this sticker...' : 'State the specific reason for rejecting this application...'}
+            placeholder={reasonAction.action === 'delete' ? 'State why this application is being deleted...' : reasonAction.action === 'revoke' ? 'State the specific reason for revoking this sticker...' : 'State the specific reason for rejecting this application...'}
             disabled={reasonLoading}
             rows="3"
             oninput={() => { if (reasonError) reasonError = ''; }}
@@ -1240,7 +1249,7 @@
           <button
             type="button"
             class="btn-confirm-reason"
-            class:is-revoke={reasonAction.action === 'revoke'}
+            class:is-revoke={reasonAction.action !== 'reject'}
             onclick={submitReasonAction}
             disabled={reasonLoading}
           >
@@ -1250,7 +1259,7 @@
               </svg>
               <span>Submitting…</span>
             {:else}
-              <span>{reasonAction.action === 'revoke' ? 'Confirm Revocation' : 'Confirm Rejection'}</span>
+              <span>{reasonAction.action === 'delete' ? 'Move to Recently Deleted' : reasonAction.action === 'revoke' ? 'Confirm Revocation' : 'Confirm Rejection'}</span>
             {/if}
           </button>
         </div>

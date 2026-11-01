@@ -1,7 +1,6 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
-    import { invalidateAll } from '$app/navigation';
 
     let {
         data,
@@ -19,7 +18,7 @@
                 identification: string;
                 created_at: string | null;
                 is_active: boolean;
-                has_pin: boolean;
+                google_linked: boolean;
                 department_name?: string;
             };
         };
@@ -31,28 +30,47 @@
 
     let admin = $derived(data.adminUser);
 
-    // Password State
-    let currentPinForPassword = $state('');
-    let newPassword = $state('');
-    let confirmPassword = $state('');
-    let showNewPassword = $state(false);
-    let showConfirmPassword = $state(false);
-    let passwordLoading = $state(false);
-    let passwordError = $state('');
-    let passwordSuccess = $state('');
+    // Change Email: a confirmation link goes to the current email
+    let newEmail = $state('');
+    let emailLoading = $state(false);
+    let emailError = $state('');
+    let emailSuccess = $state('');
 
-    // PIN State
-    let currentPin = $state('');
-    let newPin = $state('');
-    let confirmPin = $state('');
-    let pinLoading = $state(false);
-    let pinError = $state('');
-    let pinSuccess = $state('');
+    async function handleChangeEmail(e: Event) {
+        e.preventDefault();
+        emailError = '';
+        emailSuccess = '';
 
-    // PIN Verification tester
-    let testPin = $state('');
-    let testPinResult = $state<{ success: boolean; message: string } | null>(null);
-    let testPinLoading = $state(false);
+        const value = newEmail.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            emailError = 'Please enter a valid email address.';
+            return;
+        }
+        if (value === (admin.email || '').toLowerCase()) {
+            emailError = 'That is already your current email.';
+            return;
+        }
+
+        emailLoading = true;
+        try {
+            const res = await fetch('/api/auth/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'request_email_change', new_email: value })
+            });
+            const result = await res.json();
+            if (res.ok) {
+                emailSuccess = result.message || 'Confirmation email sent.';
+                newEmail = '';
+            } else {
+                emailError = result.error || 'Could not request the email change.';
+            }
+        } catch {
+            emailError = 'Network error occurred. Please try again.';
+        } finally {
+            emailLoading = false;
+        }
+    }
 
     function formatDate(dateStr: string | null): string {
         if (!dateStr) return 'Not Available';
@@ -65,140 +83,6 @@
             minute: '2-digit',
             hour12: true
         });
-    }
-
-    async function handleChangePassword(e: Event) {
-        e.preventDefault();
-        passwordError = '';
-        passwordSuccess = '';
-
-        if (!admin.has_pin) {
-            passwordError = 'Please configure your 4-Digit Security PIN on the right first before changing your password.';
-            return;
-        }
-
-        if (!currentPinForPassword || !/^\d{4}$/.test(currentPinForPassword)) {
-            passwordError = 'Please enter your valid 4-digit security PIN.';
-            return;
-        }
-
-        if (newPassword.length < 6) {
-            passwordError = 'New password must be at least 6 characters long.';
-            return;
-        }
-
-        if (newPassword !== confirmPassword) {
-            passwordError = 'New password and confirmation do not match.';
-            return;
-        }
-
-        passwordLoading = true;
-        try {
-            const res = await fetch('/api/auth/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'change_password',
-                    pin: currentPinForPassword,
-                    new_password: newPassword
-                })
-            });
-
-            const result = await res.json();
-            if (res.ok) {
-                passwordSuccess = 'Password updated successfully!';
-                currentPinForPassword = '';
-                newPassword = '';
-                confirmPassword = '';
-                await invalidateAll();
-            } else {
-                passwordError = result.error || 'Failed to update password.';
-            }
-        } catch {
-            passwordError = 'Network error occurred. Please try again.';
-        } finally {
-            passwordLoading = false;
-        }
-    }
-
-    async function handleSetPin(e: Event) {
-        e.preventDefault();
-        pinError = '';
-        pinSuccess = '';
-
-        if (!newPin || !/^\d{4}$/.test(newPin)) {
-            pinError = 'PIN must be exactly 4 numeric digits.';
-            return;
-        }
-
-        if (newPin !== confirmPin) {
-            pinError = 'New PIN and confirmation PIN do not match.';
-            return;
-        }
-
-        if (admin.has_pin && (!currentPin || !/^\d{4}$/.test(currentPin))) {
-            pinError = 'Please enter your current 4-digit PIN to update.';
-            return;
-        }
-
-        pinLoading = true;
-        try {
-            const res = await fetch('/api/auth/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'set_pin',
-                    current_pin: admin.has_pin ? currentPin : undefined,
-                    pin: newPin
-                })
-            });
-
-            const result = await res.json();
-            if (res.ok) {
-                pinSuccess = admin.has_pin ? 'Security PIN updated successfully!' : '4-Digit Security PIN configured successfully!';
-                currentPin = '';
-                newPin = '';
-                confirmPin = '';
-                await invalidateAll();
-            } else {
-                pinError = result.error || 'Failed to save security PIN.';
-            }
-        } catch {
-            pinError = 'Network error occurred. Please try again.';
-        } finally {
-            pinLoading = false;
-        }
-    }
-
-    async function handleVerifyPinTest() {
-        if (!testPin || !/^\d{4}$/.test(testPin)) {
-            testPinResult = { success: false, message: 'Please enter a 4-digit PIN.' };
-            return;
-        }
-
-        testPinLoading = true;
-        testPinResult = null;
-        try {
-            const res = await fetch('/api/auth/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'verify_pin',
-                    pin: testPin
-                })
-            });
-
-            const result = await res.json();
-            if (res.ok) {
-                testPinResult = { success: true, message: 'PIN is verified and valid!' };
-            } else {
-                testPinResult = { success: false, message: result.error || 'Incorrect PIN.' };
-            }
-        } catch {
-            testPinResult = { success: false, message: 'Network error occurred.' };
-        } finally {
-            testPinLoading = false;
-        }
     }
 
     let displayRoleName = $derived.by(() => {
@@ -299,12 +183,12 @@
                 </div>
 
                 <div class="info-field">
-                    <span class="field-label">4-Digit Security PIN</span>
+                    <span class="field-label">Sign-in Method</span>
                     <div class="field-value">
-                        {#if admin.has_pin}
-                            <span class="badge-pin-active">✓ PIN Configured</span>
+                        {#if admin.google_linked}
+                            <span class="badge-linked">✓ Google account linked</span>
                         {:else}
-                            <span class="badge-pin-warning">⚠ PIN Not Configured</span>
+                            <span class="badge-pending">Google (not signed in yet)</span>
                         {/if}
                     </div>
                 </div>
@@ -319,234 +203,100 @@
                     <line x1="12" y1="5" x2="12" y2="19"></line>
                     <polyline points="19 12 12 19 5 12"></polyline>
                 </svg>
-                Security Credentials Management
+                Sign-in & Email
             </span>
             <span class="scroll-line"></span>
         </div>
 
-        <!-- Section 2: Two-column Security Settings (Password on Left, PIN on Right) -->
+        <!-- Section 2: Google sign-in (left) and Change Email (right) -->
         <div class="security-grid">
-            <!-- Left Column: Change Password -->
             <div class="security-column-card left-card">
                 <div class="col-header">
                     <div class="col-icon left-icon">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <polyline points="9 12 11 14 15 10"/>
                         </svg>
                     </div>
                     <div>
-                        <h3>Change Password</h3>
-                        <p>Authorize with your 4-digit security PIN to update account password</p>
+                        <h3>Google Sign-In</h3>
+                        <p>GateQR has no passwords. You sign in with the Google account of {admin.email}.</p>
                     </div>
                 </div>
 
-                {#if passwordError}
-                    <div class="alert-box error-alert">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                        </svg>
-                        <span>{passwordError}</span>
-                    </div>
-                {/if}
+                <ul class="info-list">
+                    <li>Google checks it's you each time you sign in on a new device.</li>
+                    <li>Turn on <strong>2-Step Verification</strong> so a new sign-in needs your approval on your phone or any device signed in to your Google account.</li>
+                    <li>Signing out of GateQR does not sign you out of Google.</li>
+                </ul>
 
-                {#if passwordSuccess}
-                    <div class="alert-box success-alert">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-                        </svg>
-                        <span>{passwordSuccess}</span>
-                    </div>
-                {/if}
-
-                <form onsubmit={handleChangePassword} class="form-body">
-                    <div class="form-group">
-                        <label for="pwd-pin">4-Digit Security PIN <span class="required">*</span></label>
-                        <input
-                            id="pwd-pin"
-                            type="password"
-                            maxlength="4"
-                            inputmode="numeric"
-                            placeholder="••••"
-                            bind:value={currentPinForPassword}
-                            required
-                            class="input-field pin-masked"
-                        />
-                        <span class="hint-text">Your security PIN is required to authorize password modifications</span>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="new-pwd">New Password <span class="required">*</span></label>
-                        <div class="input-with-toggle">
-                            <input
-                                id="new-pwd"
-                                type={showNewPassword ? 'text' : 'password'}
-                                placeholder="Enter at least 6 characters"
-                                bind:value={newPassword}
-                                required
-                                class="input-field"
-                            />
-                            <button type="button" class="eye-toggle" onclick={() => showNewPassword = !showNewPassword} title="Toggle Visibility">
-                                {#if showNewPassword}
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                                {:else}
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                {/if}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="confirm-pwd">Confirm New Password <span class="required">*</span></label>
-                        <div class="input-with-toggle">
-                            <input
-                                id="confirm-pwd"
-                                type={showConfirmPassword ? 'text' : 'password'}
-                                placeholder="Confirm your new password"
-                                bind:value={confirmPassword}
-                                required
-                                class="input-field"
-                            />
-                            <button type="button" class="eye-toggle" onclick={() => showConfirmPassword = !showConfirmPassword} title="Toggle Visibility">
-                                {#if showConfirmPassword}
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                                {:else}
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                {/if}
-                            </button>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="submit-btn maroon-btn" disabled={passwordLoading}>
-                        {#if passwordLoading}
-                            <span class="btn-spinner"></span> Updating Password...
-                        {:else}
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                            Save New Password
-                        {/if}
-                    </button>
-                </form>
+                <a class="submit-btn maroon-btn link-btn" href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener noreferrer">
+                    Open Google 2-Step Verification
+                </a>
             </div>
 
-            <!-- Right Column: 4-Digit Security PIN -->
             <div class="security-column-card right-card">
                 <div class="col-header">
                     <div class="col-icon right-icon">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-                            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-                            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                            <polyline points="22,6 12,13 2,6"/>
                         </svg>
                     </div>
                     <div>
-                        <h3>4-Digit Security PIN</h3>
-                        <p>{admin.has_pin ? 'Update or manage your 4-digit administrative verification PIN' : 'Configure a 4-digit security PIN for authorized approvals'}</p>
+                        <h3>Change Email</h3>
+                        <p>We send a confirmation link to your current email. The change happens only after you approve it there.</p>
                     </div>
                 </div>
 
-                {#if pinError}
+                {#if emailError}
                     <div class="alert-box error-alert">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
-                        <span>{pinError}</span>
+                        <span>{emailError}</span>
                     </div>
                 {/if}
 
-                {#if pinSuccess}
+                {#if emailSuccess}
                     <div class="alert-box success-alert">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
                         </svg>
-                        <span>{pinSuccess}</span>
+                        <span>{emailSuccess}</span>
                     </div>
                 {/if}
 
-                <form onsubmit={handleSetPin} class="form-body">
-                    {#if admin.has_pin}
-                        <div class="form-group">
-                            <label for="cur-pin">Current 4-Digit PIN <span class="required">*</span></label>
-                            <input
-                                id="cur-pin"
-                                type="password"
-                                maxlength="4"
-                                inputmode="numeric"
-                                placeholder="••••"
-                                bind:value={currentPin}
-                                required
-                                class="input-field pin-masked"
-                            />
-                        </div>
-                    {/if}
-
+                <form onsubmit={handleChangeEmail} class="form-body">
                     <div class="form-group">
-                        <label for="new-pin">{admin.has_pin ? 'New 4-Digit PIN' : 'Set 4-Digit PIN'} <span class="required">*</span></label>
-                        <input
-                            id="new-pin"
-                            type="password"
-                            maxlength="4"
-                            inputmode="numeric"
-                            placeholder="••••"
-                            bind:value={newPin}
-                            required
-                            class="input-field pin-masked"
-                        />
-                        <span class="hint-text">Must be exactly 4 digits (e.g. 1234)</span>
+                        <label for="cur-email">Current Email</label>
+                        <input id="cur-email" type="email" value={admin.email} disabled class="input-field" />
                     </div>
 
                     <div class="form-group">
-                        <label for="confirm-pin">Confirm 4-Digit PIN <span class="required">*</span></label>
+                        <label for="new-email">New Email <span class="required">*</span></label>
                         <input
-                            id="confirm-pin"
-                            type="password"
-                            maxlength="4"
-                            inputmode="numeric"
-                            placeholder="••••"
-                            bind:value={confirmPin}
+                            id="new-email"
+                            type="email"
+                            inputmode="email"
+                            autocomplete="email"
+                            placeholder="Must be a Google account"
+                            bind:value={newEmail}
                             required
-                            class="input-field pin-masked"
+                            class="input-field"
                         />
+                        <span class="hint-text">After the change, only the Google account of the new email can sign in.</span>
                     </div>
 
-                    <button type="submit" class="submit-btn gold-btn" disabled={pinLoading}>
-                        {#if pinLoading}
-                            <span class="btn-spinner"></span> Saving PIN...
+                    <button type="submit" class="submit-btn maroon-btn" disabled={emailLoading}>
+                        {#if emailLoading}
+                            <span class="btn-spinner"></span> Sending...
                         {:else}
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            {admin.has_pin ? 'Update Security PIN' : 'Save 4-Digit PIN'}
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            Send Confirmation
                         {/if}
                     </button>
                 </form>
-
-                {#if admin.has_pin}
-                    <!-- Verification / PIN Test Box -->
-                    <div class="pin-tester-section">
-                        <h4>Test & Verify PIN</h4>
-                        <div class="tester-input-row">
-                            <input
-                                type="password"
-                                maxlength="4"
-                                inputmode="numeric"
-                                placeholder="Verify PIN..."
-                                bind:value={testPin}
-                                class="input-field tester-input"
-                            />
-                            <button
-                                type="button"
-                                class="tester-btn"
-                                onclick={handleVerifyPinTest}
-                                disabled={testPinLoading}
-                            >
-                                {testPinLoading ? 'Checking...' : 'Verify'}
-                            </button>
-                        </div>
-                        {#if testPinResult}
-                            <p class="test-feedback" class:test-pass={testPinResult.success} class:test-fail={!testPinResult.success}>
-                                {testPinResult.message}
-                            </p>
-                        {/if}
-                    </div>
-                {/if}
             </div>
         </div>
     </div>
@@ -699,7 +449,7 @@
         font-weight: 600;
     }
 
-    .badge-pin-active {
+    .badge-linked {
         color: #059669;
         background: #ecfdf5;
         border: 1px solid #a7f3d0;
@@ -709,7 +459,7 @@
         font-weight: 700;
     }
 
-    .badge-pin-warning {
+    .badge-pending {
         color: #d97706;
         background: #fffbeb;
         border: 1px solid #fde68a;
@@ -857,35 +607,6 @@
         box-shadow: 0 0 0 3px rgba(122, 23, 52, 0.12);
     }
 
-    .pin-masked {
-        letter-spacing: 0.35em;
-        font-weight: 700;
-        font-size: 1.1rem;
-    }
-
-    .input-with-toggle {
-        position: relative;
-        display: flex;
-        align-items: center;
-    }
-
-    .eye-toggle {
-        position: absolute;
-        right: 12px;
-        background: transparent;
-        border: none;
-        color: #64748b;
-        cursor: pointer;
-        padding: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .eye-toggle:hover {
-        color: #0f172a;
-    }
-
     .hint-text {
         font-size: 0.75rem;
         color: #64748b;
@@ -917,17 +638,6 @@
         box-shadow: 0 6px 16px rgba(122, 23, 52, 0.3);
     }
 
-    .gold-btn {
-        background: linear-gradient(135deg, #D4A62A 0%, #B8860B 100%);
-        color: #ffffff;
-        box-shadow: 0 4px 12px rgba(212, 166, 42, 0.25);
-    }
-
-    .gold-btn:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 16px rgba(212, 166, 42, 0.35);
-    }
-
     .submit-btn:disabled {
         opacity: 0.6;
         cursor: not-allowed;
@@ -947,6 +657,24 @@
     }
 
     /* Alerts */
+    .info-list {
+        margin: 0 0 1.25rem;
+        padding: 0.9rem 1rem 0.9rem 1.9rem;
+        border-radius: 12px;
+        background: #fbf7f8;
+        border: 1px solid #ecdfe3;
+        font-size: 0.86rem;
+        line-height: 1.55;
+        color: #475569;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .link-btn {
+        text-decoration: none;
+    }
+
     .alert-box {
         padding: 0.75rem 1rem;
         border-radius: 10px;
@@ -971,60 +699,4 @@
     }
 
     /* PIN Tester Section */
-    .pin-tester-section {
-        margin-top: 1.5rem;
-        padding-top: 1.25rem;
-        border-top: 1px dashed #e2e8f0;
-    }
-
-    .pin-tester-section h4 {
-        font-size: 0.85rem;
-        font-weight: 700;
-        color: #475569;
-        margin: 0 0 0.5rem 0;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-    }
-
-    .tester-input-row {
-        display: flex;
-        gap: 0.5rem;
-    }
-
-    .tester-input {
-        width: 130px;
-        letter-spacing: 0.3em;
-        font-weight: 700;
-    }
-
-    .tester-btn {
-        padding: 0.5rem 1rem;
-        border-radius: 8px;
-        background: #f1f5f9;
-        border: 1px solid #cbd5e1;
-        color: #334155;
-        font-weight: 700;
-        font-size: 0.85rem;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .tester-btn:hover:not(:disabled) {
-        background: #e2e8f0;
-        color: #0f172a;
-    }
-
-    .test-feedback {
-        margin: 0.5rem 0 0 0;
-        font-size: 0.8rem;
-        font-weight: 700;
-    }
-
-    .test-pass {
-        color: #059669;
-    }
-
-    .test-fail {
-        color: #dc2626;
-    }
 </style>

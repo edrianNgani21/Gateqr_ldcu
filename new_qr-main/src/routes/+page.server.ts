@@ -39,7 +39,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                     administrative_department
                 ),
                 vehicle_information:vehicle_information_id(*)
-            `)
+            `).neq('status', 'deleted')
             .eq('user_id', userRow.user_id)
             .not('status', 'in', '("rejected","revoked")')
             .order('created_at', { ascending: false })

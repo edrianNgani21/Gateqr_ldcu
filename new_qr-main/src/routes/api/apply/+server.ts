@@ -81,7 +81,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (renewal_registration_id) {
             const { data: foundReg } = await supabase
                 .from('registration')
-                .select('*, vehicle_information:vehicle_information_id(*)')
+                .select('*, vehicle_information:vehicle_information_id(*)').neq('status', 'deleted')
                 .eq('registration_id', renewal_registration_id)
                 .maybeSingle();
 
@@ -109,7 +109,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (existingUser?.user_id) {
             let dupQuery = supabase
                 .from('registration')
-                .select('registration_id, status')
+                .select('registration_id, status').neq('status', 'deleted')
                 .eq('user_id', existingUser.user_id)
                 .not('status', 'in', '("rejected","revoked")');
 
@@ -130,7 +130,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (cleanSchoolId) {
             let schoolQuery = supabase
                 .from('registration')
-                .select('registration_id, status')
+                .select('registration_id, status').neq('status', 'deleted')
                 .ilike('school_id', cleanSchoolId)
                 .not('status', 'in', '("rejected","revoked")');
 
@@ -164,7 +164,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 const vehicleIds = matchedVehicles.map(v => v.vehicle_information_id);
                 let plateQuery = supabase
                     .from('registration')
-                    .select('registration_id, status')
+                    .select('registration_id, status').neq('status', 'deleted')
                     .in('vehicle_information_id', vehicleIds)
                     .not('status', 'in', '("rejected","revoked")');
 

@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             identification, 
             is_active, 
             created_at, 
-            security_pin_hash,
+            auth_user_id,
             department_id,
             department:department_id(*)
         `)
@@ -40,7 +40,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             department_name: departmentName,
             created_at: userRow?.created_at || null,
             is_active: userRow?.is_active ?? true,
-            has_pin: !!userRow?.security_pin_hash
+            google_linked: !!userRow?.auth_user_id
         }
     };
 };

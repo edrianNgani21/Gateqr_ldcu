@@ -43,7 +43,7 @@ export const POST: RequestHandler = async ({ request }) => {
             // If an Admin/Dean/Security tries to use the Applicant register form, guide them to Admin Login
             if (existingUser.user_type !== 'applicant' && existingUser.user_type !== 'Applicants') {
                 return json({
-                    error: `This email is registered as ${existingUser.user_type}. Please sign in using the Staff/Admin Login tab with your password.`
+                    error: `This email is registered as ${existingUser.user_type}. Please use Admin Login and sign in with Google.`
                 }, { status: 400 });
             }
         }

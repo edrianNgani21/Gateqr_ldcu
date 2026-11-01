@@ -14,6 +14,7 @@ import numpy as np
 from gpiozero import AngularServo, Device
 from collections import deque
 import re
+import textwrap
 from supabase import create_client, Client
 from datetime import datetime, timezone
 import json
@@ -816,6 +817,16 @@ def registration_access(reg):
     """(allowed, alert_kind, title, detail) for a registration's current status.
     Only registered (approved / completed) stickers that have not expired may enter."""
     status = str(reg.get('status') or '').strip().lower()
+    if status == 'deleted':
+        # Moved to OSA's Recently Deleted: the QR no longer gives access
+        reason = ''
+        try:
+            res = supabase.table('recycle_bin').select('reason').eq('registration_id', reg.get('registration_id')).limit(1).execute()
+            if res.data:
+                reason = f" Reason: {res.data[0].get('reason')}"
+        except Exception as e:
+            print(f"DEBUG: Recycle bin lookup failed: {e}")
+        return False, 'deleted', "RECENTLY DELETED", f"This account has been recently deleted. Access denied.{reason}"
     if status == 'revoked':
         reason = reg.get('revoke_reason') or 'No reason given'
         return False, 'revoked', "REVOKED", f"Revoked by OSA: {reason}. Access returns only after the QR is unrevoked."
@@ -1129,7 +1140,9 @@ def process_qr(side, qr_text, frame):
                 side.data = qr_text
                 return
             
-            evaluate_registered_vehicle(side, response.data[0])
+            # Prefer a live registration over a deleted one with the same code
+            rows = sorted(response.data, key=lambda r: str(r.get('status') or '').lower() == 'deleted')
+            evaluate_registered_vehicle(side, rows[0])
 
         except Exception as e:
             side.state = GateState.API_ERROR
@@ -1159,7 +1172,7 @@ def lookup_registered_plate(side, plate_input):
             # Prefer an active application; otherwise return the latest one so the gate can say why
             # it is denied (REVOKED / NOT REGISTERED) instead of "not found"
             rows = rows or []
-            active = [r for r in rows if str(r.get('status') or '').lower() not in ('rejected', 'revoked')]
+            active = [r for r in rows if str(r.get('status') or '').lower() not in ('rejected', 'revoked', 'deleted')]
             return active or rows[:1]
 
         # 1. Match vehicle_information.plate_number, ignoring spaces and hyphens
@@ -1827,7 +1840,7 @@ def get_card_status(side):
         return f"{label} PARKING FULL", (0, 0, 200), [f"{label} slots occupied: {used} / {cap}", "Override only if a slot is actually free."]
     if st == GateState.STATUS_DENIED:
         title, detail, status = getattr(side, 'denied_info', ("ENTRY DENIED", "", ""))
-        lines = [detail[:80], detail[80:160], f"Application status: {status or 'UNKNOWN'}"]
+        lines = textwrap.wrap(detail, 80)[:2] + [f"Application status: {status or 'UNKNOWN'}"]
         return f"{title} - ENTRY DENIED", (0, 0, 200), [l for l in lines if l]
     if st == GateState.BLOCKED:
         block = side.block_info or {}

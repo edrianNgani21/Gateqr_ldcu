@@ -40,7 +40,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 // Fetch registration details for QR and notification
                 const { data: reg } = await supabase
                     .from('registration')
-                    .select('user_id, role, created_at, qr_code, qr_unique_code')
+                    .select('user_id, role, created_at, qr_code, qr_unique_code').neq('status', 'deleted')
                     .eq('registration_id', registration_id)
                     .single();
 

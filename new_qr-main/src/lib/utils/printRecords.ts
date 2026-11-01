@@ -35,38 +35,18 @@ function cap(s?: string | null): string {
     return s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—';
 }
 
-export function printRegisteredVehicles(rows: RegisteredVehicleRow[], preparedBy: string, office: string) {
-    if (rows.length === 0) {
-        showAlert('Select at least one registered vehicle to print.', { tone: 'info', title: 'Nothing selected' });
-        return;
-    }
+/** Open a print window with the shared A4 record layout (title bar, table, signature line). */
+function openPrintWindow(docTitle: string, office: string, heading: string, metaHtml: string, headCells: string[], bodyRows: string, extraCss = '') {
     const win = window.open('', '_blank', 'width=1000,height=760');
     if (!win) {
         showAlert('The print window was blocked. Please allow pop-ups for this site and try again.');
         return;
     }
-
-    const generated = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
-    const body = rows
-        .map((r, i) => `<tr>
-            <td class="num">${i + 1}</td>
-            <td class="reg">${esc(r.regNo)}</td>
-            <td><strong>${esc(r.name)}</strong></td>
-            <td>${esc(cap(r.role))}</td>
-            <td>${esc(r.department || '—')}</td>
-            <td>${esc(r.campus || '—')}</td>
-            <td class="plate">${esc((r.plate || '—').toUpperCase())}</td>
-            <td>${esc(r.vehicle || '—')}</td>
-            <td>${esc(niceType(r.type))}</td>
-            <td>${esc(niceDate(r.expires))}</td>
-        </tr>`)
-        .join('');
-
     win.document.write(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Registered Vehicles - GateQR</title>
+<title>${esc(docTitle)}</title>
 <style>
   @page { size: A4 landscape; margin: 14mm 12mm; }
   * { box-sizing: border-box; }
@@ -89,6 +69,7 @@ export function printRegisteredVehicles(rows: RegisteredVehicleRow[], preparedBy
   .toolbar button { padding: 8px 16px; border-radius: 8px; border: 1px solid #8B1A3C; background: #8B1A3C; color: #fff; font-weight: 700; cursor: pointer; }
   .toolbar button.secondary { background: #fff; color: #8B1A3C; }
   @media print { .toolbar { display: none; } body { padding: 0; } }
+${extraCss}
 </style>
 </head>
 <body>
@@ -96,13 +77,13 @@ export function printRegisteredVehicles(rows: RegisteredVehicleRow[], preparedBy
   <header>
     <div>
       <div class="uni">Liceo de Cagayan University · ${esc(office)}</div>
-      <h1>Registered Vehicles Record</h1>
+      <h1>${esc(heading)}</h1>
     </div>
-    <div class="meta">Generated: ${esc(generated)}<br>Prepared by: ${esc(preparedBy)}<br>Total vehicles: <strong>${rows.length}</strong></div>
+    <div class="meta">${metaHtml}</div>
   </header>
   <table>
-    <thead><tr><th>#</th><th>Reg. No.</th><th>Name</th><th>Role</th><th>Department</th><th>Campus</th><th>Plate</th><th>Vehicle</th><th>Type</th><th>Sticker Expiry</th></tr></thead>
-    <tbody>${body}</tbody>
+    <thead><tr>${headCells.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${bodyRows}</tbody>
   </table>
   <div class="sign">Signature over printed name</div>
   <footer><span>GateQR Vehicle Sticker Portal</span><span>Confidential: for official use only</span></footer>
@@ -110,4 +91,81 @@ export function printRegisteredVehicles(rows: RegisteredVehicleRow[], preparedBy
 </body>
 </html>`);
     win.document.close();
+}
+
+export function printRegisteredVehicles(rows: RegisteredVehicleRow[], preparedBy: string, office: string) {
+    if (rows.length === 0) {
+        showAlert('Select at least one registered vehicle to print.', { tone: 'info', title: 'Nothing selected' });
+        return;
+    }
+    const generated = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+    const body = rows
+        .map((r, i) => `<tr>
+            <td class="num">${i + 1}</td>
+            <td class="reg">${esc(r.regNo)}</td>
+            <td><strong>${esc(r.name)}</strong></td>
+            <td>${esc(cap(r.role))}</td>
+            <td>${esc(r.department || '—')}</td>
+            <td>${esc(r.campus || '—')}</td>
+            <td class="plate">${esc((r.plate || '—').toUpperCase())}</td>
+            <td>${esc(r.vehicle || '—')}</td>
+            <td>${esc(niceType(r.type))}</td>
+            <td>${esc(niceDate(r.expires))}</td>
+        </tr>`)
+        .join('');
+
+    openPrintWindow(
+        'Registered Vehicles - GateQR',
+        office,
+        'Registered Vehicles Record',
+        `Generated: ${esc(generated)}<br>Prepared by: ${esc(preparedBy)}<br>Total vehicles: <strong>${rows.length}</strong>`,
+        ['#', 'Reg. No.', 'Name', 'Role', 'Department', 'Campus', 'Plate', 'Vehicle', 'Type', 'Sticker Expiry'],
+        body
+    );
+}
+
+export interface RecentlyDeletedRow {
+    regNo: string | number;
+    name: string;
+    email?: string | null;
+    role?: string | null;
+    plate?: string | null;
+    vehicle?: string | null;
+    previousStatus?: string | null;
+    deletedByRole: string;
+    deletedByEmail?: string | null;
+    deletedAt: string;
+    reason: string;
+}
+
+export function printRecentlyDeleted(rows: RecentlyDeletedRow[], preparedBy: string) {
+    if (rows.length === 0) {
+        showAlert('There are no recently deleted records to print.', { tone: 'info', title: 'Nothing to print' });
+        return;
+    }
+    const generated = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+    const body = rows
+        .map((r, i) => `<tr>
+            <td class="num">${i + 1}</td>
+            <td class="reg">${esc(r.regNo)}</td>
+            <td><strong>${esc(r.name)}</strong><div class="sub">${esc(r.email || '')}</div></td>
+            <td>${esc(cap(r.role))}</td>
+            <td class="plate">${esc((r.plate || '—').toUpperCase())}<div class="sub">${esc(r.vehicle || '')}</div></td>
+            <td>${esc(cap(r.previousStatus))}</td>
+            <td><strong>${esc(r.deletedByRole)}</strong><div class="sub">${esc(r.deletedByEmail || '')}</div></td>
+            <td>${esc(new Date(r.deletedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }))}</td>
+            <td class="why">${esc(r.reason)}</td>
+        </tr>`)
+        .join('');
+    openPrintWindow(
+        'Recently Deleted - GateQR',
+        'Office of Student Affairs',
+        'Recently Deleted',
+        `Generated: ${esc(generated)}<br>Prepared by: ${esc(preparedBy)}<br>Total records: <strong>${rows.length}</strong>`,
+        ['#', 'Reg. No.', 'Name', 'Role', 'Plate / Vehicle', 'Status Before', 'Deleted By', 'Deleted On', 'Reason'],
+        body,
+        `
+  .sub { font-size: 9.5px; color: #8B6A72; font-weight: 400; margin-top: 2px; }
+  td.why { max-width: 220px; }`
+    );
 }

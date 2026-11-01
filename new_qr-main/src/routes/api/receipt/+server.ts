@@ -36,7 +36,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         const { data: reg } = await supabase
             .from('registration')
-            .select('registration_id, status')
+            .select('registration_id, status').neq('status', 'deleted')
             .eq('user_id', user.user_id)
             .order('created_at', { ascending: false })
             .limit(1)

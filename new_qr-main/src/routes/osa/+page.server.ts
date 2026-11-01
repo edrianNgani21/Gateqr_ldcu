@@ -37,7 +37,7 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
                         color,
                         type
                     )
-                `)
+                `).neq('status', 'deleted')
                 .order('created_at', { ascending: false }),
             supabase
                 .from('modification_request')

@@ -2,10 +2,24 @@
   import { dialogState, closeDialog } from '$lib/utils/dialog';
 
   let confirmBtn = $state<HTMLButtonElement | null>(null);
+  let promptInput = $state<HTMLTextAreaElement | null>(null);
+  let promptValue = $state('');
 
   $effect(() => {
-    if ($dialogState && confirmBtn) confirmBtn.focus();
+    if (!$dialogState) return;
+    promptValue = '';
+    if ($dialogState.kind === 'prompt' && promptInput) promptInput.focus();
+    else if (confirmBtn) confirmBtn.focus();
   });
+
+  function confirm() {
+    if ($dialogState?.kind === 'prompt') {
+      if (!promptValue.trim()) return;
+      closeDialog(true, promptValue);
+    } else {
+      closeDialog(true);
+    }
+  }
 
   function onKey(e: KeyboardEvent) {
     if (!$dialogState) return;
@@ -25,7 +39,7 @@
   <div class="dlg-overlay" onclick={() => { if (d.kind === 'alert') closeDialog(false); }}>
     <div
       class="dlg-card tone-{d.tone}"
-      role={d.kind === 'confirm' ? 'alertdialog' : 'dialog'}
+      role={d.kind === 'alert' ? 'dialog' : 'alertdialog'}
       aria-modal="true"
       aria-labelledby="app-dialog-title"
       aria-describedby="app-dialog-message"
@@ -48,17 +62,60 @@
       {#if d.detail}
         <p class="dlg-detail">{d.detail}</p>
       {/if}
+      {#if d.kind === 'prompt'}
+        <label class="dlg-input-label" for="app-dialog-input">{d.inputLabel} <span class="dlg-req">*</span></label>
+        <textarea
+          id="app-dialog-input"
+          class="dlg-input"
+          rows="3"
+          placeholder={d.inputPlaceholder}
+          bind:this={promptInput}
+          bind:value={promptValue}
+        ></textarea>
+      {/if}
       <div class="dlg-actions">
-        {#if d.kind === 'confirm'}
+        {#if d.kind !== 'alert'}
           <button type="button" class="dlg-btn dlg-cancel" onclick={() => closeDialog(false)}>{d.cancelLabel}</button>
         {/if}
-        <button type="button" class="dlg-btn dlg-confirm" bind:this={confirmBtn} onclick={() => closeDialog(true)}>{d.confirmLabel}</button>
+        <button
+          type="button"
+          class="dlg-btn dlg-confirm"
+          bind:this={confirmBtn}
+          onclick={confirm}
+          disabled={d.kind === 'prompt' && !promptValue.trim()}
+        >{d.confirmLabel}</button>
       </div>
     </div>
   </div>
 {/if}
 
 <style>
+  .dlg-input-label {
+    display: block;
+    margin: 1rem 0 0.35rem;
+    text-align: left;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #475569;
+  }
+  .dlg-req {
+    color: #dc2626;
+  }
+  .dlg-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.6rem 0.75rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+  }
+  .dlg-input:focus {
+    outline: none;
+    border-color: var(--tone);
+    box-shadow: 0 0 0 3px var(--tone-soft);
+  }
   .dlg-overlay {
     position: fixed;
     inset: 0;
@@ -154,6 +211,7 @@
     border: none;
   }
   .tone-info .dlg-confirm { background: linear-gradient(135deg, #7a1734 0%, #4a121e 100%); }
+  .dlg-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 
   @media (max-width: 400px) {
     .dlg-actions { flex-direction: column-reverse; }

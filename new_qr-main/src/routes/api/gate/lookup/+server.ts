@@ -103,6 +103,11 @@ export const GET: RequestHandler = async ({ request, url }) => {
             return json({ registered: false }, { status: 404 });
         }
 
+        // In OSA's Recently Deleted: the QR no longer gives access
+        if (reg.status === 'deleted') {
+            return json({ registered: false, deleted: true, message: 'This account has been recently deleted. Access denied.' }, { status: 403 });
+        }
+
         // Check if there is an approved change vehicle request (which means QR should be deactivated until sticker release)
         const { data: activeChange } = await supabase
             .from('modification_request')

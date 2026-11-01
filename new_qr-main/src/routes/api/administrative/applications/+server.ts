@@ -66,7 +66,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     email,
                     user_id
                 )
-            `)
+            `).neq('status', 'deleted')
             .eq('registration_id', registration_id)
             .eq('department_id', departmentIdForAuth)
             .single();

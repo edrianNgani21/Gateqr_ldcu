@@ -1,7 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import jwt from 'jsonwebtoken';
+import { env } from '$env/dynamic/private';
 import { supabase } from '$lib/server/supabase';
-import bcrypt from 'bcryptjs';
+import { sendEmail } from '$lib/server/email';
+import { EMAIL_CHANGE_PURPOSE, EMAIL_CHANGE_TTL_MINUTES } from '$lib/server/emailChange';
 
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user) {
@@ -11,7 +14,7 @@ export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: user, error } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, created_at, is_active, security_pin_hash')
+            .select('user_id, email, user_type, identification, created_at, is_active, auth_user_id')
             .eq('user_id', locals.user.user_id)
             .single();
 
@@ -25,7 +28,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             identification: user.identification,
             created_at: user.created_at,
             is_active: user.is_active,
-            has_pin: Boolean(user.security_pin_hash)
+            google_linked: Boolean(user.auth_user_id)
         });
     } catch (error) {
         console.error('[Settings GET error]:', error);
@@ -33,19 +36,27 @@ export const GET: RequestHandler = async ({ locals }) => {
     }
 };
 
-export const POST: RequestHandler = async ({ request, locals }) => {
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+export const POST: RequestHandler = async ({ request, locals, url }) => {
     if (!locals.user) {
         return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     try {
         const body = await request.json();
-        const { action } = body;
 
-        // Fetch current user record
+        if (body.action !== 'request_email_change') {
+            return json({ error: 'Invalid action specified' }, { status: 400 });
+        }
+
         const { data: user, error: fetchError } = await supabase
             .from('users')
-            .select('user_id, email, security_pin_hash')
+            .select('user_id, email')
             .eq('user_id', locals.user.user_id)
             .single();
 
@@ -53,84 +64,52 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'User account not found' }, { status: 404 });
         }
 
-        if (action === 'set_pin') {
-            const { pin, current_pin } = body;
-
-            if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
-                return json({ error: 'PIN must be exactly 4 digits (e.g. 1234)' }, { status: 400 });
-            }
-
-            // If user already has a PIN, verify current PIN before allowing change
-            if (user.security_pin_hash) {
-                if (!current_pin || typeof current_pin !== 'string' || !bcrypt.compareSync(current_pin, user.security_pin_hash)) {
-                    return json({ error: 'Current 4-digit PIN is incorrect' }, { status: 400 });
-                }
-            }
-
-            const pinHash = bcrypt.hashSync(pin, 10);
-
-            const { error: updateError } = await supabase
-                .from('users')
-                .update({ security_pin_hash: pinHash })
-                .eq('user_id', user.user_id);
-
-            if (updateError) throw updateError;
-
-            return json({ message: user.security_pin_hash ? '4-Digit PIN updated successfully' : '4-Digit PIN created successfully' });
+        const newEmail = typeof body.new_email === 'string' ? body.new_email.trim().toLowerCase() : '';
+        if (!EMAIL_PATTERN.test(newEmail)) {
+            return json({ error: 'Please enter a valid email address.' }, { status: 400 });
+        }
+        if (newEmail === user.email.toLowerCase()) {
+            return json({ error: 'That is already your current email.' }, { status: 400 });
         }
 
-        if (action === 'change_password') {
-            const { pin, new_password } = body;
-
-            if (!new_password || typeof new_password !== 'string' || new_password.trim().length < 6) {
-                return json({ error: 'New password must be at least 6 characters long' }, { status: 400 });
-            }
-
-            // If user has a 4-digit PIN set up, require PIN confirmation
-            if (user.security_pin_hash) {
-                if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
-                    return json({ error: 'Please enter your 4-digit security PIN' }, { status: 400 });
-                }
-
-                if (!bcrypt.compareSync(pin, user.security_pin_hash)) {
-                    return json({ error: 'Incorrect 4-digit security PIN' }, { status: 400 });
-                }
-            } else {
-                return json({
-                    error: 'Please set your 4-digit security PIN first before changing your password'
-                }, { status: 400 });
-            }
-
-            const newPasswordHash = bcrypt.hashSync(new_password.trim(), 10);
-
-            const { error: updateError } = await supabase
-                .from('users')
-                .update({ password_hash: newPasswordHash })
-                .eq('user_id', user.user_id);
-
-            if (updateError) throw updateError;
-
-            console.log(`[Settings] Password successfully changed for ${user.email}`);
-            return json({ success: true, message: 'Password updated successfully' });
+        const { data: taken } = await supabase.from('users').select('user_id').ilike('email', newEmail).limit(1);
+        if (taken && taken.length > 0) {
+            return json({ error: 'That email is already used by another account.' }, { status: 400 });
         }
 
-        if (action === 'verify_pin') {
-            const { pin } = body;
-            if (!pin || typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
-                return json({ error: 'Please enter a valid 4-digit PIN' }, { status: 400 });
-            }
-            if (!user.security_pin_hash) {
-                return json({ error: 'No 4-digit security PIN has been set yet' }, { status: 400 });
-            }
-            if (!bcrypt.compareSync(pin, user.security_pin_hash)) {
-                return json({ error: 'Incorrect 4-digit security PIN' }, { status: 400 });
-            }
-            return json({ success: true, message: 'PIN verified successfully' });
+        // Stateless confirmation: the signed link carries the request and is only valid while the
+        // account still has the old email, so it cannot be used twice.
+        const token = jwt.sign(
+            { purpose: EMAIL_CHANGE_PURPOSE, uid: user.user_id, old_email: user.email, new_email: newEmail },
+            env.JWT_SECRET as string,
+            { expiresIn: `${EMAIL_CHANGE_TTL_MINUTES}m` }
+        );
+        const base = (env.PUBLIC_APP_URL || env.ORIGIN || url.origin).replace(/\/+$/, '');
+        const link = `${base}/auth/confirm-email-change?token=${encodeURIComponent(token)}`;
+
+        const subject = 'Confirm your GateQR email change';
+        const text =
+            `A request was made to change the GateQR sign-in email of this account.\n\n` +
+            `Current email: ${user.email}\n` +
+            `New email: ${newEmail}\n\n` +
+            `To approve, open this link within ${EMAIL_CHANGE_TTL_MINUTES} minutes:\n${link}\n\n` +
+            `After the change, sign in with the Google account of ${newEmail}. This Google account will no longer work.\n` +
+            `If you did not ask for this, ignore this email and your email stays the same.`;
+        const html =
+            `<p style="margin:0 0 12px;">A request was made to change the GateQR sign-in email of this account.</p>` +
+            `<p style="margin:0 0 12px;"><strong>Current email:</strong> ${escapeHtml(user.email)}<br><strong>New email:</strong> ${escapeHtml(newEmail)}</p>` +
+            `<p style="margin:0 0 16px;"><a href="${link}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:#7A1734;color:#ffffff;font-weight:700;text-decoration:none;">Review and confirm the change</a></p>` +
+            `<p style="margin:0 0 12px;">The link expires in ${EMAIL_CHANGE_TTL_MINUTES} minutes. After the change, sign in with the Google account of <strong>${escapeHtml(newEmail)}</strong>; this Google account will no longer work.</p>` +
+            `<p style="margin:0;">If you did not ask for this, ignore this email and your email stays the same.</p>`;
+
+        const sent = await sendEmail(user.email, subject, text, html);
+        if (sent?.error) {
+            return json({ error: 'Could not send the confirmation email. Please try again.' }, { status: 502 });
         }
 
-        return json({ error: 'Invalid action specified' }, { status: 400 });
+        return json({ message: `Confirmation sent to ${user.email}. Open it within ${EMAIL_CHANGE_TTL_MINUTES} minutes to finish the change.` });
     } catch (error) {
         console.error('[Settings POST error]:', error);
-        return json({ error: 'Failed to process security request' }, { status: 500 });
+        return json({ error: 'Failed to process the request' }, { status: 500 });
     }
 };

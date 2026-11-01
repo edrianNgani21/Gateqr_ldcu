@@ -46,7 +46,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     color,
                     type
                 )
-            `)
+            `).neq('status', 'deleted')
             .eq('user_id', userId)
             .order('created_at', { ascending: false })
             .limit(1)

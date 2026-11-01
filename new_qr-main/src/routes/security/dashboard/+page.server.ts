@@ -96,6 +96,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                     logged_status,
                     flagged_alert,
                     reason,
+                    deleted_owner_name,
+                    deleted_plate,
                     campus,
                     campus_gate,
                     vehicle_information:vehicle_information_id(
@@ -291,6 +293,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         const alertLabels: Record<string, string> = {
             double_access: 'Double Access',
+            deleted: 'Deleted Account',
             wrong_campus_exit: 'Wrong Campus Exit',
             blocked: 'Blocked',
             revoked: 'Revoked QR',
@@ -304,8 +307,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                 // vehicle_log.flagged_alert, shown as the alert name
                 alert: alertLabels[r.flagged_alert] || 'Denied',
                 reason: r.reason || (r.logged_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.logged_status) || 'Flagged Alert',
-                plate: r.vehicle_information?.plate_number || 'No Plate',
-                name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || 'Guest / Unregistered',
+                plate: r.vehicle_information?.plate_number || r.deleted_plate || 'No Plate',
+                name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || r.deleted_owner_name || 'Guest / Unregistered',
                 role: r.registration?.role ? (r.registration.role.charAt(0).toUpperCase() + r.registration.role.slice(1)) : 'Visitor',
                 campus: (() => {
                     const raw = (r.campus || r.campus_gate || 'Main Campus').trim();

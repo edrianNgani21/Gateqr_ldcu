@@ -54,7 +54,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                         color,
                         type
                     )
-                `)
+                `).neq('status', 'deleted')
                 .in('status', ['approved', 'distributed', 'completed', 'security_checked', 'revoked', 'osa_validated', 'rejected'])
                 .order('created_at', { ascending: false }),
             supabase
@@ -68,7 +68,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                 .lt('check_in', tomorrow),
             supabase
                 .from('registration')
-                .select('*', { count: 'exact', head: true })
+                .select('*', { count: 'exact', head: true }).neq('status', 'deleted')
                 .in('status', ['approved', 'distributed', 'completed', 'security_checked']),
             supabase
                 .from('incident_report')

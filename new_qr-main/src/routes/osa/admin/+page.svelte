@@ -14,8 +14,6 @@
 
     let showForm = $state(false);
     let adminEmail = $state('');
-    let adminPassword = $state('');
-    let adminPin = $state('');
     let adminType = $state('Office of Student Affairs');
     let selectedDepartmentId = $state('');
     let loading = $state(false);
@@ -23,8 +21,6 @@
     let success = $state('');
     let admins = $state<any[]>([]);
     let loadingAdmins = $state(false);
-    let hasPin = $state(false);
-    let checkingPin = $state(true);
 
     const isPrimaryAdmin = $derived((data?.userEmail || '').trim().toLowerCase() === 'aluban98304@liceo.edu.ph');
 
@@ -110,21 +106,6 @@
         return admin?.user_type || 'Admin';
     }
 
-    async function checkPinStatus() {
-        checkingPin = true;
-        try {
-            const res = await fetch('/api/auth/settings');
-            if (res.ok) {
-                const sData = await res.json();
-                hasPin = Boolean(sData.has_pin);
-            }
-        } catch (err) {
-            console.error('Error checking PIN status:', err);
-        } finally {
-            checkingPin = false;
-        }
-    }
-
     async function loadAdmins() {
         loadingAdmins = true;
         try {
@@ -140,10 +121,9 @@
         }
     }
 
-    // Load admins & check PIN on component mount & subscribe to realtime updates
+    // Load admins on component mount & subscribe to realtime updates
     $effect(() => {
         loadAdmins();
-        checkPinStatus();
         const channel = supabaseClient
             .channel('osa-admins-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
@@ -172,16 +152,6 @@
             return;
         }
 
-        if (adminPassword && adminPassword.length < 6) {
-            error = 'Password must be at least 6 characters long';
-            return;
-        }
-
-        if (hasPin && (!adminPin || !/^\d{4}$/.test(adminPin.trim()))) {
-            error = 'Please enter your 4-digit security PIN to authorize adding this admin account';
-            return;
-        }
-
         loading = true;
         error = '';
         success = '';
@@ -193,8 +163,6 @@
                 body: JSON.stringify({
                     email: adminEmail.trim(),
                     user_type: adminType,
-                    password: adminPassword.trim() || 'Admin123!',
-                    pin: adminPin.trim(),
                     department_id: selectedDepartmentId ? parseInt(selectedDepartmentId) : null
                 })
             });
@@ -202,8 +170,6 @@
             if (res.ok) {
                 success = 'Admin added successfully!';
                 adminEmail = '';
-                adminPassword = '';
-                adminPin = '';
                 selectedDepartmentId = '';
                 showForm = false;
                 loadAdmins(); // Reload admin list
@@ -221,8 +187,6 @@
     function cancelForm() {
         showForm = false;
         adminEmail = '';
-        adminPassword = '';
-        adminPin = '';
         selectedDepartmentId = '';
         error = '';
         success = '';
@@ -287,7 +251,6 @@
     <NavBar title="Accounts" />
     
     <div class="admin-container">
-
         {#if success}
             <div class="alert alert-success">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -324,18 +287,6 @@
                 </p>
             </div>
         {:else if !showForm}
-            {#if !checkingPin && !hasPin}
-                <div class="pin-warning-alert">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                    </svg>
-                    <div>
-                        <strong>4-Digit Security PIN Required:</strong>
-                        <span>You must create your 4-digit Security PIN first in Admin Settings before adding new admin accounts.</span>
-                    </div>
-                </div>
-            {/if}
-
             <div class="empty-state-card">
                 <div class="empty-icon">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -346,8 +297,8 @@
                     </svg>
                 </div>
                 <h2>No Admin Creation in Progress</h2>
-                <p>Click the button below to create a new admin account (4-digit PIN required)</p>
-                <button class="primary-btn" onclick={() => showForm = true} disabled={!hasPin}>
+                <p>Click the button below to create a new admin account. They sign in with the Google account of that email.</p>
+                <button class="primary-btn" onclick={() => showForm = true}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/>
                         <line x1="5" y1="12" x2="19" y2="12"/>
@@ -359,7 +310,7 @@
             <div class="form-card">
                 <div class="form-header">
                     <h2>New Admin Details</h2>
-                    <p class="form-subtitle">Fill in the information below and authorize with your 4-digit security PIN to proceed</p>
+                    <p class="form-subtitle">Enter their Google email and admin type. No password: they sign in with Google, and a welcome email explains how.</p>
                 </div>
                 
                 <div class="form-grid">
@@ -442,72 +393,24 @@
                         </div>
                     {/if}
 
-                    <div class="form-group full-width">
-                        <label for="adminPassword">
-                            <span class="label-text">Account Password</span>
-                            <span class="label-optional">(optional - default: Admin123!)</span>
-                        </label>
-                        <div class="input-wrapper">
-                            <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            <input 
-                                id="adminPassword" 
-                                type="password" 
-                                bind:value={adminPassword} 
-                                placeholder="Default: Admin123! (or set custom password)"
-                                disabled={loading}
-                                class="form-input"
-                            />
-                        </div>
-                    </div>
-
-                    {#if hasPin}
-                    <div class="form-group full-width">
-                        <label for="adminPin">
-                            <span class="label-text">Authorize with Your 4-Digit Security PIN</span>
-                            <span class="label-required">*</span>
-                        </label>
-                        <div class="input-wrapper">
-                            <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <circle cx="12" cy="16" r="1.5"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            <input 
-                                id="adminPin" 
-                                type="password" 
-                                maxlength="4"
-                                pattern="[0-9]*"
-                                inputmode="numeric"
-                                bind:value={adminPin} 
-                                placeholder="••••"
-                                disabled={loading}
-                                class="form-input pin-input"
-                            />
-                        </div>
-                        <span class="field-hint">Enter your 4-digit security PIN set on your account to authorize creating this admin.</span>
-                    </div>
-                    {/if}
                 </div>
 
                 <div class="form-actions">
                     <button class="btn-secondary" onclick={cancelForm} disabled={loading}>
                         Cancel
                     </button>
-                    <button class="btn-primary" onclick={handleSubmit} disabled={loading || !adminEmail || (hasPin && adminPin.length < 4)}>
+                    <button class="btn-primary" onclick={handleSubmit} disabled={loading || !adminEmail}>
                         {#if loading}
                             <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                             </svg>
-                            Authorizing...
+                            Adding...
                         {:else}
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            Authorize & Add Admin
+                            Add Admin
                         {/if}
                     </button>
                 </div>
@@ -1282,38 +1185,10 @@
         }
     }
 
-    .pin-input {
-        letter-spacing: 0.35rem;
-        font-family: monospace;
-        font-size: 1.15rem;
-        font-weight: 700;
-    }
-
     .field-hint {
         font-size: 0.78rem;
         color: var(--text-secondary);
         margin-top: 0.25rem;
-    }
-
-    .pin-warning-alert {
-        display: flex;
-        align-items: center;
-        gap: 0.85rem;
-        padding: 1rem 1.25rem;
-        background: #FFFBEB;
-        border: 1px solid #FCD34D;
-        border-left: 4px solid #D97706;
-        border-radius: 12px;
-        color: #92400E;
-        font-size: 0.88rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .pin-warning-alert strong {
-        display: block;
-        color: #78350F;
-        font-weight: 700;
-        margin-bottom: 0.15rem;
     }
 
     .restriction-notice-card {
