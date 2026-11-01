@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ params, locals }) => {
             .eq('notification_id', notificationId);
 
         if (locals.user.role !== 'osa') {
-            updateQuery = updateQuery.eq('user_id', userId);
+            updateQuery = updateQuery.eq('recipient_user_id', userId);
         }
 
         const { error } = await updateQuery;

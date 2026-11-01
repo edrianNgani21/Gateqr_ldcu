@@ -30,48 +30,47 @@ export const load: PageServerLoad = async ({ locals }) => {
             campusResults,
             violationRowsRes
         ] = await Promise.all([
-            // 1. All currently active inside vehicles (where check_out is null)
+            // 1. All currently active inside vehicles (where exited_at is null)
             supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select(`
-                    vehicle_log_id,
-                    check_in,
-                    check_out,
-                    logged_status,
-                    vip_access,
+                    gate_log_id,
+                    entered_at,
+                    exited_at,
+                    presence_status,
+                    is_vip,
                     guest_id,
-                    campus,
                     campus_gate,
                     registration_id,
-                    vehicle_information:vehicle_information_id(
-                        type
+                    vehicle:vehicle_id(
+                        vehicle_type
                     ),
                     registration:registration_id(
                         role,
-                        vehicle_information:vehicle_information_id(
-                            type
+                        vehicle:vehicle_id(
+                            vehicle_type
                         )
                     )
                 `)
-                .is('check_out', null),
+                .is('exited_at', null),
 
             // 2. Today's vehicle entries for hourly traffic chart and role breakdown
             supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select(`
-                    vehicle_log_id,
-                    check_in,
-                    check_out,
+                    gate_log_id,
+                    entered_at,
+                    exited_at,
                     created_at,
-                    logged_status,
-                    reason,
+                    presence_status,
+                    note,
                     guest_id,
-                    vip_access,
-                    campus,
-                    vehicle_information:vehicle_information_id(
+                    is_vip,
+                    campus_gate,
+                    vehicle:vehicle_id(
                         brand,
                         plate_number,
-                        type,
+                        vehicle_type,
                         color
                     ),
                     registration:registration_id(
@@ -80,30 +79,29 @@ export const load: PageServerLoad = async ({ locals }) => {
                         role
                     )
                 `)
-                .or(`check_in.gte.${today},created_at.gte.${today}`)
+                .or(`entered_at.gte.${today},created_at.gte.${today}`)
                 // Refused gate attempts are alerts, not visits
-                .neq('logged_status', 'denied')
-                .order('check_in', { ascending: false })
+                .neq('presence_status', 'denied')
+                .order('entered_at', { ascending: false })
                 .limit(200),
 
             // 3. Flagged alerts / anomalies
             supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select(`
-                    vehicle_log_id,
-                    check_in,
+                    gate_log_id,
+                    entered_at,
                     created_at,
-                    logged_status,
+                    presence_status,
                     flagged_alert,
-                    reason,
-                    deleted_owner_name,
-                    deleted_plate,
-                    campus,
+                    note,
+                    owner_name_snapshot,
+                    plate_snapshot,
                     campus_gate,
-                    vehicle_information:vehicle_information_id(
+                    vehicle:vehicle_id(
                         brand,
                         plate_number,
-                        type
+                        vehicle_type
                     ),
                     registration:registration_id(
                         first_name,
@@ -112,15 +110,15 @@ export const load: PageServerLoad = async ({ locals }) => {
                     )
                 `)
                 // main.py sets flagged_alert on every gate alert; 'denied' covers rows saved before that column existed
-                .or('flagged_alert.not.is.null,logged_status.eq.denied')
-                .order('check_in', { ascending: false })
+                .or('flagged_alert.not.is.null,presence_status.eq.denied')
+                .order('entered_at', { ascending: false })
                 .limit(20),
 
             // 4. Incident report & registration counts
             Promise.all([
                 supabase.from('incident_report').select('*', { count: 'exact', head: true }),
                 supabase.from('incident_report').select('*', { count: 'exact', head: true }).or('status.eq.pending,status.eq.Pending'),
-                supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'distributed', 'completed', 'security_checked'])
+                supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['approved', 'distributed', 'completed', 'security_checked'])
             ]),
 
             // 5. Parking capacity & active events for all 3 campuses
@@ -131,8 +129,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                     supabase
                         .from('parking_capacity')
                         .select('*')
-                        .or(`campus.eq.${name},campus_gate.eq.${gate}`)
-                        .order('date_time', { ascending: false })
+                        .eq('campus_gate', gate)
+                        .order('recorded_at', { ascending: false })
                         .limit(1)
                         .maybeSingle(),
                     supabase
@@ -140,7 +138,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         .select('*')
                         .eq('campus_gate', gate)
                         .eq('is_active', true)
-                        .gt('end_date', nowIso)
+                        .gt('ends_at', nowIso)
                         .order('created_at', { ascending: false })
                         .limit(1)
                         .maybeSingle()
@@ -155,10 +153,10 @@ export const load: PageServerLoad = async ({ locals }) => {
                     blocklist_id,
                     violation_level,
                     reason,
-                    block_by,
-                    recorded_at,
+                    blocked_by,
+                    blocked_at,
                     blocked_until,
-                    vehicle_information:vehicle_id(
+                    vehicle:vehicle_id(
                         plate_number
                     ),
                     registration:registration_id(
@@ -167,7 +165,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                         role
                     )
                 `)
-                .order('recorded_at', { ascending: false })
+                .order('blocked_at', { ascending: false })
                 .limit(20)
         ]);
 
@@ -198,15 +196,15 @@ export const load: PageServerLoad = async ({ locals }) => {
         };
 
         activeInsideLogs.forEach((log: any) => {
-            if (log.check_out) return;
-            const st = (log.logged_status || '').toLowerCase();
+            if (log.exited_at) return;
+            const st = (log.presence_status || '').toLowerCase();
             if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited' || st === 'exited_campus') return;
 
-            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || Boolean(log.guest_id) || Boolean(log.vip_access) || st === 'guest' || st === 'vip';
-            const vehicleKey = isGuestOrVip ? `log_${log.vehicle_log_id}` : `reg_${log.registration_id}`;
+            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || Boolean(log.guest_id) || Boolean(log.is_vip) || st === 'guest' || st === 'vip';
+            const vehicleKey = isGuestOrVip ? `log_${log.gate_log_id}` : `reg_${log.registration_id}`;
 
-            const rawVInfo = Array.isArray(log.vehicle_information) ? log.vehicle_information[0] : log.vehicle_information;
-            const regVInfo = Array.isArray(log.registration?.vehicle_information) ? log.registration?.vehicle_information[0] : log.registration?.vehicle_information;
+            const rawVInfo = Array.isArray(log.vehicle) ? log.vehicle[0] : log.vehicle;
+            const regVInfo = Array.isArray(log.registration?.vehicle) ? log.registration?.vehicle[0] : log.registration?.vehicle;
             const vType = (
                 rawVInfo?.type || 
                 regVInfo?.type || 
@@ -214,7 +212,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             ).toLowerCase();
             const is2W = vType.includes('2') || vType.includes('motorcycle') || vType.includes('bike') || vType.includes('scooter');
 
-            const rawRole = (log.registration?.role || log.role || (log.vip_access ? 'vip' : '')).toLowerCase();
+            const rawRole = (log.registration?.role || log.role || (log.is_vip ? 'vip' : '')).toLowerCase();
             let role = 'student';
             if (log.guest_id && !log.registration) role = 'guest';
             else if (rawRole.includes('faculty')) role = 'faculty';
@@ -223,12 +221,12 @@ export const load: PageServerLoad = async ({ locals }) => {
             else if (rawRole.includes('concessionaire') || rawRole.includes('concecioonaire') || rawRole.includes('concession')) role = 'concessionaire';
             else if (rawRole.includes('supplier')) role = 'supplier';
             else if (rawRole.includes('vps')) role = 'vps';
-            else if (rawRole.includes('vip') || log.vip_access) role = 'vip';
+            else if (rawRole.includes('vip') || log.is_vip) role = 'vip';
             else if (rawRole.includes('student')) role = 'student';
             else if (log.guest_id || st.includes('guest')) role = 'guest';
             else role = 'student';
 
-            const c = (log.campus || log.campus_gate || '').toLowerCase();
+            const c = (log.campus_gate || '').toLowerCase();
             if (c.includes('rnp')) {
                 if (!countedRnp.has(vehicleKey)) {
                     countedRnp.add(vehicleKey);
@@ -261,7 +259,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         const hourlyChart = Array(24).fill(0);
         todayLogs.forEach((log: any) => {
-            const timeStr = log.check_in || log.created_at;
+            const timeStr = log.entered_at || log.created_at;
             if (timeStr) {
                 const hour = new Date(timeStr).getHours();
                 if (hour >= 0 && hour < 24) {
@@ -277,13 +275,13 @@ export const load: PageServerLoad = async ({ locals }) => {
         };
         const violationAlerts = (violationRowsRes.data || []).map((v: any) => {
             const blockedUntil = v.blocked_until ? new Date(v.blocked_until) : null;
-            const by = v.block_by === 'osa_admin' ? 'OSA' : 'Security';
+            const by = v.blocked_by === 'osa_admin' ? 'OSA' : 'Security';
             return {
                 id: `violation-${v.blocklist_id}`,
-                time: v.recorded_at,
+                time: v.blocked_at,
                 alert: 'Violation',
                 reason: `Violation (${by}): ${v.reason}${blockedUntil ? ` - blocked until ${blockedUntil.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' })}` : ''}`,
-                plate: v.vehicle_information?.plate_number || 'No Plate',
+                plate: v.vehicle?.plate_number || 'No Plate',
                 name: `${v.registration?.first_name || ''} ${v.registration?.last_name || ''}`.trim() || 'Unknown',
                 role: v.registration?.role ? (v.registration.role.charAt(0).toUpperCase() + v.registration.role.slice(1)) : '-',
                 campus: 'All Campuses',
@@ -300,25 +298,25 @@ export const load: PageServerLoad = async ({ locals }) => {
             not_registered: 'Not Registered'
         };
         const gateAlerts = flaggedRows
-            .filter((r: any) => r.flagged_alert || r.logged_status === 'denied')
+            .filter((r: any) => r.flagged_alert || r.presence_status === 'denied')
             .map((r: any) => ({
-                id: r.vehicle_log_id,
-                time: r.check_in || r.created_at || new Date().toISOString(),
-                // vehicle_log.flagged_alert, shown as the alert name
+                id: r.gate_log_id,
+                time: r.entered_at || r.created_at || new Date().toISOString(),
+                // gate_log.flagged_alert, shown as the alert name
                 alert: alertLabels[r.flagged_alert] || 'Denied',
-                reason: r.reason || (r.logged_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.logged_status) || 'Flagged Alert',
-                plate: r.vehicle_information?.plate_number || r.deleted_plate || 'No Plate',
-                name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || r.deleted_owner_name || 'Guest / Unregistered',
+                reason: r.note || (r.presence_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.presence_status) || 'Flagged Alert',
+                plate: r.vehicle?.plate_number || r.plate_snapshot || 'No Plate',
+                name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || r.owner_name_snapshot || 'Guest / Unregistered',
                 role: r.registration?.role ? (r.registration.role.charAt(0).toUpperCase() + r.registration.role.slice(1)) : 'Visitor',
                 campus: (() => {
-                    const raw = (r.campus || r.campus_gate || 'Main Campus').trim();
+                    const raw = (r.campus_gate || 'main').trim();
                     const low = raw.toLowerCase();
                     if (low === 'rnp' || low.includes('rnp')) return 'RNP Campus';
                     if (low === 'paseo' || low.includes('paseo')) return 'Paseo Campus';
                     if (low === 'main' || low.includes('main')) return 'Main Campus';
                     return raw.charAt(0).toUpperCase() + raw.slice(1);
                 })(),
-                status: alertLabels[r.flagged_alert] || (r.logged_status === 'denied' ? 'Denied' : 'Flagged')
+                status: alertLabels[r.flagged_alert] || (r.presence_status === 'denied' ? 'Denied' : 'Flagged')
             }));
 
         // Gate events and recorded violations, newest first
@@ -336,7 +334,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         for (const { name, paData, evData } of (campusResults || [])) {
             const presence = name === 'RNP' ? rnpCampusPresence : (name === 'PASEO' ? paseoCampusPresence : mainCampusPresence);
-            const cap = paData?.parking_capacity ?? paData?.capacity ?? 200;
+            const cap = paData?.capacity ?? paData?.capacity ?? 200;
             const occ = presence;
             const avail = Math.max(0, cap - occ);
 
@@ -345,7 +343,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             if (name === 'PASEO') paseoCapacity = { capacity: cap, occupied: occ, available: avail, unoccupied: avail };
 
             if (evData?.event_name) {
-                const evt = { name: evData.event_name, start: evData.start_date, end: evData.end_date };
+                const evt = { name: evData.event_name, start: evData.starts_at, end: evData.ends_at };
                 if (name === 'Main Campus') mainEvent = evt;
                 if (name === 'RNP') rnpEvent = evt;
                 if (name === 'PASEO') paseoEvent = evt;

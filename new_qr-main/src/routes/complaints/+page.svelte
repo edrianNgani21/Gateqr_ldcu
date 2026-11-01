@@ -76,7 +76,7 @@
             });
 
             if (res.ok) {
-                complaints = complaints.filter(c => c.complaint_id !== id);
+                complaints = complaints.filter(c => c.incident_report_id !== id);
             } else {
                 const json = await res.json();
                 showAlert(json.error || 'Failed to delete incident report');
@@ -106,7 +106,7 @@
     </div>
   </div>
 
-  {#if complaints.some(c => c.schedule && c.status !== 'resolved')}
+  {#if complaints.some(c => c.scheduled_at && c.status !== 'resolved')}
     <div class="alert-schedule">
       <div class="alert-icon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -169,7 +169,7 @@
       {:else}
         <div class="cards-list">
           {#each complaints as c}
-            <div class="complaint-card" class:card-scheduled={c.schedule && c.status !== 'resolved'} class:card-resolved={c.status === 'resolved'}>
+            <div class="complaint-card" class:card-scheduled={c.scheduled_at && c.status !== 'resolved'} class:card-resolved={c.status === 'resolved'}>
               <div class="card-header">
                 <span class="date-time">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -177,7 +177,7 @@
                 </span>
                 {#if c.status === 'resolved'}
                   <span class="status-badge resolved">✓ Resolved</span>
-                {:else if c.schedule}
+                {:else if c.scheduled_at}
                   <span class="status-badge scheduled">📅 Scheduled</span>
                 {:else}
                   <span class="status-badge pending">Pending Review</span>
@@ -186,12 +186,12 @@
 
               <div class="card-body">{c.message}</div>
 
-              {#if c.schedule && c.status !== 'resolved'}
+              {#if c.scheduled_at && c.status !== 'resolved'}
                 <div class="schedule-banner">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                   <div>
                     <span class="schedule-label">Meeting scheduled for</span>
-                    <strong>{new Date(c.schedule).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
+                    <strong>{new Date(c.scheduled_at).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
                   </div>
                 </div>
               {/if}
@@ -199,13 +199,13 @@
               <div class="card-footer">
                 {#if c.status === 'resolved'}
                   <span class="resolved-note">This incident report has been resolved.</span>
-                {:else if !c.schedule}
+                {:else if !c.scheduled_at}
                   <span class="pending-note">Awaiting security review</span>
                 {:else}
                   <span class="pending-note">Please attend your scheduled meeting</span>
                 {/if}
                 {#if c.status !== 'resolved'}
-                  <button class="btn-delete" onclick={() => deleteComplaint(c.complaint_id)}>
+                  <button class="btn-delete" onclick={() => deleteComplaint(c.incident_report_id)}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     Delete
                   </button>

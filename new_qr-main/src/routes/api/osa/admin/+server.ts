@@ -19,8 +19,8 @@ async function createNotification(
 ) {
     try {
         await supabase.from('notification').insert({
-            user_id: userId,
-            activity: message,
+            recipient_user_id: userId,
+            title: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -46,7 +46,7 @@ async function notifyAllOsa(
     metadata?: any
 ) {
     try {
-        const osaFilters = ['user_type.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
+        const osaFilters = ['account_role.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
         const { data: osaUsers } = await supabase
             .from('users')
             .select('user_id, email')
@@ -58,8 +58,8 @@ async function notifyAllOsa(
 
         if (uniqueOsaUsers.length > 0) {
             const notifs = uniqueOsaUsers.map(u => ({
-                user_id: u.user_id,
-                activity: message,
+                recipient_user_id: u.user_id,
+                title: message,
                 notification_type: notificationType,
                 message: message,
                 actor_id: actorId || null,
@@ -230,14 +230,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }, { status: 403 });
         }
 
-        const { email, user_type, department_id } = await request.json();
+        const { email, account_role, department_id } = await request.json();
 
-        if (!email || !user_type) {
+        if (!email || !account_role) {
             return json({ error: 'Missing required fields: email and admin type are required' }, { status: 400 });
         }
 
-        // Map incoming adminType to valid PostgreSQL types and identification
-        const cleanType = (user_type || '').toString().trim().toLowerCase();
+        // Map incoming adminType to valid PostgreSQL types and account_type
+        const cleanType = (account_role || '').toString().trim().toLowerCase();
         let dbUserType: string = 'osa';
         let dbIdentification: string = 'admin';
 
@@ -269,8 +269,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // Create new admin user in users table
         const insertPayload: any = {
             email: email.trim().toLowerCase(),
-            user_type: dbUserType,
-            identification: dbIdentification,
+            account_role: dbUserType,
+            account_type: dbIdentification,
             is_active: true
         };
         if (department_id) {
@@ -283,8 +283,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .select(`
                 user_id, 
                 email, 
-                user_type, 
-                identification, 
+                account_role, 
+                account_type, 
                 department_id,
                 department:department_id(*),
                 is_active, 
@@ -307,7 +307,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 'create_admin',
                 'users',
                 newUser.user_id,
-                { user_type: dbUserType, identification: dbIdentification, department_id }
+                { account_role: dbUserType, account_type: dbIdentification, department_id }
             );
 
             // Welcome email: role, login email and how to sign in with Google
@@ -333,14 +333,14 @@ export const GET: RequestHandler = async ({ locals }) => {
             .select(`
                 user_id, 
                 email, 
-                user_type, 
-                identification, 
+                account_role, 
+                account_type, 
                 department_id,
                 department:department_id(*),
                 is_active, 
                 created_at
             `)
-            .or('user_type.in.(osa,safety_security,dean,"Academic Head","Office Head"),identification.in.(admin,faculty,staff),department_id.not.is.null')
+            .or('account_role.in.(osa,safety_security,dean,"Academic Head","Office Head"),account_type.in.(admin,faculty,staff),department_id.not.is.null')
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -381,7 +381,7 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
             .from('users')
             .update({ is_active })
             .eq('user_id', user_id)
-            .select('user_id, email, user_type, is_active')
+            .select('user_id, email, account_role, is_active')
             .single();
 
         if (error) throw error;
@@ -399,7 +399,7 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
                     'users',
                     updatedUser.user_id,
                     updatedUser.user_id,
-                    { user_type: updatedUser.user_type }
+                    { account_role: updatedUser.account_role }
                 );
             }
         }
@@ -436,7 +436,7 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         // Get user info before deletion for notification
         const { data: userToDelete } = await supabase
             .from('users')
-            .select('user_id, email, user_type')
+            .select('user_id, email, account_role')
             .eq('user_id', user_id)
             .single();
 
@@ -457,7 +457,7 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
                 'delete_admin',
                 'users',
                 user_id,
-                { user_type: userToDelete.user_type }
+                { account_role: userToDelete.account_role }
             );
         }
 

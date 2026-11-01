@@ -22,19 +22,19 @@ export const GET: RequestHandler = async ({ request, url }) => {
 
         // First try to lookup by unique alphanumeric code (new format)
         const { data: uniqueCodeRows } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 user:user_id(email),
                 department:department_id(department_id, academic_department, administrative_department),
-                vehicle_information:vehicle_information_id(
+                vehicle:vehicle_id(
                     plate_number,
                     brand,
                     color,
-                    type
+                    vehicle_type
                 )
             `)
-            .eq('qr_unique_code', qr)
+            .eq('qr_code', qr)
             .maybeSingle();
 
         if (uniqueCodeRows) {
@@ -49,16 +49,16 @@ export const GET: RequestHandler = async ({ request, url }) => {
             if (regIdMatch) {
                 const autoId = parseInt(regIdMatch[1]);
                 const { data: rows } = await supabase
-                    .from('registration')
+                    .from('sticker_application')
                     .select(`
                         *,
                         user:user_id(email),
                         department:department_id(department_id, academic_department, administrative_department),
-                        vehicle_information:vehicle_information_id(
+                        vehicle:vehicle_id(
                             plate_number,
                             brand,
                             color,
-                            type
+                            vehicle_type
                         )
                     `)
                     .eq('registration_id', autoId)
@@ -74,16 +74,16 @@ export const GET: RequestHandler = async ({ request, url }) => {
             } else {
                 // Direct registration_id lookup
                 const { data: rows } = await supabase
-                    .from('registration')
+                    .from('sticker_application')
                     .select(`
                         *,
                         user:user_id(email),
                         department:department_id(department_id, academic_department, administrative_department),
-                        vehicle_information:vehicle_information_id(
+                        vehicle:vehicle_id(
                             plate_number,
                             brand,
                             color,
-                            type
+                            vehicle_type
                         )
                     `)
                     .eq('registration_id', qr)
@@ -110,7 +110,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
 
         // Check if there is an approved change vehicle request (which means QR should be deactivated until sticker release)
         const { data: activeChange } = await supabase
-            .from('modification_request')
+            .from('profile_update_request')
             .select('status')
             .eq('registration_id', reg.registration_id)
             .eq('status', 'approved')
@@ -121,32 +121,32 @@ export const GET: RequestHandler = async ({ request, url }) => {
         }
 
         const { data: logRows } = await supabase
-            .from('vehicle_log')
-            .select('vehicle_log_id, check_in, check_out')
+            .from('gate_log')
+            .select('gate_log_id, entered_at, exited_at')
             .eq('registration_id', reg.registration_id)
-            .order('check_in', { ascending: false })
+            .order('entered_at', { ascending: false })
             .limit(1)
             .single();
 
         let lastLog = null;
-        let logged_status = 'Outside'; // Default to outside
+        let presence_status = 'Outside'; // Default to outside
 
         if (logRows) {
             const log = logRows;
             lastLog = {
-                log_id: log.vehicle_log_id,
-                type: log.check_out ? 'out' : 'in',
-                date: new Date(log.check_in).toISOString().slice(0, 10), // YYYY-MM-DD
+                log_id: log.gate_log_id,
+                type: log.exited_at ? 'out' : 'in',
+                date: new Date(log.entered_at).toISOString().slice(0, 10), // YYYY-MM-DD
                 time: new Intl.DateTimeFormat('en-US', {
                     hour: '2-digit', minute: '2-digit', hour12: false
-                }).format(new Date(log.check_in)),
+                }).format(new Date(log.entered_at)),
             };
 
             // Determine if vehicle is currently inside based on last log
-            logged_status = log.check_out ? 'Outside' : 'Inside';
+            presence_status = log.exited_at ? 'Outside' : 'Inside';
         }
 
-        return json({ registered: true, registration: reg, lastLog, logged_status });
+        return json({ registered: true, registration: reg, lastLog, presence_status });
     } catch (error) {
         console.error('[Gate] Lookup error:', error);
         return json({ error: 'Internal Server Error' }, { status: 500 });

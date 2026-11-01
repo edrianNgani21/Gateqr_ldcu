@@ -12,7 +12,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: 'security-dashboard-realtime',
-      tables: ['vehicle_log', 'incident_report', 'parking_capacity', 'registration', 'blocklist'],
+      tables: ['gate_log', 'incident_report', 'parking_capacity', 'sticker_application', 'blocklist'],
       onStatus: (live) => (isLive = live)
     });
   });

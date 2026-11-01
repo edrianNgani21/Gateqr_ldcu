@@ -17,8 +17,8 @@ async function createNotification(
 ) {
     try {
         await supabaseAdmin.from('notification').insert({
-            user_id: userId,
-            activity: message,
+            recipient_user_id: userId,
+            title: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -113,8 +113,8 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Get registration
         let regQuery = supabaseAdmin
-            .from('registration')
-            .select('*, vehicle_information:vehicle_information_id(*)').neq('status', 'deleted')
+            .from('sticker_application')
+            .select('*, vehicle:vehicle_id(*)').neq('status', 'deleted')
             .eq('user_id', userData.user_id);
 
         if (registration_id) {
@@ -132,7 +132,7 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Check if there is already a pending change request
         const { data: existingRequests, error: checkError } = await supabaseAdmin
-            .from('modification_request')
+            .from('profile_update_request')
             .select('*')
             .eq('registration_id', registration.registration_id)
             .eq('status', 'pending');
@@ -147,7 +147,7 @@ export async function POST({ request, locals }: RequestEvent) {
         const { data: osaAdmin } = await supabaseAdmin
             .from('users')
             .select('user_id')
-            .eq('user_type', 'osa')
+            .eq('account_role', 'osa')
             .limit(1)
             .maybeSingle();
 
@@ -157,7 +157,7 @@ export async function POST({ request, locals }: RequestEvent) {
         const insertPayload: any = {
             user_id: userData.user_id,
             registration_id: registration.registration_id,
-            recipient_id: recipientId,
+            assigned_to_user_id: recipientId,
             reason: reason,
             status: 'pending',
             proposed_changes: {
@@ -173,7 +173,7 @@ export async function POST({ request, locals }: RequestEvent) {
         };
 
         const { data: insertedRequest, error: insertError } = await supabaseAdmin
-            .from('modification_request')
+            .from('profile_update_request')
             .insert([insertPayload])
             .select()
             .single();
@@ -202,8 +202,8 @@ export async function POST({ request, locals }: RequestEvent) {
             'Your request to change registration details has been submitted to OSA for review.',
             userData.user_id,
             'request_registration_change',
-            'modification_request',
-            insertedRequest?.change_vehicle_request_id,
+            'profile_update_request',
+            insertedRequest?.profile_update_request_id,
             registration.registration_id,
             { reason, vehicle_make, vehicle_plate }
         );

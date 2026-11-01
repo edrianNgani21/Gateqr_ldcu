@@ -14,8 +14,8 @@
             adminUser: {
                 user_id: number;
                 email: string;
-                user_type: string;
-                identification: string;
+                account_role: string;
+                account_type: string;
                 created_at: string | null;
                 is_active: boolean;
                 google_linked: boolean;
@@ -87,12 +87,12 @@
 
     let displayRoleName = $derived.by(() => {
         if (roleLabel) return roleLabel;
-        const ut = (admin.user_type || '').toLowerCase();
+        const ut = (admin.account_role || '').toLowerCase();
         if (ut === 'osa') return 'Office of Student Affairs (OSA)';
         if (ut.includes('security') || ut === 'safety_security') return 'Security Administrator';
         if (userRole === 'dean') return 'Academic Department Head';
         if (userRole === 'administrative') return 'Administrative Department Head';
-        return admin.user_type || 'Administrator';
+        return admin.account_role || 'Administrator';
     });
 </script>
 
@@ -165,7 +165,7 @@
                 <div class="info-field">
                     <span class="field-label">Identification Classification</span>
                     <div class="field-value">
-                        <span class="badge-id">{admin.identification || 'Administrator'}</span>
+                        <span class="badge-id">{admin.account_type || 'Administrator'}</span>
                     </div>
                 </div>
 

@@ -2,6 +2,10 @@
 -- Campus Vehicle Registration System - Supabase (PostgreSQL) Schema
 -- Generated and Aligned for GATEQR System
 -- Run in: Supabase Dashboard > SQL Editor
+--
+-- NAMES: this file still creates the original table/column names. On a NEW database, run this
+-- file and then supabase-migration-clean-names.sql once; the app and main.py use the clean names
+-- (sticker_application, vehicle, gate_log, profile_update_request, application_form_setting, ...).
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -1300,3 +1304,9 @@ ALTER TABLE public.vehicle_log ADD COLUMN IF NOT EXISTS deleted_plate TEXT;
 ALTER TABLE public.vehicle_log DROP CONSTRAINT IF EXISTS vehicle_log_owner_chk;
 ALTER TABLE public.vehicle_log ADD CONSTRAINT vehicle_log_owner_chk
   CHECK (registration_id IS NOT NULL OR guest_id IS NOT NULL OR vip_access IS TRUE OR deleted_owner_name IS NOT NULL);
+
+-- ---------------------------------------------------------------------
+-- 21. CLEAN NAMES
+-- ---------------------------------------------------------------------
+-- Next step: run supabase-migration-clean-names.sql (once). It renames the tables and columns
+-- above to the names the app uses, removes duplicate columns and rewrites the database functions.

@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ request }) => {
         // Check if user exists and is inactive or an admin/staff account
         const { data: userList, error: queryError } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, department_id, is_active')
+            .select('user_id, email, account_role, account_type, department_id, is_active')
             .ilike('email', email)
             .limit(1);
 
@@ -41,9 +41,9 @@ export const POST: RequestHandler = async ({ request }) => {
             }
 
             // If an Admin/Dean/Security tries to use the Applicant register form, guide them to Admin Login
-            if (existingUser.user_type !== 'applicant' && existingUser.user_type !== 'Applicants') {
+            if (existingUser.account_role !== 'applicant' && existingUser.account_role !== 'Applicants') {
                 return json({
-                    error: `This email is registered as ${existingUser.user_type}. Please use Admin Login and sign in with Google.`
+                    error: `This email is registered as ${existingUser.account_role}. Please use Admin Login and sign in with Google.`
                 }, { status: 400 });
             }
         }

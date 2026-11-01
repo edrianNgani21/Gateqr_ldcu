@@ -39,7 +39,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { data: reg } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('registration_id, status, role, agreement_reminder_sent_at').neq('status', 'deleted')
             .eq('user_id', user.user_id)
             .order('created_at', { ascending: false })
@@ -61,11 +61,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const fileUrl = await uploadToStorage(path, buffer, file.type);
 
         const { error: updateError } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .update({
                 signed_agreement_form: fileUrl,
                 status: 'dept_validated',
-                dept_val_at: new Date().toISOString()
+                dept_approved_at: new Date().toISOString()
             })
             .eq('registration_id', reg.registration_id)
             .eq('status', 'pending');

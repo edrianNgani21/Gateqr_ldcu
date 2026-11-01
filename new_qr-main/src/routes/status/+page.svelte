@@ -12,7 +12,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'applicant-status-realtime',
-            tables: ['registration', 'modification_request']
+            tables: ['sticker_application', 'profile_update_request']
         });
     });
 
@@ -236,31 +236,31 @@
         
         if (stepNum === 1) { // College Head Approval
             if (['visitor', 'concessionaire'].includes(app.role)) return 'done';
-            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_val_at) return 'done';
+            if (['dept_validated', 'osa_val', 'osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.dept_approved_at) return 'done';
             if (s === 'dept_val' || s === 'pending') return 'active';
             return 'pending';
         }
 
         if (stepNum === 2) { // OSA Review and Schedule
-            if (['osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_val_at || app.schedule || app.dist_sched) return 'done';
+            if (['osa_validated', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'distributed', 'completed', 'expired'].includes(s) || app.osa_approved_at || app.schedule || app.dist_sched) return 'done';
             if (s === 'dept_validated' || s === 'osa_val' || (['visitor', 'concessionaire'].includes(app.role) && s === 'pending')) return 'active';
             return 'pending';
         }
 
         if (stepNum === 3) { // OSA Checked Hardcopies
-            if (app.osa_dist_at || ['distributed', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
+            if (app.hardcopy_received_at || ['distributed', 'security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'approved', 'completed', 'expired'].includes(s)) return 'done'; 
             if (['osa_validated'].includes(s)) return 'active'; 
             return 'pending';
         }
 
         if (stepNum === 4) { // Security Check Hardcopies
-            if (app.security_check_at || app.security_checked_at || ['security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
-            if (s === 'distributed' || app.osa_dist_at) return 'active';
+            if (app.security_checked_at || app.security_checked_at || ['security_checked', 'receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done'; 
+            if (s === 'distributed' || app.hardcopy_received_at) return 'active';
             return 'pending';
         }
 
         if (stepNum === 5) { // Payment and Receipt Upload
-            if (app.receipt || ['receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done';
+            if (app.payment_receipt_file || ['receipt_submitted', 'sticker_released', 'sticker_installed', 'completed', 'approved', 'expired'].includes(s)) return 'done';
             if (s === 'security_checked') return 'active';
             return 'pending';
         }
@@ -396,9 +396,9 @@
             <span class="ps-label">Step {skipDean ? 1 : 2} — OSA Application Review</span>
             <span class="ps-desc">Wait for the Office of Student Affairs (OSA) to review your application details and schedule your office visit.</span>
             {#if app.dist_sched || app.schedule}
-              <div class="sched-pill" class:sched-overdue={!app.osa_dist_at && new Date(app.dist_sched || app.schedule) < new Date()}>
+              <div class="sched-pill" class:sched-overdue={!app.hardcopy_received_at && new Date(app.dist_sched || app.schedule) < new Date()}>
                 Schedule: {new Date(app.dist_sched || app.schedule).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}
-                {#if !app.osa_dist_at && new Date(app.dist_sched || app.schedule) < new Date()}
+                {#if !app.hardcopy_received_at && new Date(app.dist_sched || app.schedule) < new Date()}
                   <span style="color: #dc2626; font-weight: bold; margin-left: 0.5rem;">(OVERDUE)</span>
                 {/if}
               </div>
@@ -419,8 +419,8 @@
           <div class="ps-info">
             <span class="ps-label">Step {skipDean ? 2 : 3} — OSA Document Verification</span>
             <span class="ps-desc">Visit the OSA Office and present your physical documents for verification against the information and files you submitted online.</span>
-            {#if app.osa_dist_at}
-              <div class="sched-pill sched-done">Checked by OSA: {new Date(app.osa_dist_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
+            {#if app.hardcopy_received_at}
+              <div class="sched-pill sched-done">Checked by OSA: {new Date(app.hardcopy_received_at).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'})}</div>
             {/if}
           </div>
         </div>
@@ -485,7 +485,7 @@
                   {receiptLoading ? 'Uploading…' : 'Confirm'}
                 </button>
               </div>
-            {:else if app.receipt}
+            {:else if app.payment_receipt_file}
               <div class="sched-pill sched-done">Receipt submitted</div>
             {/if}
           </div>
@@ -528,16 +528,16 @@
       owner: app.is_owner ? 'Yes' : 'No',
       status: app.status,
       crd: app.created_at,
-      sgn: app.dept_val_at,
-      apv: app.osa_val_at,
+      sgn: app.dept_approved_at,
+      apv: app.osa_approved_at,
       sch: app.dist_sched,
       exp: app.expires_at,
-      dlv: app.osa_dist_at,
-      rejection_reason: app.invalid_reason || null,
+      dlv: app.hardcopy_received_at,
+      rejected_reason: app.invalid_reason || null,
+      qr_image: app.qr_image,
       qr_code: app.qr_code,
-      qr_unique_code: app.qr_unique_code,
       documents: {
-        id: app.doc_id,
+        id: app.school_id_file,
         enrollment: app.doc_load,
         or: app.doc_or,
         cr: app.doc_cr,

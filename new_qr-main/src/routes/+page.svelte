@@ -10,7 +10,7 @@
 
     let role = $state(existing?.role || '');
     let section = $state(1);
-    let owner = $state(existing?.vehicle_information?.authorization_letter ? 'yes' : 'no');
+    let owner = $state(existing?.vehicle?.authorization_letter_file ? 'yes' : 'no');
     let dept = $state(existing?.department?.academic_department || existing?.department?.administrative_department || '');
     let campus = $state(existing?.campus || '');
     let year_level = $state(existing?.year_level || '');
@@ -19,10 +19,10 @@
     let lname = $state(existing?.last_name || '');
     let contact_number = $state(existing?.mobile || '');
     let facebook = $state(existing?.facebook || '');
-    let vehicle = $state(existing?.vehicle_information?.brand || '');
-    let vehicle_type = $state(existing?.vehicle_information?.type || '');
-    let plate = $state(existing?.vehicle_information?.plate_number || '');
-    let color = $state(existing?.vehicle_information?.color || '');
+    let vehicle = $state(existing?.vehicle?.brand || '');
+    let vehicle_type = $state(existing?.vehicle?.vehicle_type || '');
+    let plate = $state(existing?.vehicle?.plate_number || '');
+    let color = $state(existing?.vehicle?.color || '');
     let idno = $state(existing?.school_id || '');
     let loading = $state(false);
 
@@ -48,12 +48,12 @@
     type FileState = { file: File | null; url: string | null }
 
     let files = $state({
-        id:         { file: null, url: existing?.doc_id || null } as FileState,
+        id:         { file: null, url: existing?.school_id_file || null } as FileState,
         enrollment: { file: null, url: null } as FileState,
-        letter:     { file: null, url: existing?.vehicle_information?.authorization_letter || null } as FileState,
-        or:         { file: null, url: existing?.vehicle_information?.or || null } as FileState,
-        cr:         { file: null, url: existing?.vehicle_information?.cr || null } as FileState,
-        license:    { file: null, url: existing?.drivers_license || null } as FileState,
+        letter:     { file: null, url: existing?.vehicle?.authorization_letter_file || null } as FileState,
+        or:         { file: null, url: existing?.vehicle?.official_receipt_file || null } as FileState,
+        cr:         { file: null, url: existing?.vehicle?.certificate_of_registration_file || null } as FileState,
+        license:    { file: null, url: existing?.drivers_license_file || null } as FileState,
     })
 
     let canProceed = $derived((() => {
@@ -158,7 +158,7 @@
             if (files.license.file) formData.append('doc_license', files.license.file);
             else if (files.license.url) formData.append('existing_doc_license', files.license.url);
 
-            if (files.id.file) formData.append('doc_id', files.id.file);
+            if (files.id.file) formData.append('school_id_file', files.id.file);
             else if (files.id.url) formData.append('existing_doc_id', files.id.url);
 
             if (files.enrollment.file) formData.append('doc_load', files.enrollment.file);

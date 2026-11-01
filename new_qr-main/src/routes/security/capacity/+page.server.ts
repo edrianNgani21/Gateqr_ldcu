@@ -25,28 +25,27 @@ export const load: PageServerLoad = async ({ locals }) => {
         const [activeLogsRes, parkingCapRes, campusEventRes] = await Promise.all([
             // 1. Fetch active logs once for all campuses
             supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select(`
-                    vehicle_log_id,
-                    campus,
+                    gate_log_id,
                     campus_gate,
-                    logged_status,
-                    vip_access,
+                    presence_status,
+                    is_vip,
                     guest_id,
                     registration_id,
-                    vehicle_information:vehicle_information_id(type),
+                    vehicle:vehicle_id(vehicle_type),
                     registration:registration_id(
                         role,
-                        vehicle_information:vehicle_information_id(type)
+                        vehicle:vehicle_id(vehicle_type)
                     )
                 `)
-                .is('check_out', null),
+                .is('exited_at', null),
 
             // 2. Fetch all latest parking capacities in one consolidated query
             supabase
                 .from('parking_capacity')
                 .select('*')
-                .order('date_time', { ascending: false })
+                .order('recorded_at', { ascending: false })
                 .limit(20),
 
             // 3. Fetch all events (active & past) in one consolidated query
@@ -74,24 +73,24 @@ export const load: PageServerLoad = async ({ locals }) => {
         };
 
         activeLogs.forEach((log: any) => {
-            if (log.check_out) return;
-            const st = (log.logged_status || '').toLowerCase();
+            if (log.exited_at) return;
+            const st = (log.presence_status || '').toLowerCase();
             if (st === 'denied' || st === 'exit' || st === 'out' || st === 'exited' || st === 'exited_campus') return;
 
-            const c = (log.campus || log.campus_gate || '').toLowerCase();
+            const c = (log.campus_gate || '').toLowerCase();
             let key = 'main';
             if (c.includes('rnp')) key = 'rnp';
             else if (c.includes('paseo')) key = 'paseo';
 
-            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || Boolean(log.guest_id) || Boolean(log.vip_access) || st === 'guest' || st === 'vip';
-            const vehicleKey = isGuestOrVip ? `log_${log.vehicle_log_id}` : `reg_${log.registration_id}`;
+            const isGuestOrVip = !log.registration_id || log.registration_id === 1 || Boolean(log.guest_id) || Boolean(log.is_vip) || st === 'guest' || st === 'vip';
+            const vehicleKey = isGuestOrVip ? `log_${log.gate_log_id}` : `reg_${log.registration_id}`;
 
             if (!countedByCampus[key].has(vehicleKey)) {
                 countedByCampus[key].add(vehicleKey);
                 countsByCampus[key].occupied++;
                 const vType = (
-                    log.vehicle_information?.type || 
-                    log.registration?.vehicle_information?.type || 
+                    log.vehicle?.vehicle_type || 
+                    log.registration?.vehicle?.vehicle_type || 
                     ''
                 ).toLowerCase();
                 const is2W = vType.includes('2') || vType.includes('motorcycle') || vType.includes('bike') || vType.includes('scooter');
@@ -108,7 +107,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
             // Latest parking capacity row for this campus/gate
             const paData = allParkingCap.find(
-                (p: any) => (p.campus && p.campus.toLowerCase() === name.toLowerCase()) || (p.campus_gate && p.campus_gate.toLowerCase() === gate)
+                (p: any) => p.campus_gate && p.campus_gate.toLowerCase() === gate
             );
 
             // Campus events filtered in memory
@@ -116,19 +115,19 @@ export const load: PageServerLoad = async ({ locals }) => {
                 (e: any) => (e.campus_gate && e.campus_gate.toLowerCase() === gate)
             );
 
-            // Active event strictly must not have passed its end_date
+            // Active event strictly must not have passed its ends_at
             const activeEvent = campusEvents.find((e: any) => {
                 if (!e.is_active) return false;
-                if (!e.end_date) return true;
-                const endMs = new Date(e.end_date).getTime();
+                if (!e.ends_at) return true;
+                const endMs = new Date(e.ends_at).getTime();
                 return !isNaN(endMs) && endMs > nowMs;
             });
 
-            // History events: all inactive events or events whose end_date has passed
+            // History events: all inactive events or events whose ends_at has passed
             const history = campusEvents.filter((e: any) => {
                 if (!e.is_active) return true;
-                if (!e.end_date) return false;
-                const endMs = new Date(e.end_date).getTime();
+                if (!e.ends_at) return false;
+                const endMs = new Date(e.ends_at).getTime();
                 return !isNaN(endMs) && endMs <= nowMs;
             }).slice(0, 30);
 
@@ -137,7 +136,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             const capacity4 = paData?.capacity_4_wheels ?? null;
             const capacity = capacity2 !== null && capacity4 !== null
                 ? capacity2 + capacity4
-                : (paData?.parking_capacity ?? paData?.capacity ?? 200);
+                : (paData?.capacity ?? paData?.capacity ?? 200);
             const occupied = stats.occupied;
             const available = Math.max(0, capacity - occupied);
 
@@ -154,8 +153,8 @@ export const load: PageServerLoad = async ({ locals }) => {
                 available2: capacity2 !== null ? Math.max(0, capacity2 - stats.wheels2) : null,
                 available4: capacity4 !== null ? Math.max(0, capacity4 - stats.wheels4) : null,
                 event_name: activeEvent?.event_name ?? '',
-                event_start: activeEvent?.start_date ?? '',
-                event_end: activeEvent?.end_date ?? '',
+                event_start: activeEvent?.starts_at ?? '',
+                event_end: activeEvent?.ends_at ?? '',
                 history: history as any[]
             };
         });

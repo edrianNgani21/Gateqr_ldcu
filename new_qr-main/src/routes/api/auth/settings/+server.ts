@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: user, error } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, created_at, is_active, auth_user_id')
+            .select('user_id, email, account_role, account_type, created_at, is_active, google_auth_id')
             .eq('user_id', locals.user.user_id)
             .single();
 
@@ -24,11 +24,11 @@ export const GET: RequestHandler = async ({ locals }) => {
 
         return json({
             email: user.email,
-            user_type: user.user_type,
-            identification: user.identification,
+            account_role: user.account_role,
+            account_type: user.account_type,
             created_at: user.created_at,
             is_active: user.is_active,
-            google_linked: Boolean(user.auth_user_id)
+            google_linked: Boolean(user.google_auth_id)
         });
     } catch (error) {
         console.error('[Settings GET error]:', error);

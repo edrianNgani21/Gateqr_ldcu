@@ -10,7 +10,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-dashboard-realtime',
-            tables: ['registration', 'department', 'modification_request', 'recycle_bin']
+            tables: ['sticker_application', 'department', 'profile_update_request', 'recycle_bin']
         });
     });
 
@@ -75,7 +75,7 @@
     function getStageLabel(app: any): { label: string; tone: string } {
         const s = (app.status || '').toLowerCase();
         if (['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(s)) return { label: 'Screening', tone: 'pending' };
-        if (s === 'osa_validated' || (s === 'distributed' && !app.osa_dist_at)) return { label: 'Hardcopy Submission', tone: 'pending' };
+        if (s === 'osa_validated' || (s === 'distributed' && !app.hardcopy_received_at)) return { label: 'Hardcopy Submission', tone: 'pending' };
         if (s === 'distributed') return { label: 'Security Review', tone: 'review' };
         if (s === 'security_checked') return { label: 'For Payment', tone: 'review' };
         if (s === 'receipt_submitted') return { label: 'For Release', tone: 'review' };
@@ -90,7 +90,7 @@
     function getAppHref(app: any): string {
         const s = (app.status || '').toLowerCase();
         if (['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(s)) return '/osa?tab=validation';
-        if (['distributed', 'osa_validated'].includes(s) && !app.osa_dist_at) return '/osa?tab=distribution';
+        if (['distributed', 'osa_validated'].includes(s) && !app.hardcopy_received_at) return '/osa?tab=distribution';
         if (s === 'receipt_submitted') return '/osa?tab=release';
         if (['completed', 'approved'].includes(s)) return '/osa?tab=registered';
         if (['rejected', 'revoked'].includes(s)) return '/osa?tab=rejected';

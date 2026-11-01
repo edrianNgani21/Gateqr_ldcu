@@ -139,7 +139,7 @@
               <li>
                 <span class="vm-chip" class:vm-chip-block={v.violation_level === 'gate_block'}>{VIOLATION_LEVEL_LABELS[v.violation_level as ViolationLevel]}</span>
                 <span class="vm-history-reason">{v.reason}</span>
-                <span class="vm-history-date">{formatDate(v.recorded_at)}{v.blocked_until ? ` · blocked until ${formatDate(v.blocked_until)}` : ''}</span>
+                <span class="vm-history-date">{formatDate(v.blocked_at)}{v.blocked_until ? ` · blocked until ${formatDate(v.blocked_until)}` : ''}</span>
               </li>
             {/each}
           </ul>

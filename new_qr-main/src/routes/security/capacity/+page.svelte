@@ -33,7 +33,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: 'security-capacity-realtime',
-      tables: ['parking_capacity', 'campus_event', 'vehicle_log'],
+      tables: ['parking_capacity', 'campus_event', 'gate_log'],
       invalidate: false,
       onSync: () => {
         if (!editingCampus) {
@@ -67,8 +67,8 @@
             hasExpired = true;
             const pastEvent = {
               event_name: c.event_name,
-              start_date: c.event_start,
-              end_date: c.event_end,
+              starts_at: c.event_start,
+              ends_at: c.event_end,
               is_active: false
             };
             return {
@@ -185,8 +185,8 @@
                 capacity_2_wheels: Number(edit2),
                 capacity_4_wheels: Number(edit4),
                 event_name: editEventName,
-                start_date: editStartDate ? new Date(editStartDate).toISOString() : undefined,
-                end_date: editEndDate ? new Date(editEndDate).toISOString() : undefined
+                starts_at: editStartDate ? new Date(editStartDate).toISOString() : undefined,
+                ends_at: editEndDate ? new Date(editEndDate).toISOString() : undefined
             })
         });
 
@@ -378,8 +378,8 @@
                   {#each campus.history as h}
                     <tr>
                       <td>{h.event_name}</td>
-                      <td>{new Date(h.start_date).toLocaleDateString()} {new Date(h.start_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                      <td>{new Date(h.end_date).toLocaleDateString()} {new Date(h.end_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                      <td>{new Date(h.starts_at).toLocaleDateString()} {new Date(h.starts_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                      <td>{new Date(h.ends_at).toLocaleDateString()} {new Date(h.ends_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                     </tr>
                   {/each}
                 </tbody>

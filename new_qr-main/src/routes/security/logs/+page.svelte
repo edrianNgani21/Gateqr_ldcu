@@ -20,7 +20,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: 'security-logs-realtime',
-      tables: ['vehicle_log'],
+      tables: ['gate_log'],
       onSync: () => fetchLogs()
     });
   });
@@ -171,7 +171,7 @@
   function toggleSelectAll() {
     selectAllChecked = !selectAllChecked;
     if (selectAllChecked) {
-      selectedLogs = new Set(logs.map((log: any) => log.vehicle_log_id));
+      selectedLogs = new Set(logs.map((log: any) => log.gate_log_id));
     } else {
       selectedLogs.clear();
       selectedLogs = new Set();
@@ -188,7 +188,7 @@
   }
 
   function printSelectedLogs() {
-    const selectedLogsData = logs.filter((log: any) => selectedLogs.has(log.vehicle_log_id));
+    const selectedLogsData = logs.filter((log: any) => selectedLogs.has(log.gate_log_id));
     if (selectedLogsData.length === 0) {
       showAlert('Please select at least one log to print.');
       return;
@@ -237,12 +237,12 @@
           <tbody>
             ${selectedLogsData.map((log: any) => `
               <tr>
-                <td><strong>#${log.vehicle_log_id}</strong></td>
+                <td><strong>#${log.gate_log_id}</strong></td>
                 <td>${log.vehicle_plate || log.plate || (log.is_vip ? 'VIP' : log.is_guest ? 'Guest Vehicle' : 'No Plate')}</td>
                 <td>${log.is_vip ? 'VIP Access [VIP]' : log.is_guest ? (log.driver_name + ' [GUEST]') : ((log.driver_name || log.name || 'N/A') + ' (' + (log.role || 'Visitor') + ')')}</td>
-                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
-                <td>${log.check_out ? new Date(log.check_out).toLocaleString() : '—'}</td>
-                <td><strong style="color: ${log.check_out ? '#64748b' : '#059669'}">${log.check_out ? 'EXITED' : 'INSIDE CAMPUS'}</strong></td>
+                <td>${log.entered_at ? new Date(log.entered_at).toLocaleString() : '—'}</td>
+                <td>${log.exited_at ? new Date(log.exited_at).toLocaleString() : '—'}</td>
+                <td><strong style="color: ${log.exited_at ? '#64748b' : '#059669'}">${log.exited_at ? 'EXITED' : 'INSIDE CAMPUS'}</strong></td>
               </tr>
             `).join('')}
           </tbody>
@@ -519,18 +519,18 @@
             </thead>
             <tbody>
               {#each logs as log}
-                <tr class:selected-row={selectedLogs.has(log.vehicle_log_id)}>
+                <tr class:selected-row={selectedLogs.has(log.gate_log_id)}>
                   {#if printModeActive}
                     <td class="col-checkbox">
                       <input
                         type="checkbox"
-                        checked={selectedLogs.has(log.vehicle_log_id)}
-                        onchange={() => toggleLogSelection(log.vehicle_log_id)}
+                        checked={selectedLogs.has(log.gate_log_id)}
+                        onchange={() => toggleLogSelection(log.gate_log_id)}
                       />
                     </td>
                   {/if}
                   <td class="td-id">
-                    <span class="id-tag">#{log.vehicle_log_id}</span>
+                    <span class="id-tag">#{log.gate_log_id}</span>
                   </td>
                   <td class="td-plate">
                     {#if log.is_vip || log.role?.toLowerCase() === 'vip'}
@@ -585,17 +585,17 @@
                     </div>
                   </td>
                   <td class="td-time">
-                    {log.check_in ? new Date(log.check_in).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                    {log.entered_at ? new Date(log.entered_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                   </td>
                   <td class="td-time">
-                    {#if log.check_out}
-                      {new Date(log.check_out).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                    {#if log.exited_at}
+                      {new Date(log.exited_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                     {:else}
                       <span style="color: #64748b; font-size: 0.85rem;">—</span>
                     {/if}
                   </td>
                   <td>
-                    {#if !log.check_out && (log.logged_status || '').toLowerCase() !== 'exited'}
+                    {#if !log.exited_at && (log.presence_status || '').toLowerCase() !== 'exited'}
                       <span class="status-pill status-inside-pill">INSIDE CAMPUS</span>
                     {:else}
                       <span class="status-pill status-exited-pill">EXITED</span>
@@ -831,7 +831,7 @@
             </div>
             <div>
               <h3 id="guest-modal-title">Guest Log Details</h3>
-              <p class="modal-sub">Verified Guest Gate Record &bull; Log #{viewingGuestLog.vehicle_log_id}</p>
+              <p class="modal-sub">Verified Guest Gate Record &bull; Log #{viewingGuestLog.gate_log_id}</p>
             </div>
           </div>
           <button type="button" class="modal-close-btn" onclick={closeGuestDetails} aria-label="Close details">
@@ -841,10 +841,10 @@
 
         <div class="modal-body">
           <!-- Status Banner -->
-          <div class="guest-status-banner" class:banner-inside={!viewingGuestLog.check_out && (viewingGuestLog.logged_status || '').toLowerCase() !== 'exited'} class:banner-exited={viewingGuestLog.check_out || (viewingGuestLog.logged_status || '').toLowerCase() === 'exited'}>
+          <div class="guest-status-banner" class:banner-inside={!viewingGuestLog.exited_at && (viewingGuestLog.presence_status || '').toLowerCase() !== 'exited'} class:banner-exited={viewingGuestLog.exited_at || (viewingGuestLog.presence_status || '').toLowerCase() === 'exited'}>
             <div class="status-indicator-dot"></div>
             <span class="status-banner-text">
-              {#if !viewingGuestLog.check_out && (viewingGuestLog.logged_status || '').toLowerCase() !== 'exited'}
+              {#if !viewingGuestLog.exited_at && (viewingGuestLog.presence_status || '').toLowerCase() !== 'exited'}
                 CURRENTLY INSIDE CAMPUS
               {:else}
                 EXITED CAMPUS
@@ -865,7 +865,7 @@
             <div class="detail-box">
               <span class="detail-label">Driver's License / ID Number</span>
               <div class="detail-val-strong">
-                {viewingGuestLog.guest_details?.id_number || 'N/A'}
+                {viewingGuestLog.guest_details?.guest_id_number || 'N/A'}
               </div>
             </div>
 
@@ -879,14 +879,14 @@
             <div class="detail-box">
               <span class="detail-label">Check-In Time</span>
               <div class="detail-val time-in">
-                {viewingGuestLog.check_in ? new Date(viewingGuestLog.check_in).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                {viewingGuestLog.entered_at ? new Date(viewingGuestLog.entered_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
               </div>
             </div>
 
             <div class="detail-box">
               <span class="detail-label">Check-Out Time</span>
               <div class="detail-val time-out">
-                {viewingGuestLog.check_out ? new Date(viewingGuestLog.check_out).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not Checked Out (Active)'}
+                {viewingGuestLog.exited_at ? new Date(viewingGuestLog.exited_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not Checked Out (Active)'}
               </div>
             </div>
 
@@ -900,7 +900,7 @@
             <div class="detail-box">
               <span class="detail-label">Guest ID Reference</span>
               <div class="detail-val id-mono">
-                {viewingGuestLog.guest_details?.guest_id ? `GST-${viewingGuestLog.guest_details.guest_id}` : `LOG-${viewingGuestLog.vehicle_log_id}`}
+                {viewingGuestLog.guest_details?.guest_id ? `GST-${viewingGuestLog.guest_details.guest_id}` : `LOG-${viewingGuestLog.gate_log_id}`}
               </div>
             </div>
           </div>

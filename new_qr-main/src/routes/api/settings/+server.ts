@@ -13,12 +13,12 @@ export const GET: RequestHandler = async ({ locals }) => {
     try {
         const { data: row } = await supabase
             .from('parking_capacity')
-            .select('parking_capacity, max_capacity')
-            .order('date_time', { ascending: false })
+            .select('capacity')
+            .order('recorded_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        const capacity = row?.parking_capacity ?? row?.max_capacity ?? 500;
+        const capacity = row?.capacity ?? 500;
 
         return json({ max_capacity: capacity, parking_capacity: capacity });
     } catch (error) {
@@ -45,21 +45,21 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         // Try updating latest parking_availability record, or insert one
         const { data: latest } = await supabase
             .from('parking_capacity')
-            .select('parking_availability_id')
-            .order('date_time', { ascending: false })
+            .select('parking_capacity_id')
+            .order('recorded_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        if (latest?.parking_availability_id) {
+        if (latest?.parking_capacity_id) {
             const { error: updateError } = await supabase
                 .from('parking_capacity')
-                .update({ parking_capacity: newCap, max_capacity: newCap })
-                .eq('parking_availability_id', latest.parking_availability_id);
+                .update({ capacity: newCap })
+                .eq('parking_capacity_id', latest.parking_capacity_id);
             if (updateError) throw updateError;
         } else {
             const { error: insertError } = await supabase
                 .from('parking_capacity')
-                .insert({ parking_capacity: newCap, max_capacity: newCap, vehicle_log_id: 1 });
+                .insert({ capacity: newCap });
             if (insertError) throw insertError;
         }
 

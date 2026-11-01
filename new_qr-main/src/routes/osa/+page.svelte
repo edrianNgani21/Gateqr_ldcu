@@ -20,7 +20,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-applications-realtime',
-            tables: ['registration', 'modification_request', 'department']
+            tables: ['sticker_application', 'profile_update_request', 'department']
         });
     });
 
@@ -39,7 +39,7 @@
     let rejectedFilter = $state<'all' | 'rejected' | 'revoked' | 'blocked'>('all');
 
     function isAppOverdue(a: any): boolean {
-        if (a.invalid_reason === 'OVERDUE' || a.rejection_reason === 'OVERDUE') return true;
+        if (a.invalid_reason === 'OVERDUE' || a.rejected_reason === 'OVERDUE') return true;
         const s = a.schedule || a.dist_sched;
         if (!s) return false;
         return new Date(s).getTime() < Date.now();
@@ -47,8 +47,8 @@
 
     function getAppsForTab(t: string) {
         if (t === 'validation') return apps.filter(a => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((a.status || '').toLowerCase()));
-        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && !a.osa_dist_at);
-        if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.osa_dist_at && isAppOverdue(a));
+        if (t === 'distribution') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.sticker_released_at && !a.hardcopy_received_at);
+        if (t === 'overdue') return apps.filter(a => ['distributed', 'osa_validated'].includes((a.status || '').toLowerCase()) && !a.hardcopy_received_at && isAppOverdue(a));
         if (t === 'release') return apps.filter(a => (a.status || '').toLowerCase() === 'receipt_submitted' && !a.sticker_released_at);
         if (t === 'registered') return apps.filter(a => ['completed', 'approved'].includes((a.status || '').toLowerCase()));
         if (t === 'rejected' || t === 'revoked') return apps.filter(a => ['rejected', 'revoked'].includes((a.status || '').toLowerCase()) || a.active_block);
@@ -233,7 +233,7 @@
 
         if (vehicleTypeFilter !== 'all') {
             filtered = filtered.filter(a => {
-                const rawType = (a.vehicle_type || a.vehicle_information?.type || '').toLowerCase().trim();
+                const rawType = (a.vehicle_type || a.vehicle?.vehicle_type || '').toLowerCase().trim();
                 if (vehicleTypeFilter === '2 wheelers' || vehicleTypeFilter === '2-wheelers' || vehicleTypeFilter === '2-Wheeler / Motorcycle' || vehicleTypeFilter === '2-wheeler') {
                     return rawType.includes('2') || rawType.includes('motor') || rawType.includes('bike');
                 }
@@ -307,11 +307,11 @@
                     a.vehicle_make,
                     a.vehicle_color,
                     a.vehicle_type,
-                    a.vehicle_information?.plate_number,
-                    a.vehicle_information?.brand,
-                    a.vehicle_information?.color,
-                    a.vehicle_information?.type,
-                    a.qr_unique_code,
+                    a.vehicle?.plate_number,
+                    a.vehicle?.brand,
+                    a.vehicle?.color,
+                    a.vehicle?.vehicle_type,
+                    a.qr_code,
                     a.registration_id,
                     a.id
                 ].filter(Boolean).map(String).join(' ').toLowerCase();
@@ -696,23 +696,23 @@
               owner: app.is_owner ? 'Yes' : 'No',
               status: app.status,
               crd: app.created_at,
-              dpt: app.dept_val_at,
-              osa: app.osa_val_at,
+              dpt: app.dept_approved_at,
+              osa: app.osa_approved_at,
               sch: app.dist_sched,
-              hdc: app.osa_dist_at,
+              hdc: app.hardcopy_received_at,
               sec: app.security_checked_at,
               rel: app.sticker_released_at,
-              receipt: app.receipt,
+              receipt: app.payment_receipt_file,
               exp: app.expires_at,
               change_vehicle_request: app.change_vehicle_request,
               is_change_vehicle: app.is_change_vehicle,
-              rejection_reason: app.invalid_reason || null,
+              rejected_reason: app.invalid_reason || null,
+              qr_image: app.qr_image,
               qr_code: app.qr_code,
-              qr_unique_code: app.qr_unique_code,
               blocked_until: app.active_block?.blocked_until ?? null,
               block_reason: app.active_block?.reason ?? null,
               documents: {
-                id: app.doc_id,
+                id: app.school_id_file,
                 enrollment: app.doc_load,
                 or: app.doc_or,
                 cr: app.doc_cr,
@@ -835,23 +835,23 @@
                       owner: app.is_owner ? 'Yes' : 'No',
                       status: app.status,
                       crd: app.created_at,
-                      dpt: app.dept_val_at,
-                      osa: app.osa_val_at,
+                      dpt: app.dept_approved_at,
+                      osa: app.osa_approved_at,
                       sch: app.dist_sched,
-                      hdc: app.osa_dist_at,
+                      hdc: app.hardcopy_received_at,
                       sec: app.security_checked_at,
                       rel: app.sticker_released_at,
-                      receipt: app.receipt,
+                      receipt: app.payment_receipt_file,
                       exp: app.expires_at,
                       change_vehicle_request: app.change_vehicle_request,
                       is_change_vehicle: app.is_change_vehicle,
-                      rejection_reason: app.invalid_reason || null,
+                      rejected_reason: app.invalid_reason || null,
+                      qr_image: app.qr_image,
                       qr_code: app.qr_code,
-                      qr_unique_code: app.qr_unique_code,
                       blocked_until: app.active_block?.blocked_until ?? null,
                       block_reason: app.active_block?.reason ?? null,
                       documents: {
-                        id: app.doc_id,
+                        id: app.school_id_file,
                         enrollment: app.doc_load,
                         or: app.doc_or,
                         cr: app.doc_cr,
@@ -890,23 +890,23 @@
                   owner: app.is_owner ? 'Yes' : 'No',
                   status: app.status,
                   crd: app.created_at,
-                  dpt: app.dept_val_at,
-                  osa: app.osa_val_at,
+                  dpt: app.dept_approved_at,
+                  osa: app.osa_approved_at,
                   sch: app.dist_sched,
-                  hdc: app.osa_dist_at,
+                  hdc: app.hardcopy_received_at,
                   sec: app.security_checked_at,
                   rel: app.sticker_released_at,
-                  receipt: app.receipt,
+                  receipt: app.payment_receipt_file,
                   exp: app.expires_at,
                   change_vehicle_request: app.change_vehicle_request,
                   is_change_vehicle: app.is_change_vehicle,
-                  rejection_reason: app.invalid_reason || null,
+                  rejected_reason: app.invalid_reason || null,
+                  qr_image: app.qr_image,
                   qr_code: app.qr_code,
-                  qr_unique_code: app.qr_unique_code,
                   blocked_until: app.active_block?.blocked_until ?? null,
                   block_reason: app.active_block?.reason ?? null,
                   documents: {
-                    id: app.doc_id,
+                    id: app.school_id_file,
                     enrollment: app.doc_load,
                     or: app.doc_or,
                     cr: app.doc_cr,

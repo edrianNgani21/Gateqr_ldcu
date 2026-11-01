@@ -15,7 +15,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 				role: string;
 				department_id: number | null;
 				user_id: number;
-				user_type: string;
+				account_role: string;
 			};
 			event.locals.user = decoded;
 		} catch (err) {

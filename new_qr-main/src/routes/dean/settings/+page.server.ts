@@ -12,11 +12,11 @@ export const load: PageServerLoad = async ({ locals }) => {
         .select(`
             user_id, 
             email, 
-            user_type, 
-            identification, 
+            account_role, 
+            account_type, 
             is_active, 
             created_at, 
-            auth_user_id,
+            google_auth_id,
             department_id,
             department:department_id(*)
         `)
@@ -35,12 +35,12 @@ export const load: PageServerLoad = async ({ locals }) => {
         adminUser: {
             user_id: userRow?.user_id || locals.user.user_id,
             email: userRow?.email || locals.user.email,
-            user_type: 'Academic Department Head',
-            identification: userRow?.identification || 'Faculty',
+            account_role: 'Academic Department Head',
+            account_type: userRow?.account_type || 'Faculty',
             department_name: departmentName,
             created_at: userRow?.created_at || null,
             is_active: userRow?.is_active ?? true,
-            google_linked: !!userRow?.auth_user_id
+            google_linked: !!userRow?.google_auth_id
         }
     };
 };

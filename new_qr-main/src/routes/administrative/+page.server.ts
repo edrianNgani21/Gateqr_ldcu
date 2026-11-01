@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ locals }) => {
         }
 
         const { data: rows } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 department:department_id(
@@ -56,14 +56,14 @@ export const load: PageServerLoad = async ({ locals }) => {
                 user:user_id(
                     email
                 ),
-                vehicle_information:vehicle_information_id(
-                    "or",
-                    cr,
-                    authorization_letter,
+                vehicle:vehicle_id(
+                    "official_receipt_file",
+                    certificate_of_registration_file,
+                    authorization_letter_file,
                     plate_number,
                     brand,
                     color,
-                    type
+                    vehicle_type
                 )
             `).neq('status', 'deleted')
             .eq('department_id', departmentIdForQuery)
@@ -87,34 +87,33 @@ export const load: PageServerLoad = async ({ locals }) => {
                 department_email: '-',
                 user_email: app.user?.email,
                 // Map vehicle information fields to match frontend expectations
-                doc_id: (app as any).doc_id || 
-                        (app.agreement_form && typeof app.agreement_form === 'string' && app.agreement_form.startsWith('http') ? app.agreement_form : null) || 
+                school_id_file: (app as any).school_id_file || 
+                        (app.agreement_form_file && typeof app.agreement_form_file === 'string' && app.agreement_form_file.startsWith('http') ? app.agreement_form_file : null) || 
                         (app.school_id && typeof app.school_id === 'string' && app.school_id.startsWith('http') ? app.school_id : null) || null,
-                doc_load: app.enrollment_form || null,
-                enrollment_form: app.enrollment_form || null,
-                doc_or: app.vehicle_information?.or || (app.vehicle_information as any)?.or_document || null,
-                doc_cr: app.vehicle_information?.cr || (app.vehicle_information as any)?.cr_document || null,
-                doc_license: app.drivers_license || (app.vehicle_information as any)?.drivers_license || null,
-                doc_letter: app.vehicle_information?.authorization_letter || null,
-                rejection_reason: app.rejection_reason || (app as any).invalid_reason || null,
+                doc_load: app.enrollment_form_file || null,
+                enrollment_form_file: app.enrollment_form_file || null,
+                doc_or: app.vehicle?.official_receipt_file || (app.vehicle as any)?.or_document || null,
+                doc_cr: app.vehicle?.certificate_of_registration_file || (app.vehicle as any)?.cr_document || null,
+                doc_license: app.drivers_license_file || (app.vehicle as any)?.drivers_license_file || null,
+                doc_letter: app.vehicle?.authorization_letter_file || null,
+                rejected_reason: app.rejected_reason || (app as any).invalid_reason || null,
                 // Map vehicle details
-                vehicle_make: app.vehicle_information?.brand || 'Unknown',
-                vehicle_color: app.vehicle_information?.color || '-',
-                vehicle_plate: app.vehicle_information?.plate_number || '-',
-                vehicle_type: app.vehicle_information?.type || '-',
-                qr_code: app.qr_code || app.vehicle_information?.qr_code || null,
-                qr_unique_code: app.qr_unique_code || app.vehicle_information?.qr_unique_code || null,
+                vehicle_make: app.vehicle?.brand || 'Unknown',
+                vehicle_color: app.vehicle?.color || '-',
+                vehicle_plate: app.vehicle?.plate_number || '-',
+                vehicle_type: app.vehicle?.vehicle_type || '-',
+                qr_image: app.qr_image || app.vehicle?.qr_image || null,
+                qr_code: app.qr_code || app.vehicle?.qr_code || null,
                 created_at: typeof app.created_at === 'string' ? app.created_at : app.created_at?.toISOString(),
-                dept_val_at: typeof app.dept_val_at === 'string' ? app.dept_val_at : app.dept_val_at?.toISOString(),
-                osa_val_at: typeof app.osa_val_at === 'string' ? app.osa_val_at : app.osa_val_at?.toISOString(),
-                osa_dist_at: typeof app.osa_dist_at === 'string' ? app.osa_dist_at : app.osa_dist_at?.toISOString(),
-                dist_sched: typeof app.schedule === 'string' ? app.schedule : (app.schedule?.toISOString() || (typeof app.dist_sched === 'string' ? app.dist_sched : app.dist_sched?.toISOString())),
-                schedule: typeof app.schedule === 'string' ? app.schedule : (app.schedule?.toISOString() || (typeof app.dist_sched === 'string' ? app.dist_sched : app.dist_sched?.toISOString())),
-                security_check_at: typeof app.security_check_at === 'string' ? app.security_check_at : (app.security_check_at?.toISOString() || app.security_checked_at),
-                security_checked_at: typeof app.security_check_at === 'string' ? app.security_check_at : (app.security_check_at?.toISOString() || app.security_checked_at),
+                dept_approved_at: typeof app.dept_approved_at === 'string' ? app.dept_approved_at : app.dept_approved_at?.toISOString(),
+                osa_approved_at: typeof app.osa_approved_at === 'string' ? app.osa_approved_at : app.osa_approved_at?.toISOString(),
+                hardcopy_received_at: typeof app.hardcopy_received_at === 'string' ? app.hardcopy_received_at : app.hardcopy_received_at?.toISOString(),
+                dist_sched: typeof app.hardcopy_due_at === 'string' ? app.hardcopy_due_at : (app.hardcopy_due_at?.toISOString() || (typeof app.dist_sched === 'string' ? app.dist_sched : app.dist_sched?.toISOString())),
+                schedule: typeof app.hardcopy_due_at === 'string' ? app.hardcopy_due_at : (app.hardcopy_due_at?.toISOString() || (typeof app.dist_sched === 'string' ? app.dist_sched : app.dist_sched?.toISOString())),
+                security_checked_at: typeof app.security_checked_at === 'string' ? app.security_checked_at : (app.security_checked_at?.toISOString() || app.security_checked_at),
                 dist_checked: typeof app.dist_checked === 'string' ? app.dist_checked : app.dist_checked?.toISOString(),
                 expires_at: typeof app.expires_at === 'string' ? app.expires_at : app.expires_at?.toISOString(),
-                revoked_at: typeof app.revoke_at === 'string' ? app.revoke_at : (app.revoke_at?.toISOString() || (typeof app.revoked_at === 'string' ? app.revoked_at : app.revoked_at?.toISOString())),
+                revoked_at: typeof app.revoked_at === 'string' ? app.revoked_at : (app.revoked_at?.toISOString() || (typeof app.revoked_at === 'string' ? app.revoked_at : app.revoked_at?.toISOString())),
                 rejected_at: typeof app.rejected_at === 'string' ? app.rejected_at : app.rejected_at?.toISOString(),
             };
         });

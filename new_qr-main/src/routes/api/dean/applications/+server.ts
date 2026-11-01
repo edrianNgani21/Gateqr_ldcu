@@ -16,8 +16,8 @@ async function createNotification(
 ) {
     try {
         await supabase.from('notification').insert({
-            user_id: userId,
-            activity: message,
+            recipient_user_id: userId,
+            title: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -59,7 +59,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Check if registration belongs to dean's dept
         const { data: rows } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 user:user_id(
@@ -79,8 +79,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (action === 'accept' && (reg.status === 'dept_val' || reg.status === 'pending')) {
             const { error: updateError } = await supabase
-                .from('registration')
-                .update({ status: 'dept_validated', dept_val_at: new Date().toISOString() })
+                .from('sticker_application')
+                .update({ status: 'dept_validated', dept_approved_at: new Date().toISOString() })
                 .eq('registration_id', registration_id);
 
             if (updateError) throw updateError;
@@ -111,11 +111,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'rejected', 
                     rejected_at: new Date().toISOString(), 
-                    rejection_reason: reason 
+                    rejected_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -149,11 +149,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'revoked', 
-                    revoke_at: new Date().toISOString(), 
-                    revoke_reason: reason 
+                    revoked_at: new Date().toISOString(), 
+                    revoked_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -184,12 +184,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
         else if (action === 'retract' && (reg.status === 'osa_val' || reg.status === 'rejected' || reg.status === 'dept_validated')) {
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'pending', 
-                    dept_val_at: null, 
+                    dept_approved_at: null, 
                     rejected_at: null, 
-                    rejection_reason: null 
+                    rejected_reason: null 
                 })
                 .eq('registration_id', registration_id);
 

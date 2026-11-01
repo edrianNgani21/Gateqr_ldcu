@@ -66,7 +66,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: "security-realtime",
-      tables: ["registration", "vehicle_log", "parking_capacity"],
+      tables: ["sticker_application", "gate_log", "parking_capacity"],
       onSync: () => {
         if (tab === "Vehicle Log") {
           fetchLogs();
@@ -80,7 +80,7 @@
     if (t === "Document Review") {
       return vehicles.filter(
         (v: any) =>
-          ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
+          ((v.status || "").toLowerCase() === "distributed" || v.hardcopy_received_at) && !v.security_checked_at && !v.security_checked_at
       );
     }
     if (t === "Registered Vehicles" || t === "Registered") {
@@ -181,7 +181,7 @@
     };
   }
 
-  // For History tab - gate logs from vehicle_log table
+  // For History tab - gate logs from gate_log table
   let logs = $state<any[]>([]);
   let totalLogs = $state(0);
   let currentPage = $state(1);
@@ -269,7 +269,7 @@
         ) ||
         (v.id || "").toLowerCase().includes(searchQuery.toLowerCase());
 
-      const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase().trim();
+      const rawType = (v.vehicle_type || v.vehicle?.vehicle_type || "").toLowerCase().trim();
       const matchesType =
         vehicleTypeFilter === "all" ||
         ((vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") && (rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike"))) ||
@@ -286,7 +286,7 @@
     if (tab === "Document Review") {
       filtered = filtered.filter(
         (v: any) =>
-          ((v.status || "").toLowerCase() === "distributed" || v.osa_dist_at) && !v.security_check_at && !v.security_checked_at
+          ((v.status || "").toLowerCase() === "distributed" || v.hardcopy_received_at) && !v.security_checked_at && !v.security_checked_at
       );
     } else if (tab === "Registered Vehicles" || tab === "Registered") {
       filtered = filtered.filter(
@@ -315,7 +315,7 @@
 
     if (vehicleTypeFilter !== "all") {
       filtered = filtered.filter((v: any) => {
-        const rawType = (v.vehicle_type || v.vehicle_information?.type || "").toLowerCase().trim();
+        const rawType = (v.vehicle_type || v.vehicle?.vehicle_type || "").toLowerCase().trim();
         if (vehicleTypeFilter === "2 wheelers" || vehicleTypeFilter === "2-wheelers" || vehicleTypeFilter === "2-Wheeler / Motorcycle" || vehicleTypeFilter === "2-wheeler") {
           return rawType.includes("2") || rawType.includes("motor") || rawType.includes("bike");
         }
@@ -360,11 +360,11 @@
           v.vehicle_make,
           v.vehicle_color,
           v.vehicle_type,
-          v.vehicle_information?.plate_number,
-          v.vehicle_information?.brand,
-          v.vehicle_information?.color,
-          v.vehicle_information?.type,
-          v.qr_unique_code,
+          v.vehicle?.plate_number,
+          v.vehicle?.brand,
+          v.vehicle?.color,
+          v.vehicle?.vehicle_type,
+          v.qr_code,
           v.registration_id,
           v.id
         ].filter(Boolean).map(String).join(" ").toLowerCase();
@@ -503,7 +503,7 @@
   async function fetchLogs() {
     loading = true;
     try {
-      // Fetch gate logs from vehicle_log table for both History and Vehicle Log tabs
+      // Fetch gate logs from gate_log table for both History and Vehicle Log tabs
       const params = new URLSearchParams({
         date: selectedDate,
         search: searchQuery,
@@ -554,7 +554,7 @@
   function toggleSelectAll() {
     selectAllChecked = !selectAllChecked;
     if (selectAllChecked) {
-      selectedLogs = new Set(logs.map((log: any) => log.vehicle_log_id));
+      selectedLogs = new Set(logs.map((log: any) => log.gate_log_id));
     } else {
       selectedLogs.clear();
     }
@@ -572,7 +572,7 @@
 
   function printSelectedLogs() {
     const selectedLogsData = logs.filter((log: any) =>
-      selectedLogs.has(log.vehicle_log_id),
+      selectedLogs.has(log.gate_log_id),
     );
     if (selectedLogsData.length === 0) {
       showAlert("Please select at least one log to print.");
@@ -618,12 +618,12 @@
                           .map(
                             (log) => `
                             <tr>
-                                <td>#${log.vehicle_log_id}</td>
+                                <td>#${log.gate_log_id}</td>
                                 <td>${log.plate || log.vehicle_plate || 'No Plate'}</td>
                                 <td>${log.driver_name || log.name || 'Driver'} (${log.role || 'Visitor'})</td>
-                                <td>${log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</td>
-                                <td>${log.check_out ? new Date(log.check_out).toLocaleString() : "Still Inside"}</td>
-                                <td>${log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</td>
+                                <td>${log.entered_at ? new Date(log.entered_at).toLocaleString() : '—'}</td>
+                                <td>${log.exited_at ? new Date(log.exited_at).toLocaleString() : "Still Inside"}</td>
+                                <td>${log.presence_status || (log.exited_at ? 'Exited' : 'Inside')}</td>
                             </tr>
                         `,
                           )
@@ -774,9 +774,9 @@
                   role: a.role,
                   department: a.department_name,
                   campus: a.campus,
-                  plate: a.vehicle_information?.plate_number,
-                  vehicle: [a.vehicle_information?.brand, a.vehicle_information?.color].filter(Boolean).join(" · "),
-                  type: a.vehicle_information?.type,
+                  plate: a.vehicle?.plate_number,
+                  vehicle: [a.vehicle?.brand, a.vehicle?.color].filter(Boolean).join(" · "),
+                  type: a.vehicle?.vehicle_type,
                   expires: a.expires_at,
                 })),
                 data.userEmail || "Safety and Security",
@@ -806,44 +806,44 @@
             contact: app.mobile || "-",
             department: app.department_name || "-",
             "dept. email": app.department_email || "-",
-            vehicle: app.vehicle_information?.brand || "-",
-            "vehicle type": app.vehicle_information?.type || "-",
-            color: app.vehicle_information?.color || "-",
-            plate: app.vehicle_information?.plate_number || "-",
+            vehicle: app.vehicle?.brand || "-",
+            "vehicle type": app.vehicle?.vehicle_type || "-",
+            color: app.vehicle?.color || "-",
+            plate: app.vehicle?.plate_number || "-",
             owner: app.is_owner ? "Yes" : "No",
             status: (tab === "Document Review" && app.status === "distributed") ? "" : app.status,
             crd: app.created_at,
-            dpt: app.dept_val_at,
-            osa: app.osa_val_at,
+            dpt: app.dept_approved_at,
+            osa: app.osa_approved_at,
             sch: app.dist_sched,
-            hdc: app.osa_dist_at,
+            hdc: app.hardcopy_received_at,
             sec: app.security_checked_at,
             rel: app.sticker_released_at,
             exp: app.expires_at,
-            rejection_reason: app.invalid_reason || null,
+            rejected_reason: app.invalid_reason || null,
             is_change_vehicle: app.is_change_vehicle,
+            qr_image: app.qr_image,
             qr_code: app.qr_code,
-            qr_unique_code: app.qr_unique_code,
             blocked_until: app.active_block?.blocked_until ?? null,
             block_reason: app.active_block?.reason ?? null,
             documents: {
               id:
-                toDocUrl(app.doc_id) ||
-                toDocUrl(app.vehicle_information?.school_id),
+                toDocUrl(app.school_id_file) ||
+                toDocUrl(app.vehicle?.school_id),
               enrollment:
-                toDocUrl(app.doc_load) || toDocUrl(app.enrollment_form),
+                toDocUrl(app.doc_load) || toDocUrl(app.enrollment_form_file),
               or:
                 toDocUrl(app.doc_or) ||
-                toDocUrl(app.vehicle_information?.or_document),
+                toDocUrl(app.vehicle?.or_document),
               cr:
                 toDocUrl(app.doc_cr) ||
-                toDocUrl(app.vehicle_information?.cr_document),
+                toDocUrl(app.vehicle?.cr_document),
               license:
                 toDocUrl(app.doc_license) ||
-                toDocUrl(app.vehicle_information?.drivers_license),
+                toDocUrl(app.vehicle?.drivers_license_file),
               letter:
                 toDocUrl(app.doc_letter) ||
-                toDocUrl(app.vehicle_information?.authorization_letter),
+                toDocUrl(app.vehicle?.authorization_letter_file),
             },
           }}
           showQR={true}
@@ -861,7 +861,7 @@
                   violationTarget = {
                     id: app.registration_id,
                     name: `${app.first_name || ""} ${app.last_name || ""}`.trim(),
-                    plate: app.vehicle_information?.plate_number || "",
+                    plate: app.vehicle?.plate_number || "",
                   };
                 } else if (action === "revoke") {
                   await revokeQR(app.registration_id);
@@ -875,7 +875,6 @@
                     v.registration_id === app.registration_id
                       ? {
                           ...v,
-                          security_check_at: new Date().toISOString(),
                           security_checked_at: new Date().toISOString(),
                           status: "security_checked"
                         }
@@ -910,7 +909,7 @@
                           ...v,
                           status: "rejected",
                           rejected_at: new Date().toISOString(),
-                          rejection_reason: schedule
+                          rejected_reason: schedule
                         }
                       : v,
                   );
@@ -1094,18 +1093,18 @@
             </thead>
             <tbody>
               {#each logs as log}
-                <tr class:selected-row={selectedLogs.has(log.vehicle_log_id)}>
+                <tr class:selected-row={selectedLogs.has(log.gate_log_id)}>
                   {#if printModeActive}
                     <td class="select-column">
                       <input
                         type="checkbox"
-                        checked={selectedLogs.has(log.vehicle_log_id)}
-                        onchange={() => toggleLogSelection(log.vehicle_log_id)}
+                        checked={selectedLogs.has(log.gate_log_id)}
+                        onchange={() => toggleLogSelection(log.gate_log_id)}
                       />
                     </td>
                   {/if}
                   <td class="td-id">
-                    <span class="id-text">#{log.vehicle_log_id}</span>
+                    <span class="id-text">#{log.gate_log_id}</span>
                   </td>
                   <td>
                     <span class="plate-badge">{log.plate || log.vehicle_plate || 'No Plate'}</span>
@@ -1118,13 +1117,13 @@
                   </td>
                   <td class="td-time">
                     <span class="time-main"
-                      >{log.check_in ? new Date(log.check_in).toLocaleString() : '—'}</span
+                      >{log.entered_at ? new Date(log.entered_at).toLocaleString() : '—'}</span
                     >
                   </td>
                   <td class="td-time">
                     <span class="time-main"
-                      >{log.check_out
-                        ? new Date(log.check_out).toLocaleString()
+                      >{log.exited_at
+                        ? new Date(log.exited_at).toLocaleString()
                         : "Still Inside"}</span
                     >
                   </td>
@@ -1132,7 +1131,7 @@
                     <span class="campus-badge">{log.campus || 'Main Campus'}</span>
                   </td>
                   <td>
-                    <span class="chip chip-status">{log.logged_status || (log.check_out ? 'Exited' : 'Inside')}</span>
+                    <span class="chip chip-status">{log.presence_status || (log.exited_at ? 'Exited' : 'Inside')}</span>
                   </td>
                 </tr>
               {:else}
@@ -1206,31 +1205,31 @@
                 </tr>
               </thead>
               <tbody>
-                {#each logs.filter( (log: any) => selectedLogs.has(log.vehicle_log_id), ) as log}
+                {#each logs.filter( (log: any) => selectedLogs.has(log.gate_log_id), ) as log}
                   <tr>
                     <td class="td-id">
-                      <span class="id-text">{log.vehicle_log_id}</span>
+                      <span class="id-text">{log.gate_log_id}</span>
                     </td>
                     <td class="td-id">
                       <span class="id-text">{log.registration_id}</span>
                     </td>
                     <td class="td-id">
-                      <span class="id-text">{log.vehicle_information_id}</span>
+                      <span class="id-text">{log.vehicle_id}</span>
                     </td>
                     <td class="td-time">
                       <span class="time-main"
-                        >{new Date(log.check_in).toLocaleString()}</span
+                        >{new Date(log.entered_at).toLocaleString()}</span
                       >
                     </td>
                     <td class="td-time">
                       <span class="time-main"
-                        >{log.check_out
-                          ? new Date(log.check_out).toLocaleString()
+                        >{log.exited_at
+                          ? new Date(log.exited_at).toLocaleString()
                           : "Still Inside"}</span
                       >
                     </td>
                     <td>
-                      <span class="chip chip-status">{log.logged_status}</span>
+                      <span class="chip chip-status">{log.presence_status}</span>
                     </td>
                     <td class="td-time">
                       <span class="time-main"
@@ -1246,7 +1245,7 @@
       {/if}
     </div>
   {:else if tab === "History"}
-    <!-- History Tab - Gate History from vehicle_log table -->
+    <!-- History Tab - Gate History from gate_log table -->
     <div class="card">
       <div class="header">
         <div class="header-left">

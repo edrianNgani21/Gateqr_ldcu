@@ -26,19 +26,19 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     const userQuery = locals.user.user_id 
-        ? supabase.from('users').select('user_id, email, user_type, identification, is_active, created_at, auth_user_id').eq('user_id', locals.user.user_id)
-        : supabase.from('users').select('user_id, email, user_type, identification, is_active, created_at, auth_user_id').ilike('email', locals.user.email);
+        ? supabase.from('users').select('user_id, email, account_role, account_type, is_active, created_at, google_auth_id').eq('user_id', locals.user.user_id)
+        : supabase.from('users').select('user_id, email, account_role, account_type, is_active, created_at, google_auth_id').ilike('email', locals.user.email);
 
     const { data: userRow } = await userQuery.maybeSingle();
 
     const adminUser = {
         user_id: userRow?.user_id || locals.user.user_id,
         email: userRow?.email || locals.user.email,
-        user_type: 'Security Administrator',
-        identification: userRow?.identification || 'Admin',
+        account_role: 'Security Administrator',
+        account_type: userRow?.account_type || 'Admin',
         created_at: userRow?.created_at || null,
         is_active: userRow?.is_active ?? true,
-        google_linked: !!userRow?.auth_user_id
+        google_linked: !!userRow?.google_auth_id
     };
 
     userCache.set(cacheKey, { data: adminUser, timestamp: now });

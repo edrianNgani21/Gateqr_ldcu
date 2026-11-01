@@ -8,7 +8,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     const { data: rows } = await supabase
-        .from('registration')
+        .from('sticker_application')
         .select(`
             *,
             user:user_id(

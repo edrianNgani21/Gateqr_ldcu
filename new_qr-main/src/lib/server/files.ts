@@ -37,16 +37,16 @@ export async function canAccessFile(user: { role: string; user_id?: number; emai
     if (!user.user_id) return false;
 
     const { data: regs } = await supabaseAdmin
-        .from('registration')
-        .select('registration_id, doc_id, agreement_form, signed_agreement_form, school_id, enrollment_form, drivers_license, receipt, qr_code, vehicle_information:vehicle_information_id("or", cr, authorization_letter)').neq('status', 'deleted')
+        .from('sticker_application')
+        .select('registration_id, school_id_file, agreement_form_file, signed_agreement_form, school_id, enrollment_form_file, drivers_license_file, payment_receipt_file, qr_image, vehicle:vehicle_id("official_receipt_file", certificate_of_registration_file, authorization_letter_file)').neq('status', 'deleted')
         .eq('user_id', user.user_id);
     if (!regs || regs.length === 0) return false;
     if (JSON.stringify(regs).includes(path)) return true;
 
     const ids = regs.map((r: any) => r.registration_id);
     const [{ data: violations }, { data: changes }] = await Promise.all([
-        supabaseAdmin.from('blocklist').select('evidence_image').in('registration_id', ids),
-        supabaseAdmin.from('modification_request').select('proposed_changes').in('registration_id', ids)
+        supabaseAdmin.from('blocklist').select('evidence_image_file').in('registration_id', ids),
+        supabaseAdmin.from('profile_update_request').select('proposed_changes').in('registration_id', ids)
     ]);
     return JSON.stringify(violations || []).includes(path) || JSON.stringify(changes || []).includes(path);
 }

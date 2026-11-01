@@ -30,8 +30,8 @@
   // A real QR only exists once OSA has scheduled the application (moved to Submission of Hardcopies).
   // Screening of Applications never shows one.
   let hasRealQR = $derived.by(() => {
-    const unique = typeof data.qr_unique_code === 'string' ? data.qr_unique_code.trim() : '';
-    const qr = typeof data.qr_code === 'string' ? data.qr_code.trim() : '';
+    const unique = typeof data.qr_code === 'string' ? data.qr_code.trim() : '';
+    const qr = typeof data.qr_image === 'string' ? data.qr_image.trim() : '';
     return (!!unique && unique.toUpperCase() !== 'PENDING') || (!!qr && qr.toUpperCase() !== 'PENDING');
   });
   let effectiveShowQR = $derived(showQR && tab !== 'validation' && hasRealQR);
@@ -42,7 +42,7 @@
 
   let role = $derived(data.role?.toLowerCase() ?? "student");
   let ownerVal = $derived(data.owner?.toLowerCase() === "yes" ? "yes" : "no");
-  let rejectionReason = $derived(data.rejection_reason ?? null);
+  let rejectionReason = $derived(data.rejected_reason ?? null);
   let appStatus = $derived(data.status ?? null);
   let reasonLabel = $derived(
     appStatus === "revoked" ? "Revoked:" : "Rejected:",
@@ -138,7 +138,7 @@
 
   // `id` is the registration_id: shown as "Reg. No." on the title line, not in the details.
   // `name` is the title itself.
-  const excludedKeys = ["id", "registration_id", "name", "blocked_until", "block_reason", "documents", "owner", "rejection_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_code", "qr_unique_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
+  const excludedKeys = ["id", "registration_id", "name", "blocked_until", "block_reason", "documents", "owner", "rejected_reason", "status", "crd", "dpt", "osa", "sch", "hdc", "sec", "rel", "ins", "exp", "qr_image", "qr_code", "change_vehicle_request", "is_change_vehicle", "receipt"];
 
   function getQRImageUrl(qr: string | null | undefined = null, uniqueCode: string | null = null): string {
     const rawCode = (uniqueCode && uniqueCode.trim()) || (qr && typeof qr === 'string' && !qr.trim().startsWith('http') ? qr.trim() : null);
@@ -427,7 +427,7 @@
 
         <!-- QR Code -->
         {#if effectiveShowQR}
-          {@const qrImgUrl = getQRImageUrl(data.qr_code, data.qr_unique_code)}
+          {@const qrImgUrl = getQRImageUrl(data.qr_image, data.qr_code)}
           <div class="detail-section" class:no-border={tab.toLowerCase() === 'revoked'}>
             <span class="section-label">QR Code</span>
             <div class="qr-body">

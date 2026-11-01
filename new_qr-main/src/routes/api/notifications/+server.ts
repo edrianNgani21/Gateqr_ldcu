@@ -16,13 +16,13 @@ export const GET: RequestHandler = async ({ locals }) => {
             .from('notification')
             .select(`
                 *,
-                user:user_id(email)
+                user:recipient_user_id(email)
             `)
             .order('created_at', { ascending: false })
             .limit(50);
 
         // Show only notifications addressed to this authenticated user
-        query = query.eq('user_id', userId);
+        query = query.eq('recipient_user_id', userId);
 
         const { data: notifications, error } = await query;
 

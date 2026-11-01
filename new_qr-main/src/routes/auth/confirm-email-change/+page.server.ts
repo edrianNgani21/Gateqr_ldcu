@@ -38,7 +38,7 @@ export const actions: Actions = {
         // New email = new Google account; clearing the link lets only that account sign in next
         const { error: updateError } = await supabase
             .from('users')
-            .update({ email: request.new_email, auth_user_id: null })
+            .update({ email: request.new_email, google_auth_id: null })
             .eq('user_id', request.uid)
             .ilike('email', request.old_email);
         if (updateError) {

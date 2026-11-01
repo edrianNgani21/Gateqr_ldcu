@@ -35,7 +35,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { data: reg } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('registration_id, status').neq('status', 'deleted')
             .eq('user_id', user.user_id)
             .order('created_at', { ascending: false })
@@ -52,8 +52,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const receiptUrl = await uploadToStorage(path, buffer, file.type);
 
         const { error: updateError } = await supabase
-            .from('registration')
-            .update({ receipt: receiptUrl, status: 'receipt_submitted' })
+            .from('sticker_application')
+            .update({ payment_receipt_file: receiptUrl, status: 'receipt_submitted' })
             .eq('registration_id', reg.registration_id);
 
         if (updateError) throw updateError;

@@ -3,7 +3,7 @@ import { sendEmail } from './email';
 import { deleteFromStorage } from './storage';
 
 // Recently Deleted: a deleted registration keeps its row (status 'deleted', hidden everywhere) so
-// vehicle_log history keeps working; recycle_bin records who deleted it, when, why and a copy.
+// gate_log history keeps working; recycle_bin records who deleted it, when, why and a copy.
 // Only the primary OSA administrator may restore or permanently delete.
 export const PRIMARY_OSA_EMAIL = 'aluban98304@liceo.edu.ph';
 
@@ -26,8 +26,8 @@ function escapeHtml(value: string): string {
 
 async function loadRegistration(registrationId: number) {
     const { data } = await supabase
-        .from('registration')
-        .select('*, user:user_id(email, user_id), vehicle_information:vehicle_information_id(*)')
+        .from('sticker_application')
+        .select('*, user:user_id(email, user_id), vehicle:vehicle_id(*)')
         .eq('registration_id', registrationId)
         .maybeSingle();
     return data;
@@ -46,7 +46,7 @@ export async function moveToRecycleBin(registrationId: number, reason: string, a
     if (reg.status === 'deleted') throw new Error('This application is already in Recently Deleted');
 
     const roleLabel = deletedByRoleLabel(actor.role);
-    const { user, vehicle_information, ...registrationRow } = reg;
+    const { user, vehicle, ...registrationRow } = reg;
     const { error: binError } = await supabase.from('recycle_bin').insert({
         registration_id: registrationId,
         previous_status: reg.status,
@@ -54,11 +54,11 @@ export async function moveToRecycleBin(registrationId: number, reason: string, a
         deleted_by_user_id: actor.user_id ?? null,
         deleted_by_email: actor.email ?? null,
         deleted_by_role: roleLabel,
-        snapshot: { registration: registrationRow, vehicle: vehicle_information, applicant_email: user?.email ?? null }
+        snapshot: { registration: registrationRow, vehicle: vehicle, applicant_email: user?.email ?? null }
     });
     if (binError) throw binError;
 
-    const { error: statusError } = await supabase.from('registration').update({ status: 'deleted' }).eq('registration_id', registrationId);
+    const { error: statusError } = await supabase.from('sticker_application').update({ status: 'deleted' }).eq('registration_id', registrationId);
     if (statusError) {
         await supabase.from('recycle_bin').delete().eq('registration_id', registrationId);
         throw statusError;
@@ -66,7 +66,7 @@ export async function moveToRecycleBin(registrationId: number, reason: string, a
 
     if (notifyApplicant && user?.email) {
         const name = `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || 'Applicant';
-        const plate = vehicle_information?.plate_number || 'your vehicle';
+        const plate = vehicle?.plate_number || 'your vehicle';
         await sendEmail(
             user.email,
             'Your GateQR registration was deleted - Liceo GateQR',
@@ -94,30 +94,30 @@ export async function findDuplicates(registrationId: number) {
             registration_id: row.registration_id,
             status: row.status,
             name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
-            plate: row.vehicle_information?.plate_number || '-',
+            plate: row.vehicle?.plate_number || '-',
             matched: [] as string[]
         };
         if (!entry.matched.includes(why)) entry.matched.push(why);
         matches.set(row.registration_id, entry);
     };
-    const cols = 'registration_id, status, first_name, last_name, vehicle_information:vehicle_information_id(plate_number)';
+    const cols = 'registration_id, status, first_name, last_name, vehicle:vehicle_id(plate_number)';
 
     if (reg.user_id) {
-        const { data } = await supabase.from('registration').select(cols).eq('user_id', reg.user_id);
+        const { data } = await supabase.from('sticker_application').select(cols).eq('user_id', reg.user_id);
         (data || []).forEach((r) => add(r, 'same applicant email'));
     }
     if (reg.school_id) {
-        const { data } = await supabase.from('registration').select(cols).ilike('school_id', reg.school_id);
+        const { data } = await supabase.from('sticker_application').select(cols).ilike('school_id', reg.school_id);
         (data || []).forEach((r) => add(r, 'same school ID'));
     }
-    const plate = (reg.vehicle_information?.plate_number || '').replace(/[\s-]/g, '').toUpperCase();
+    const plate = (reg.vehicle?.plate_number || '').replace(/[\s-]/g, '').toUpperCase();
     if (plate) {
-        const { data: vehicles } = await supabase.from('vehicle_information').select('vehicle_information_id, plate_number');
+        const { data: vehicles } = await supabase.from('vehicle').select('vehicle_id, plate_number');
         const ids = (vehicles || [])
             .filter((v) => (v.plate_number || '').replace(/[\s-]/g, '').toUpperCase() === plate)
-            .map((v) => v.vehicle_information_id);
+            .map((v) => v.vehicle_id);
         if (ids.length) {
-            const { data } = await supabase.from('registration').select(cols).in('vehicle_information_id', ids);
+            const { data } = await supabase.from('sticker_application').select(cols).in('vehicle_id', ids);
             (data || []).forEach((r) => add(r, 'same plate number'));
         }
     }
@@ -141,40 +141,40 @@ export async function restoreFromRecycleBin(registrationId: number, mode: 'resto
         await moveToRecycleBin(dup.registration_id, `Replaced by restored Reg. No. ${registrationId}`, actor, false);
     }
 
-    const { error } = await supabase.from('registration').update({ status: bin.previous_status }).eq('registration_id', registrationId);
+    const { error } = await supabase.from('sticker_application').update({ status: bin.previous_status }).eq('registration_id', registrationId);
     if (error) throw error;
     await supabase.from('recycle_bin').delete().eq('registration_id', registrationId);
     return { conflict: false, replaced: duplicates.map((d) => d.registration_id) };
 }
 
-/** Remove a deleted registration for good. Gate history stays: name and plate are copied onto its vehicle_log rows. */
+/** Remove a deleted registration for good. Gate history stays: name and plate are copied onto its gate_log rows. */
 export async function permanentlyDelete(registrationId: number) {
     const reg = await loadRegistration(registrationId);
     if (!reg || reg.status !== 'deleted') throw new Error('Only records in Recently Deleted can be permanently deleted');
 
     await supabase
-        .from('vehicle_log')
+        .from('gate_log')
         .update({
             // Required by vehicle_log_owner_chk once the registration link is cleared
-            deleted_owner_name: `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || `Deleted applicant (Reg. No. ${registrationId})`,
-            deleted_plate: reg.vehicle_information?.plate_number || null
+            owner_name_snapshot: `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || `Deleted applicant (Reg. No. ${registrationId})`,
+            plate_snapshot: reg.vehicle?.plate_number || null
         })
         .eq('registration_id', registrationId);
 
-    const files = [reg.doc_id, reg.doc_load, reg.doc_or, reg.doc_cr, reg.doc_license, reg.doc_letter, reg.receipt, reg.qr_code]
+    const files = [reg.school_id_file, reg.doc_load, reg.doc_or, reg.doc_cr, reg.doc_license, reg.doc_letter, reg.payment_receipt_file, reg.qr_image]
         .filter((f): f is string => typeof f === 'string' && /^https?:\/\//.test(f));
     for (const file of files) await deleteFromStorage(file);
 
     await supabase.from('incident_report').delete().eq('registration_id', registrationId);
-    // Cascades: recycle_bin, blocklist, modification_request. vehicle_log rows keep their copied name/plate.
-    const { error } = await supabase.from('registration').delete().eq('registration_id', registrationId);
+    // Cascades: recycle_bin, blocklist, profile_update_request. gate_log rows keep their copied name/plate.
+    const { error } = await supabase.from('sticker_application').delete().eq('registration_id', registrationId);
     if (error) throw error;
 
-    if (reg.vehicle_information_id) {
+    if (reg.vehicle_id) {
         const { count } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('registration_id', { count: 'exact', head: true })
-            .eq('vehicle_information_id', reg.vehicle_information_id);
-        if (!count) await supabase.from('vehicle_information').delete().eq('vehicle_information_id', reg.vehicle_information_id);
+            .eq('vehicle_id', reg.vehicle_id);
+        if (!count) await supabase.from('vehicle').delete().eq('vehicle_id', reg.vehicle_id);
     }
 }

@@ -50,7 +50,7 @@ export async function sendAgreementReminders(): Promise<number> {
         // (renewals reuse the row, so created_at would be the original submission)
         const cutoff = new Date(Date.now() - PENDING_LIMIT_MS).toISOString();
         const { data: rows, error } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('registration_id, role, user:user_id(email)')
             .eq('status', 'pending')
             .is('agreement_reminder_sent_at', null)
@@ -65,7 +65,7 @@ export async function sendAgreementReminders(): Promise<number> {
             if (!email) continue;
 
             const { data: claimed, error: claimError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ agreement_reminder_sent_at: new Date().toISOString() })
                 .eq('registration_id', row.registration_id)
                 .eq('status', 'pending')

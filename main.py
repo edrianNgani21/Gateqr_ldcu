@@ -171,7 +171,7 @@ class SideState:
         self.api_error = ""
         self.anomaly_id = None
         self.anomaly_desc = ""
-        self.logged_status = None
+        self.presence_status = None
         self.vehicle_data = {} # Holds vehicle information from separate table
         self.block_info = None # Active blocklist row when state is BLOCKED
         self.processing_label = ""  # What is being processed, e.g. "QR: HVTX7FCD" (shown in the card)
@@ -181,7 +181,7 @@ class SideState:
         
         # Manual Form Data
         self.input_field = 0 # which field is active
-        self.form_data = ["", "", ""] # e.g. [plate, id_number, purpose] or [plate]
+        self.form_data = ["", "", ""] # e.g. [plate, guest_id_number, purpose] or [plate]
         self.ticket_generated = ""
         self.anim_offset = 0.0 if gate_type == 'in' else 1.5
         self.last_prolong_exit = {}
@@ -382,12 +382,12 @@ def get_latest_parking_row():
     if not campus:
         return _EmptyResponse()
     gate, norm_campus = get_campus_gate_and_name()
-    return supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+    return supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
 
 def get_campus_occupied(campus_name=None):
     """Count active occupied vehicles inside campus (entry records +1 occupied, exit records -1 occupied).
-    If check_in is present and check_out is null and status is not exited/denied: occupied = 1.
-    When an exit is recorded (check_out is set or status is exited_campus): occupied drops to 0 (unoccupied increases).
+    If entered_at is present and exited_at is null and status is not exited/denied: occupied = 1.
+    When an exit is recorded (exited_at is set or status is exited_campus): occupied drops to 0 (unoccupied increases).
     Applies to registered vehicles, guest logs, and VIP logs across all campuses."""
     target_campus = campus_name or globals().get('SELECTED_CAMPUS')
     if not target_campus:
@@ -395,7 +395,7 @@ def get_campus_occupied(campus_name=None):
     c_lower = str(target_campus).strip().lower()
     norm_campus = 'RNP' if 'rnp' in c_lower else ('PASEO' if 'paseo' in c_lower else 'Main Campus')
     try:
-        res = supabase.table('vehicle_log').select('vehicle_log_id, check_in, check_out, logged_status, campus, campus_gate, registration_id, vip_access, guest_id, vehicle_information:vehicle_information_id(type)').ilike('campus', f"%{norm_campus}%").execute()
+        res = supabase.table('gate_log').select('gate_log_id, entered_at, exited_at, presence_status, campus_gate, registration_id, is_vip, guest_id, vehicle:vehicle_id(vehicle_type)').eq('campus_gate', 'rnp' if norm_campus == 'RNP' else ('paseo' if norm_campus == 'PASEO' else 'main')).execute()
         global_stats['in2'] = 0
         global_stats['in4'] = 0
         if res.data:
@@ -404,22 +404,22 @@ def get_campus_occupied(campus_name=None):
             # Get placeholder reg id if known
             placeholder_reg_id = _placeholder_ids[0] if globals().get('_placeholder_ids') else None
             for r in res.data:
-                st = str(r.get('logged_status', '')).strip().lower()
-                has_in = bool(r.get('check_in'))
-                has_out = bool(r.get('check_out'))
+                st = str(r.get('presence_status', '')).strip().lower()
+                has_in = bool(r.get('entered_at'))
+                has_out = bool(r.get('exited_at'))
                 is_exited = has_out or st in ('denied', 'exit', 'out', 'exited', 'exited_campus')
                 if has_in and not is_exited:
                     reg_id = r.get('registration_id')
-                    # If it's a guest or VIP log (or uses placeholder registration), key by vehicle_log_id
-                    if not reg_id or (placeholder_reg_id and reg_id == placeholder_reg_id) or st in ('guest', 'vip') or r.get('is_vip') or r.get('vip_access') or r.get('guest_id'):
-                        v_key = f"log_{r.get('vehicle_log_id')}"
+                    # If it's a guest or VIP log (or uses placeholder registration), key by gate_log_id
+                    if not reg_id or (placeholder_reg_id and reg_id == placeholder_reg_id) or st in ('guest', 'vip') or r.get('is_vip') or r.get('is_vip') or r.get('guest_id'):
+                        v_key = f"log_{r.get('gate_log_id')}"
                     else:
                         v_key = f"reg_{reg_id}"
                     if v_key not in seen_vehicles:
                         seen_vehicles.add(v_key)
                         active_occupied += 1
                         # Unknown type (guest / VIP placeholder) counts as 4-wheel, same as the web dashboard
-                        if is_two_wheeler((r.get('vehicle_information') or {}).get('type')):
+                        if is_two_wheeler((r.get('vehicle') or {}).get('vehicle_type')):
                             global_stats['in2'] += 1
                         else:
                             global_stats['in4'] += 1
@@ -440,7 +440,7 @@ def read_type_limits(row):
     cap4 = row.get('capacity_4_wheels')
     if cap2 is not None and cap4 is not None:
         return cap2 + cap4, cap2, cap4
-    return row.get('parking_capacity') or row.get('capacity') or 200, cap2, cap4
+    return row.get('capacity') or 200, cap2, cap4
 
 def get_live_currently_in(campus_name=None):
     """Count active vehicles currently inside selected campus. Alias for get_campus_occupied."""
@@ -457,7 +457,7 @@ def sync_parking_availability(occupied_count=None):
     gate, norm_campus = get_campus_gate_and_name()
         
     try:
-        pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
         capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
         global_stats['cap2'] = cap2
         global_stats['cap4'] = cap4
@@ -478,33 +478,24 @@ def sync_parking_availability(occupied_count=None):
                 pass
 
         if pa_res.data:
-            last_id = pa_res.data[0]['parking_availability_id']
+            last_id = pa_res.data[0]['parking_capacity_id']
             supabase.table('parking_capacity').update({
-                "parking_capacity": capacity,
                 "capacity": capacity,
-                "slot_occupied": occupied_count,
                 "occupied": occupied_count,
-                "slot_unoccupied": unoccupied,
                 "available": unoccupied,
                 "occupied_2_wheels": global_stats.get('in2', 0),
                 "occupied_4_wheels": global_stats.get('in4', 0),
                 "campus_gate": gate,
                 "event_name": ev_name.strip() if ev_name else None,
-                "date_time": now_iso,
                 "recorded_at": now_iso
-            }).eq('parking_availability_id', last_id).execute()
+            }).eq('parking_capacity_id', last_id).execute()
         else:
             supabase.table('parking_capacity').insert({
-                "campus": norm_campus,
                 "campus_gate": gate,
-                "parking_capacity": capacity,
                 "capacity": capacity,
-                "slot_occupied": occupied_count,
                 "occupied": occupied_count,
-                "slot_unoccupied": unoccupied,
                 "available": unoccupied,
                 "event_name": ev_name.strip() if ev_name else None,
-                "date_time": now_iso,
                 "recorded_at": now_iso
             }).execute()
 
@@ -525,7 +516,7 @@ def refresh_parking_data():
             return
         gate, norm_campus = get_campus_gate_and_name()
 
-        pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
         capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
         global_stats['cap2'] = cap2
         global_stats['cap4'] = cap4
@@ -558,7 +549,7 @@ def poll_supabase():
             if campus:
                 gate, norm_campus = get_campus_gate_and_name()
 
-                pa_res = supabase.table('parking_capacity').select('*').ilike('campus', f"%{norm_campus}%").order('date_time', desc=True).limit(1).execute()
+                pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
                 capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
                 global_stats['cap2'] = cap2
                 global_stats['cap4'] = cap4
@@ -601,7 +592,7 @@ def start_prolong_gate(side):
     side.scan_cooldown_end = 0.0
     side.prolong_ready_time = 0.0
     side.data = None
-    side.logged_status = None
+    side.presence_status = None
 
 def close_prolong_gate(side):
     """Close barrier from PROLONG mode and return to normal SCANNING"""
@@ -611,7 +602,7 @@ def close_prolong_gate(side):
     side.state = GateState.SCANNING
     side.scan_cooldown_end = time.time() + 5.0
     side.data = None
-    side.logged_status = None
+    side.presence_status = None
     if hasattr(side, 'last_prolong_exit'):
         side.last_prolong_exit = None
     global latest_scanned_details
@@ -681,7 +672,7 @@ def force_close_gate(side):
     set_servo_angle(servo, 0)
     side.state = GateState.SCANNING
     side.data = None
-    side.logged_status = None
+    side.presence_status = None
     side.processing_label = side.processing_step = ""
     side.timeout_end = 0
     global latest_scanned_details
@@ -702,7 +693,7 @@ def close_gate(side):
     set_servo_angle(servo, 0)
     side.state = GateState.SCANNING
     side.data = None
-    side.logged_status = None
+    side.presence_status = None
     side.processing_label = side.processing_step = ""
     global latest_scanned_details
     latest_scanned_details = None
@@ -786,7 +777,7 @@ def show_blocked(side, reg, block):
         "role": (reg.get('role') or 'N/A').capitalize(),
         "plate": side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A',
         "brand": f"{v_brand} ({v_color})" if v_color else v_brand,
-        "type": side.vehicle_data.get('type') or reg.get('type') or 'N/A',
+        "type": side.vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A',
         "status": "BLOCKED",
         "time": datetime.now().strftime("%I:%M:%S %p")
     }
@@ -796,17 +787,16 @@ def show_blocked(side, reg, block):
     try:
         gate_enum, campus_name = get_campus_gate_and_name()
         now_iso = datetime.now().isoformat()
-        supabase.table('vehicle_log').insert({
-            "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'),
+        supabase.table('gate_log').insert({
+            "vehicle_id": side.vehicle_data.get('vehicle_id') or reg.get('vehicle_id'),
             "registration_id": reg.get('registration_id'),
-            "check_in": now_iso,
-            "check_out": now_iso,
-            "logged_status": "denied",
+            "entered_at": now_iso,
+            "exited_at": now_iso,
+            "presence_status": "denied",
             "sticker_status": "registered",
             "campus_gate": gate_enum,
-            "campus": campus_name,
             "flagged_alert": "blocked",
-            "reason": f"BLOCKED - entry denied ({format_remaining(block.get('blocked_until'))} left): {block.get('reason') or 'No reason given'}"
+            "note": f"BLOCKED - entry denied ({format_remaining(block.get('blocked_until'))} left): {block.get('reason') or 'No reason given'}"
         }).execute()
     except Exception as e:
         print(f"DEBUG: Error logging blocked attempt: {e}")
@@ -828,7 +818,7 @@ def registration_access(reg):
             print(f"DEBUG: Recycle bin lookup failed: {e}")
         return False, 'deleted', "RECENTLY DELETED", f"This account has been recently deleted. Access denied.{reason}"
     if status == 'revoked':
-        reason = reg.get('revoke_reason') or 'No reason given'
+        reason = reg.get('revoked_reason') or 'No reason given'
         return False, 'revoked', "REVOKED", f"Revoked by OSA: {reason}. Access returns only after the QR is unrevoked."
     if status in ('approved', 'completed'):
         expires = parse_db_timestamp(reg.get('expires_at'))
@@ -843,7 +833,7 @@ def exit_flag_for(reg, vehicle_id=None):
     allowed, kind, title, detail = registration_access(reg)
     if not allowed:
         return kind, f"{title} QR used at exit (allowed out): {detail}"
-    block = get_active_block(reg.get('registration_id'), vehicle_id or reg.get('vehicle_information_id'))
+    block = get_active_block(reg.get('registration_id'), vehicle_id or reg.get('vehicle_id'))
     if block:
         return 'blocked', f"Blocked vehicle exited ({format_remaining(block.get('blocked_until'))} left): {block.get('reason') or 'No reason given'}"
     return None
@@ -863,24 +853,23 @@ def show_status_denied(side, reg, kind, title, detail):
         "role": (reg.get('role') or 'N/A').capitalize(),
         "plate": side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A',
         "brand": f"{v_brand} ({v_color})" if v_color else v_brand,
-        "type": side.vehicle_data.get('type') or reg.get('type') or 'N/A',
+        "type": side.vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A',
         "status": title,
         "time": datetime.now().strftime("%I:%M:%S %p")
     }
     try:
         gate_enum, campus_name = get_campus_gate_and_name()
         now_iso = datetime.now().isoformat()
-        supabase.table('vehicle_log').insert({
-            "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'),
+        supabase.table('gate_log').insert({
+            "vehicle_id": side.vehicle_data.get('vehicle_id') or reg.get('vehicle_id'),
             "registration_id": reg.get('registration_id'),
-            "check_in": now_iso,
-            "check_out": now_iso,
-            "logged_status": "denied",
+            "entered_at": now_iso,
+            "exited_at": now_iso,
+            "presence_status": "denied",
             "sticker_status": "registered" if kind == 'revoked' else "unregistered",
             "campus_gate": gate_enum,
-            "campus": campus_name,
             "flagged_alert": kind,
-            "reason": f"{title} - entry denied: {detail}"
+            "note": f"{title} - entry denied: {detail}"
         }).execute()
     except Exception as e:
         print(f"DEBUG: Error logging denied {kind} attempt: {e}")
@@ -899,13 +888,13 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     side.processing_step = "Loading vehicle details..."
     try:
         print(f"DEBUG: Registration data: {reg}")
-        vehicle_info_id = reg.get('vehicle_information_id')
-        print(f"DEBUG: vehicle_information_id from registration: {vehicle_info_id}")
+        vehicle_info_id = reg.get('vehicle_id')
+        print(f"DEBUG: vehicle_id from registration: {vehicle_info_id}")
         
         if vehicle_data:
             side.vehicle_data = vehicle_data
         elif vehicle_info_id:
-            vehicle_response = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', vehicle_info_id).execute()
+            vehicle_response = supabase.table('vehicle').select('*').eq('vehicle_id', vehicle_info_id).execute()
             print(f"DEBUG: Vehicle response data: {vehicle_response.data}")
             if vehicle_response.data:
                 vehicle_data = vehicle_response.data[0]
@@ -913,10 +902,10 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                 side.vehicle_data = vehicle_data
                 print(f"DEBUG: Vehicle data loaded successfully: {vehicle_data}")
             else:
-                print(f"DEBUG: No vehicle found with vehicle_information_id: {vehicle_info_id}")
+                print(f"DEBUG: No vehicle found with vehicle_id: {vehicle_info_id}")
                 side.vehicle_data = {}
         else:
-            print(f"DEBUG: No vehicle_information_id in registration")
+            print(f"DEBUG: No vehicle_id in registration")
             side.vehicle_data = {}
     except Exception as e:
         print(f"Error fetching vehicle information: {e}")
@@ -925,7 +914,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     side.exit_flag = None
     if side.type == 'out':
         # Exits are always allowed so no car is trapped inside; a revoked / unregistered / blocked QR is flagged
-        side.exit_flag = exit_flag_for(reg, side.vehicle_data.get('vehicle_information_id'))
+        side.exit_flag = exit_flag_for(reg, side.vehicle_data.get('vehicle_id'))
 
     # Registration status (all campuses): only active registered stickers may enter
     if side.type == 'in':
@@ -938,14 +927,14 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     # Blocklist check (all campuses). Applies to the entrance; a blocked vehicle already inside may still leave.
     if side.type == 'in':
         side.processing_step = "Checking blocklist..."
-        block = get_active_block(reg.get('registration_id'), side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id'))
+        block = get_active_block(reg.get('registration_id'), side.vehicle_data.get('vehicle_id') or reg.get('vehicle_id'))
         if block:
             show_blocked(side, reg, block)
             return
 
         # Separate 2-wheel / 4-wheel limits: stop this vehicle only if its own type is full
         side.processing_step = "Checking parking limits..."
-        two_wheel = is_two_wheeler(side.vehicle_data.get('type') or reg.get('type'))
+        two_wheel = is_two_wheeler(side.vehicle_data.get('vehicle_type') or reg.get('type'))
         type_cap = global_stats.get('cap2') if two_wheel else global_stats.get('cap4')
         type_in = global_stats.get('in2', 0) if two_wheel else global_stats.get('in4', 0)
         if type_cap is not None and type_in >= type_cap:
@@ -961,7 +950,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                 "role": (reg.get('role') or 'N/A').capitalize(),
                 "plate": side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A',
                 "brand": f"{v_brand} ({v_color})" if v_color else v_brand,
-                "type": side.vehicle_data.get('type') or reg.get('type') or 'N/A',
+                "type": side.vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A',
                 "status": f"{side.full_type_label} PARKING FULL",
                 "time": datetime.now().strftime("%I:%M:%S %p")
             }
@@ -973,14 +962,14 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     open_cross_log = None
     side.processing_step = "Checking entry logs..."
     try:
-        all_logs_res = supabase.table('vehicle_log').select('*')\
+        all_logs_res = supabase.table('gate_log').select('*')\
             .eq('registration_id', reg['registration_id'])\
             .order('created_at', desc=True).limit(5).execute()
         if all_logs_res.data:
             for l_row in all_logs_res.data:
-                st = str(l_row.get('logged_status', '')).strip().lower()
-                has_in = bool(l_row.get('check_in'))
-                has_out = bool(l_row.get('check_out'))
+                st = str(l_row.get('presence_status', '')).strip().lower()
+                has_in = bool(l_row.get('entered_at'))
+                has_out = bool(l_row.get('exited_at'))
                 # Active entry: checked in, not checked out, and not explicitly exited/denied
                 if (has_in and not has_out) or st in ('inside', 'inside_campus'):
                     if st not in ('exited', 'exit', 'denied', 'exited_campus'):
@@ -991,7 +980,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
         open_cross_log = None
 
     # Simple logic: if QR code exists in database, it's REGISTERED
-    side.logged_status = "REGISTERED"
+    side.presence_status = "REGISTERED"
     side.status_warning_pending = False
 
     # Populate driver and vehicle details for dashboard and display
@@ -1001,7 +990,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     role_name = (reg.get('role') or 'N/A').capitalize()
     v_plate = side.vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
     v_brand = side.vehicle_data.get('brand') or reg.get('brand') or 'N/A'
-    v_type = side.vehicle_data.get('type') or reg.get('type') or 'N/A'
+    v_type = side.vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A'
     v_color = side.vehicle_data.get('color') or ''
     full_brand = f"{v_brand} ({v_color})" if v_color else v_brand
 
@@ -1011,8 +1000,8 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 
     # --- Multi-campus duplicate entry & wrong campus exit flagging ---
     if open_cross_log:
-        active_campus_norm = normalize_campus_name(open_cross_log.get('campus'))
-        check_in_time = open_cross_log.get('check_in', '')
+        active_campus_norm = normalize_campus_name(open_cross_log.get('campus_gate'))
+        check_in_time = open_cross_log.get('entered_at', '')
         try:
             dt = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
             check_in_time = dt.strftime('%I:%M %p')
@@ -1030,17 +1019,16 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 
             # Log the flagged violation to database
             try:
-                supabase.table('vehicle_log').insert({
-                    "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
+                supabase.table('gate_log').insert({
+                    "vehicle_id": side.vehicle_data.get('vehicle_id') or reg.get('vehicle_id') or 1,
                     "registration_id": reg['registration_id'],
-                    "check_in": datetime.now().isoformat(),
-                    "check_out": datetime.now().isoformat(),
-                    "logged_status": "denied",
+                    "entered_at": datetime.now().isoformat(),
+                    "exited_at": datetime.now().isoformat(),
+                    "presence_status": "denied",
                     "sticker_status": "registered",
                     "campus_gate": current_gate,
-                    "campus": current_campus_norm,
                     "flagged_alert": "double_access",
-                    "reason": reason_text
+                    "note": reason_text
                 }).execute()
             except Exception as err:
                 print(f"DEBUG: Error logging double access violation: {err}")
@@ -1056,7 +1044,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                 "time": datetime.now().strftime("%I:%M:%S %p")
             }
 
-            side.anomaly_id = open_cross_log.get('vehicle_log_id')
+            side.anomaly_id = open_cross_log.get('gate_log_id')
             side.state = GateState.LOG_WARNING
             return
 
@@ -1068,17 +1056,16 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
 
                 # Log the flagged violation to database
                 try:
-                    supabase.table('vehicle_log').insert({
-                        "vehicle_information_id": side.vehicle_data.get('vehicle_information_id') or reg.get('vehicle_information_id') or 1,
+                    supabase.table('gate_log').insert({
+                        "vehicle_id": side.vehicle_data.get('vehicle_id') or reg.get('vehicle_id') or 1,
                         "registration_id": reg['registration_id'],
-                        "check_in": datetime.now().isoformat(),
-                        "check_out": datetime.now().isoformat(),
-                        "logged_status": "denied",
+                        "entered_at": datetime.now().isoformat(),
+                        "exited_at": datetime.now().isoformat(),
+                        "presence_status": "denied",
                         "sticker_status": "registered",
                         "campus_gate": current_gate,
-                        "campus": current_campus_norm,
                         "flagged_alert": "wrong_campus_exit",
-                        "reason": reason_text
+                        "note": reason_text
                     }).execute()
                 except Exception as err:
                     print(f"DEBUG: Error logging wrong campus exit violation: {err}")
@@ -1094,7 +1081,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
                     "time": datetime.now().strftime("%I:%M:%S %p")
                 }
 
-                side.anomaly_id = open_cross_log.get('vehicle_log_id')
+                side.anomaly_id = open_cross_log.get('gate_log_id')
                 side.state = GateState.LOG_WARNING
                 return
             else:
@@ -1110,7 +1097,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
         "plate": v_plate,
         "brand": full_brand,
         "type": v_type,
-        "status": side.logged_status or "REGISTERED",
+        "status": side.presence_status or "REGISTERED",
         "time": datetime.now().strftime("%I:%M:%S %p")
     }
 
@@ -1128,12 +1115,12 @@ def process_qr(side, qr_text, frame):
     try:
         side.snapshot = frame.copy()
         
-        # Look up registration by qr_code or qr_unique_code in Supabase
+        # Look up registration by qr_image or qr_code in Supabase
         side.processing_step = "Checking registration..."
         try:
-            response = net_retry(lambda: supabase.table('registration').select('*').eq('qr_code', qr_text).execute())
+            response = net_retry(lambda: supabase.table('sticker_application').select('*').eq('qr_image', qr_text).execute())
             if not response.data:
-                response = net_retry(lambda: supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute())
+                response = net_retry(lambda: supabase.table('sticker_application').select('*').eq('qr_code', qr_text).execute())
             
             if not response.data:
                 side.state = GateState.INVALID_QR
@@ -1175,14 +1162,14 @@ def lookup_registered_plate(side, plate_input):
             active = [r for r in rows if str(r.get('status') or '').lower() not in ('rejected', 'revoked', 'deleted')]
             return active or rows[:1]
 
-        # 1. Match vehicle_information.plate_number, ignoring spaces and hyphens
-        v_res = net_retry(lambda: supabase.table('vehicle_information').select('*').execute()) if not reg_only else _EmptyResponse()
+        # 1. Match vehicle.plate_number, ignoring spaces and hyphens
+        v_res = net_retry(lambda: supabase.table('vehicle').select('*').execute()) if not reg_only else _EmptyResponse()
         for v_item in (v_res.data or []):
             p_raw = str(v_item.get('plate_number') or '').strip().upper()
             if re.sub(r'[\s\-]', '', p_raw) != clean_input:
                 continue
-            r_res = net_retry(lambda: supabase.table('registration').select('*')\
-                .eq('vehicle_information_id', v_item['vehicle_information_id'])\
+            r_res = net_retry(lambda: supabase.table('sticker_application').select('*')\
+                .eq('vehicle_id', v_item['vehicle_id'])\
                 .order('created_at', desc=True).execute())
             candidates = _active(r_res.data)
             if candidates:
@@ -1192,7 +1179,7 @@ def lookup_registered_plate(side, plate_input):
 
         # 2. Registration number (digits only, or typed as "REG 1042")
         if not reg and plate_input.isdigit():
-            r_res = net_retry(lambda: supabase.table('registration').select('*').eq('registration_id', int(plate_input)).execute())
+            r_res = net_retry(lambda: supabase.table('sticker_application').select('*').eq('registration_id', int(plate_input)).execute())
             candidates = _active(r_res.data)
             if candidates:
                 reg = candidates[0]
@@ -1244,52 +1231,50 @@ def submit_entry_exit(side):
         try:
             gate_enum, norm_campus_name = get_campus_gate_and_name()
             if side.type == 'out':
-                # EXIT: Close any open entry logs in vehicle_log where check_out is null
+                # EXIT: Close any open entry logs in gate_log where exited_at is null
                 side.scan_cooldown_end = time.time() + 5.0
                 side.prolong_ready_time = time.time() + 5.0
                 exit_flag = getattr(side, 'exit_flag', None)
-                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
+                flag_fields = {"flagged_alert": exit_flag[0], "note": exit_flag[1]} if exit_flag else {}
                 try:
-                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
-                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                    all_logs = supabase.table('gate_log').select('gate_log_id, exited_at').eq('registration_id', reg_id).execute()
+                    open_rows = [r for r in (all_logs.data or []) if not r.get('exited_at')]
                     if open_rows:
                         for row in open_rows:
-                            supabase.table('vehicle_log').update({
-                                "check_out": current_time,
-                                "logged_status": "exited_campus",
+                            supabase.table('gate_log').update({
+                                "exited_at": current_time,
+                                "presence_status": "exited_campus",
                                 **flag_fields
-                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
-                        print(f"DEBUG: Closed {len(open_rows)} open vehicle_log row(s) on exit")
+                            }).eq('gate_log_id', row['gate_log_id']).execute()
+                        print(f"DEBUG: Closed {len(open_rows)} open gate_log row(s) on exit")
                     else:
                         # Fallback: create standalone exit log
                         log_data = {
-                            "vehicle_information_id": side.data.get('vehicle_information_id') or 1,
+                            "vehicle_id": side.data.get('vehicle_id') or 1,
                             "registration_id": reg_id,
-                            "check_in": current_time,
-                            "check_out": current_time,
-                            "logged_status": "exited_campus",
+                            "entered_at": current_time,
+                            "exited_at": current_time,
+                            "presence_status": "exited_campus",
                             "sticker_status": "registered",
                             "campus_gate": gate_enum,
-                            "campus": norm_campus_name,
                             **flag_fields
                         }
-                        supabase.table('vehicle_log').insert(log_data).execute()
+                        supabase.table('gate_log').insert(log_data).execute()
                         print(f"DEBUG: Standalone exit log created")
                 except Exception as e:
                     print(f"DEBUG: Error updating exit log: {e}")
             else:
-                # ENTRY: Insert new vehicle_log with check_out = None
+                # ENTRY: Insert new gate_log with exited_at = None
                 log_data = {
-                    "vehicle_information_id": side.data.get('vehicle_information_id') or 1,
+                    "vehicle_id": side.data.get('vehicle_id') or 1,
                     "registration_id": reg_id,
-                    "check_in": current_time,
-                    "check_out": None,
-                    "logged_status": "inside_campus",
+                    "entered_at": current_time,
+                    "exited_at": None,
+                    "presence_status": "inside_campus",
                     "sticker_status": "registered",
                     "campus_gate": gate_enum,
-                    "campus": norm_campus_name
                 }
-                supabase.table('vehicle_log').insert(log_data).execute()
+                supabase.table('gate_log').insert(log_data).execute()
                 print(f"DEBUG: Entry log submitted successfully")
             
             # Add to global logs table in UI
@@ -1320,15 +1305,15 @@ def submit_entry_exit(side):
 _placeholder_ids = None
 
 def get_placeholder_ids():
-    """Find an existing registration row (registration_id, vehicle_information_id)
-    to attach VIP/guest logs to, since vehicle_log requires valid foreign keys."""
+    """Find an existing registration row (registration_id, vehicle_id)
+    to attach VIP/guest logs to, since gate_log requires valid foreign keys."""
     global _placeholder_ids
     if _placeholder_ids:
         return _placeholder_ids
     try:
-        r = supabase.table('registration').select('registration_id, vehicle_information_id').order('registration_id').limit(1).execute()
+        r = supabase.table('sticker_application').select('registration_id, vehicle_id').order('registration_id').limit(1).execute()
         if r.data:
-            _placeholder_ids = (r.data[0]['registration_id'], r.data[0]['vehicle_information_id'])
+            _placeholder_ids = (r.data[0]['registration_id'], r.data[0]['vehicle_id'])
             print(f"DEBUG: Using placeholder IDs for VIP/guest logs: {_placeholder_ids}")
             return _placeholder_ids
         print("DEBUG: No registration rows exist - cannot attach VIP/guest log")
@@ -1348,61 +1333,59 @@ def submit_vip(side):
 
             gate_enum, norm_campus_name = get_campus_gate_and_name()
             if side.type == 'out':
-                # VIP EXIT: Find open VIP record in vehicle_log and close it
+                # VIP EXIT: Find open VIP record in gate_log and close it
                 target_log_id = None
                 try:
-                    all_campus_logs = supabase.table('vehicle_log').select('*')\
-                        .ilike('campus', f"%{norm_campus_name}%")\
+                    all_campus_logs = supabase.table('gate_log').select('*')\
+                        .eq('campus_gate', gate_enum)\
                         .order('created_at', desc=True).limit(30).execute()
                     
-                    open_vip_logs = [r for r in (all_campus_logs.data or []) if not r.get('check_out')]
+                    open_vip_logs = [r for r in (all_campus_logs.data or []) if not r.get('exited_at')]
                     if open_vip_logs:
                         for row in open_vip_logs:
-                            st = str(row.get('logged_status', '')).lower()
-                            if row.get('vip_access') or row.get('is_vip') or 'vip' in st:
-                                target_log_id = row['vehicle_log_id']
+                            st = str(row.get('presence_status', '')).lower()
+                            if row.get('is_vip') or row.get('is_vip') or 'vip' in st:
+                                target_log_id = row['gate_log_id']
                                 break
                         if not target_log_id and open_vip_logs:
-                            target_log_id = open_vip_logs[0]['vehicle_log_id']
+                            target_log_id = open_vip_logs[0]['gate_log_id']
 
                     if target_log_id:
-                        supabase.table('vehicle_log').update({
-                            "check_out": current_time,
-                            "logged_status": "exited_campus"
-                        }).eq('vehicle_log_id', target_log_id).execute()
-                        print(f"DEBUG: Closed open VIP vehicle_log row {target_log_id} on exit")
+                        supabase.table('gate_log').update({
+                            "exited_at": current_time,
+                            "presence_status": "exited_campus"
+                        }).eq('gate_log_id', target_log_id).execute()
+                        print(f"DEBUG: Closed open VIP gate_log row {target_log_id} on exit")
                     else:
                         log_data = {
-                            "vehicle_information_id": placeholder_vehicle_id,
+                            "vehicle_id": placeholder_vehicle_id,
                             "registration_id": placeholder_reg_id,
-                            "check_in": current_time,
-                            "check_out": current_time,
-                            "logged_status": "exited_campus",
+                            "entered_at": current_time,
+                            "exited_at": current_time,
+                            "presence_status": "exited_campus",
                             "sticker_status": "unregistered",
-                            "vip_access": True,
+                            "is_vip": True,
                             "campus_gate": gate_enum,
-                            "campus": norm_campus_name,
-                            "reason": "VIP Access"
+                            "note": "VIP Access"
                         }
-                        supabase.table('vehicle_log').insert(log_data).execute()
+                        supabase.table('gate_log').insert(log_data).execute()
                 except Exception as e:
                     print(f"DEBUG: Error processing VIP exit: {e}")
             else:
-                # VIP ENTRY: Log directly into vehicle_log with vip_access = True
+                # VIP ENTRY: Log directly into gate_log with is_vip = True
                 log_data = {
-                    "vehicle_information_id": placeholder_vehicle_id,
+                    "vehicle_id": placeholder_vehicle_id,
                     "registration_id": placeholder_reg_id,
-                    "check_in": current_time,
-                    "check_out": None,
-                    "logged_status": "inside_campus",
+                    "entered_at": current_time,
+                    "exited_at": None,
+                    "presence_status": "inside_campus",
                     "sticker_status": "unregistered",
-                    "vip_access": True,
+                    "is_vip": True,
                     "campus_gate": gate_enum,
-                    "campus": norm_campus_name,
-                    "reason": "VIP Access"
+                    "note": "VIP Access"
                 }
-                supabase.table('vehicle_log').insert(log_data).execute()
-                print(f"DEBUG: Logged VIP entry in vehicle_log for {norm_campus_name}")
+                supabase.table('gate_log').insert(log_data).execute()
+                print(f"DEBUG: Logged VIP entry in gate_log for {norm_campus_name}")
 
             global latest_scanned_details
             latest_scanned_details = {
@@ -1446,9 +1429,9 @@ def submit_manual_guest(side):
                 try:
                     guest_data = {
                         "plate_number": plate_val,
-                        "id_number": id_val,
+                        "guest_id_number": id_val,
                         "purpose": purpose_val,
-                        "timestamp": current_time
+                        "arrived_at": current_time
                     }
                     
                     guest_result = supabase.table('guest').insert(guest_data).execute()
@@ -1457,15 +1440,14 @@ def submit_manual_guest(side):
                     gate_enum, norm_campus_name = get_campus_gate_and_name()
                     log_data = {
                         "guest_id": guest_id,
-                        "check_in": current_time,
-                        "check_out": None,
-                        "logged_status": "inside_campus",
+                        "entered_at": current_time,
+                        "exited_at": None,
+                        "presence_status": "inside_campus",
                         "sticker_status": "unregistered",
                         "campus_gate": gate_enum,
-                        "campus": norm_campus_name
                     }
                     
-                    vehicle_log_result = supabase.table('vehicle_log').insert(log_data).execute()
+                    vehicle_log_result = supabase.table('gate_log').insert(log_data).execute()
                     sync_parking_availability()
                     refresh_parking_data()
 
@@ -1495,27 +1477,27 @@ def submit_manual_guest(side):
                 exit_time = datetime.now().isoformat()
                 
                 # Find the guest entries
-                guest_response = supabase.table('guest').select('*').eq('plate_number', plate_number).order('timestamp', desc=True).limit(5).execute()
+                guest_response = supabase.table('guest').select('*').eq('plate_number', plate_number).order('arrived_at', desc=True).limit(5).execute()
                 
                 active_guest = None
                 active_vlog_id = None
                 if guest_response.data:
                     for candidate in guest_response.data:
                         gid = candidate.get('guest_id')
-                        vlog_resp = supabase.table('vehicle_log').select('*').eq('guest_id', gid).is_('check_out', 'null').order('check_in', desc=True).limit(1).execute()
+                        vlog_resp = supabase.table('gate_log').select('*').eq('guest_id', gid).is_('exited_at', 'null').order('entered_at', desc=True).limit(1).execute()
                         if vlog_resp.data and len(vlog_resp.data) > 0:
                             active_guest = candidate
-                            active_vlog_id = vlog_resp.data[0].get('vehicle_log_id')
+                            active_vlog_id = vlog_resp.data[0].get('gate_log_id')
                             break
 
                 if active_guest and active_vlog_id:
-                    print(f"DEBUG: Updating guest exit for vehicle_log_id: {active_vlog_id}")
-                    supabase.table('vehicle_log').update({"check_out": exit_time, "logged_status": "exited_campus"}).eq('vehicle_log_id', active_vlog_id).execute()
+                    print(f"DEBUG: Updating guest exit for gate_log_id: {active_vlog_id}")
+                    supabase.table('gate_log').update({"exited_at": exit_time, "presence_status": "exited_campus"}).eq('gate_log_id', active_vlog_id).execute()
                     sync_parking_availability()
                     refresh_parking_data()
                     latest_scanned_details = {
                         "gate": "EXIT",
-                        "name": f"Guest (ID: {active_guest.get('id_number', 'N/A')})",
+                        "name": f"Guest (ID: {active_guest.get('guest_id_number', 'N/A')})",
                         "role": "Guest",
                         "plate": plate_number or "N/A",
                         "brand": active_guest.get('purpose', 'Guest Exit'),
@@ -1553,26 +1535,26 @@ def search_guest(side):
     def _run():
         try:
             # Search guest table by plate number in Supabase
-            response = supabase.table('guest').select('*').eq('plate_number', search_term).order('timestamp', desc=True).limit(5).execute()
+            response = supabase.table('guest').select('*').eq('plate_number', search_term).order('arrived_at', desc=True).limit(5).execute()
             
             if response.data and len(response.data) > 0:
                 active_guest = None
                 active_vlog_id = None
                 for candidate in response.data:
                     gid = candidate.get('guest_id')
-                    vlog_resp = supabase.table('vehicle_log').select('*').eq('guest_id', gid).is_('check_out', 'null').order('check_in', desc=True).limit(1).execute()
+                    vlog_resp = supabase.table('gate_log').select('*').eq('guest_id', gid).is_('exited_at', 'null').order('entered_at', desc=True).limit(1).execute()
                     if vlog_resp.data and len(vlog_resp.data) > 0:
                         active_guest = candidate
-                        active_vlog_id = vlog_resp.data[0].get('vehicle_log_id')
+                        active_vlog_id = vlog_resp.data[0].get('gate_log_id')
                         break
                 
                 if active_guest and active_vlog_id:
                     side.data = {
                         'plate': active_guest.get('plate_number'),
-                        'id_number': active_guest.get('id_number'),
+                        'guest_id_number': active_guest.get('guest_id_number'),
                         'purpose': active_guest.get('purpose'),
-                        'timestamp': active_guest.get('timestamp'),
-                        'vehicle_log_id': active_vlog_id
+                        'timestamp': active_guest.get('arrived_at'),
+                        'gate_log_id': active_vlog_id
                     }
                     side.state = GateState.MANUAL_GUEST_SEARCH_RESULT
                 else:
@@ -1598,19 +1580,19 @@ def submit_guest_exit(side):
     
     def _run():
         exit_time = datetime.now().isoformat()
-        vehicle_log_id = side.data.get('vehicle_log_id')
+        gate_log_id = side.data.get('gate_log_id')
         
         try:
             # Update vehicle log with checkout time and status Exited
-            if vehicle_log_id:
-                supabase.table('vehicle_log').update({"check_out": exit_time, "logged_status": "exited_campus"}).eq('vehicle_log_id', vehicle_log_id).execute()
+            if gate_log_id:
+                supabase.table('gate_log').update({"exited_at": exit_time, "presence_status": "exited_campus"}).eq('gate_log_id', gate_log_id).execute()
                 sync_parking_availability()
                 refresh_parking_data()
                 
                 global latest_scanned_details
                 latest_scanned_details = {
                     "gate": "EXIT",
-                    "name": f"Guest (ID: {side.data.get('id_number', 'N/A')})",
+                    "name": f"Guest (ID: {side.data.get('guest_id_number', 'N/A')})",
                     "role": "Guest",
                     "plate": side.data.get('plate', 'N/A'),
                     "brand": side.data.get('purpose', 'Guest Exit'),
@@ -1775,7 +1757,7 @@ def render_guest_exit_bottom(img, side):
         
         if side.data:
             draw_text(img, f"Plate Number : {side.data.get('plate', 'N/A')}", (box_x + 35, box_y + 118), 0.72, (20, 25, 35), 2)
-            draw_text(img, f"ID Number    : {side.data.get('id_number', 'N/A')}", (box_x + 35, box_y + 152), 0.72, (20, 25, 35), 2)
+            draw_text(img, f"ID Number    : {side.data.get('guest_id_number', 'N/A')}", (box_x + 35, box_y + 152), 0.72, (20, 25, 35), 2)
             draw_text(img, f"Purpose      : {side.data.get('purpose', 'N/A')}", (box_x + 35, box_y + 186), 0.72, (180, 70, 20), 2)
             entry_time = side.data.get('timestamp', 'N/A')
             if entry_time and entry_time != 'N/A':
@@ -1846,7 +1828,7 @@ def get_card_status(side):
         block = side.block_info or {}
         until_dt = parse_db_timestamp(block.get('blocked_until'))
         until_txt = until_dt.astimezone().strftime('%b %d, %Y %I:%M %p') if until_dt else 'N/A'
-        by_txt = str(block.get('block_by') or 'N/A').replace('_', ' ').upper()
+        by_txt = str(block.get('blocked_by') or 'N/A').replace('_', ' ').upper()
         return "BLOCKED - ENTRY DENIED", (0, 0, 200), [
             f"Time remaining: {format_remaining(block.get('blocked_until'))}  (until {until_txt})",
             f"Reason: {str(block.get('reason') or 'No reason given')[:60]}",
@@ -2446,9 +2428,9 @@ while True:
                     side.snapshot = crop.copy()
                     def _log_exit(qr_text=data):
                         try:
-                            response = supabase.table('registration').select('*').eq('qr_code', qr_text).execute()
+                            response = supabase.table('sticker_application').select('*').eq('qr_image', qr_text).execute()
                             if not response.data:
-                                response = supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute()
+                                response = supabase.table('sticker_application').select('*').eq('qr_code', qr_text).execute()
                             if response.data:
                                 reg = response.data[0]
                                 current_time = datetime.now().isoformat()
@@ -2456,38 +2438,37 @@ while True:
                                 
                                 # Fetch vehicle info
                                 vehicle_data = {}
-                                v_info_id = reg.get('vehicle_information_id')
+                                v_info_id = reg.get('vehicle_id')
                                 if v_info_id:
                                     try:
-                                        vres = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_info_id).execute()
+                                        vres = supabase.table('vehicle').select('*').eq('vehicle_id', v_info_id).execute()
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
-                                # Close open vehicle_log row (revoked / unregistered / blocked exits are flagged)
+                                # Close open gate_log row (revoked / unregistered / blocked exits are flagged)
                                 exit_flag = exit_flag_for(reg, v_info_id)
-                                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
+                                flag_fields = {"flagged_alert": exit_flag[0], "note": exit_flag[1]} if exit_flag else {}
                                 try:
-                                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
-                                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                                    all_logs = supabase.table('gate_log').select('gate_log_id, exited_at').eq('registration_id', reg_id).execute()
+                                    open_rows = [r for r in (all_logs.data or []) if not r.get('exited_at')]
                                     if open_rows:
                                         for row in open_rows:
-                                            supabase.table('vehicle_log').update({
-                                                "check_out": current_time,
-                                                "logged_status": "exited_campus",
+                                            supabase.table('gate_log').update({
+                                                "exited_at": current_time,
+                                                "presence_status": "exited_campus",
                                                 **flag_fields
-                                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
+                                            }).eq('gate_log_id', row['gate_log_id']).execute()
                                         print(f"[{side.type}] Closed {len(open_rows)} open log(s) during countdown")
                                     else:
                                         gate_enum, norm_campus_name = get_campus_gate_and_name()
-                                        supabase.table('vehicle_log').insert({
-                                            "vehicle_information_id": v_info_id or 1,
+                                        supabase.table('gate_log').insert({
+                                            "vehicle_id": v_info_id or 1,
                                             "registration_id": reg_id,
-                                            "check_in": current_time,
-                                            "check_out": current_time,
-                                            "logged_status": "exited_campus",
+                                            "entered_at": current_time,
+                                            "exited_at": current_time,
+                                            "presence_status": "exited_campus",
                                             "sticker_status": "registered",
                                             "campus_gate": gate_enum,
-                                            "campus": norm_campus_name,
                                             **flag_fields
                                         }).execute()
                                 except Exception as e:
@@ -2500,7 +2481,7 @@ while True:
                                 d_role = (reg.get('role') or 'N/A').capitalize()
                                 d_plate = vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
                                 d_brand = vehicle_data.get('brand') or reg.get('brand') or 'N/A'
-                                d_type = vehicle_data.get('type') or reg.get('type') or 'N/A'
+                                d_type = vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A'
                                 d_col = vehicle_data.get('color') or ''
                                 if d_col: d_brand = f"{d_brand} ({d_col})"
 
@@ -2551,9 +2532,9 @@ while True:
                     
                     def _log_prolong_exit(qr_text=data):
                         try:
-                            response = supabase.table('registration').select('*').eq('qr_code', qr_text).execute()
+                            response = supabase.table('sticker_application').select('*').eq('qr_image', qr_text).execute()
                             if not response.data:
-                                response = supabase.table('registration').select('*').eq('qr_unique_code', qr_text).execute()
+                                response = supabase.table('sticker_application').select('*').eq('qr_code', qr_text).execute()
                             if response.data:
                                 reg = response.data[0]
                                 current_time = datetime.now().isoformat()
@@ -2561,38 +2542,37 @@ while True:
                                 
                                 # Fetch vehicle info
                                 vehicle_data = {}
-                                v_info_id = reg.get('vehicle_information_id')
+                                v_info_id = reg.get('vehicle_id')
                                 if v_info_id:
                                     try:
-                                        vres = supabase.table('vehicle_information').select('*').eq('vehicle_information_id', v_info_id).execute()
+                                        vres = supabase.table('vehicle').select('*').eq('vehicle_id', v_info_id).execute()
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
-                                # Close open vehicle_log row (revoked / unregistered / blocked exits are flagged)
+                                # Close open gate_log row (revoked / unregistered / blocked exits are flagged)
                                 exit_flag = exit_flag_for(reg, v_info_id)
-                                flag_fields = {"flagged_alert": exit_flag[0], "reason": exit_flag[1]} if exit_flag else {}
+                                flag_fields = {"flagged_alert": exit_flag[0], "note": exit_flag[1]} if exit_flag else {}
                                 try:
-                                    all_logs = supabase.table('vehicle_log').select('vehicle_log_id, check_out').eq('registration_id', reg_id).execute()
-                                    open_rows = [r for r in (all_logs.data or []) if not r.get('check_out')]
+                                    all_logs = supabase.table('gate_log').select('gate_log_id, exited_at').eq('registration_id', reg_id).execute()
+                                    open_rows = [r for r in (all_logs.data or []) if not r.get('exited_at')]
                                     if open_rows:
                                         for row in open_rows:
-                                            supabase.table('vehicle_log').update({
-                                                "check_out": current_time,
-                                                "logged_status": "exited_campus",
+                                            supabase.table('gate_log').update({
+                                                "exited_at": current_time,
+                                                "presence_status": "exited_campus",
                                                 **flag_fields
-                                            }).eq('vehicle_log_id', row['vehicle_log_id']).execute()
+                                            }).eq('gate_log_id', row['gate_log_id']).execute()
                                         print(f"[{side.type}] PROLONG: Closed {len(open_rows)} open log(s)")
                                     else:
                                         gate_enum, norm_campus_name = get_campus_gate_and_name()
-                                        supabase.table('vehicle_log').insert({
-                                            "vehicle_information_id": v_info_id or 1,
+                                        supabase.table('gate_log').insert({
+                                            "vehicle_id": v_info_id or 1,
                                             "registration_id": reg_id,
-                                            "check_in": current_time,
-                                            "check_out": current_time,
-                                            "logged_status": "exited_campus",
+                                            "entered_at": current_time,
+                                            "exited_at": current_time,
+                                            "presence_status": "exited_campus",
                                             "sticker_status": "registered",
                                             "campus_gate": gate_enum,
-                                            "campus": norm_campus_name,
                                             **flag_fields
                                         }).execute()
                                 except Exception as e:
@@ -2605,7 +2585,7 @@ while True:
                                 d_role = (reg.get('role') or 'N/A').capitalize()
                                 d_plate = vehicle_data.get('plate_number') or reg.get('plate_number') or 'N/A'
                                 d_brand = vehicle_data.get('brand') or reg.get('brand') or 'N/A'
-                                d_type = vehicle_data.get('type') or reg.get('type') or 'N/A'
+                                d_type = vehicle_data.get('vehicle_type') or reg.get('type') or 'N/A'
                                 d_col = vehicle_data.get('color') or ''
                                 if d_col: d_brand = f"{d_brand} ({d_col})"
 

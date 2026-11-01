@@ -4,6 +4,7 @@ import { supabase } from '$lib/server/supabase';
 import { env } from '$env/dynamic/private';
 import { uploadToStorage } from '$lib/server/storage';
 import crypto from 'crypto';
+import { campusGate } from '$lib/campus';
 
 function checkAuth(request: Request): boolean {
     return request.headers.get('X-Gate-Key') === env.PRIVATE_GATE_API_KEY;
@@ -36,7 +37,7 @@ export const POST: RequestHandler = async ({ request }) => {
     }
 
     try {
-        const { type, ticket_no, name, mobile, make_model, plate, id_number, purpose, reason, pic_base64, logged_status, campus } = await request.json();
+        const { type, ticket_no, name, mobile, make_model, plate, guest_id_number, purpose, reason, pic_base64, presence_status, campus } = await request.json();
         const rawCampus = campus || 'Main Campus';
         let entryCampus = 'Main Campus';
         if (rawCampus.toLowerCase().includes('rnp')) entryCampus = 'RNP';
@@ -78,7 +79,7 @@ export const POST: RequestHandler = async ({ request }) => {
                     mobile: mobile || null,
                     make_model,
                     plate,
-                    id_number: id_number || null,
+                    guest_id_number: guest_id_number || null,
                     purpose: purpose || reason || null,
                     reason: reason || null,
                     in: new Date().toISOString(),
@@ -91,50 +92,49 @@ export const POST: RequestHandler = async ({ request }) => {
             // Get current parking capacity settings
             const { data: settingsData } = await supabase
                 .from('parking_capacity')
-                .select('parking_capacity')
-                .eq('campus', entryCampus)
-                .order('date_time', { ascending: false })
+                .select('capacity')
+                .eq('campus_gate', campusGate(entryCampus))
+                .order('recorded_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            const parking_capacity = settingsData?.parking_capacity ?? 500;
+            const parking_capacity = settingsData?.capacity ?? 500;
 
             // Get current slot counts from the most recent parking capacity record
             const { data: lastParkingData } = await supabase
                 .from('parking_capacity')
-                .select('slot_occupied, slot_unoccupied')
-                .eq('campus', entryCampus)
-                .order('date_time', { ascending: false })
+                .select('occupied, available')
+                .eq('campus_gate', campusGate(entryCampus))
+                .order('recorded_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            const current_occupied = lastParkingData?.slot_occupied || 0;
-            const current_unoccupied = lastParkingData?.slot_unoccupied || parking_capacity;
+            const current_occupied = lastParkingData?.occupied || 0;
+            const current_unoccupied = lastParkingData?.available || parking_capacity;
 
             // Calculate new slot counts
             const new_occupied = current_occupied + 1;
             const new_unoccupied = Math.max(0, current_unoccupied - 1);
 
-            // Get a valid vehicle_log_id for foreign key constraint
+            // Get a valid gate_log_id for foreign key constraint
             const { data: vehicleLog } = await supabase
-                .from('vehicle_log')
-                .select('vehicle_log_id')
-                .order('vehicle_log_id', { ascending: false })
+                .from('gate_log')
+                .select('gate_log_id')
+                .order('gate_log_id', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            const vehicle_log_id = vehicleLog?.vehicle_log_id || null;
+            const gate_log_id = vehicleLog?.gate_log_id || null;
 
-            // Create new parking capacity record (use existing vehicle_log_id for guests)
+            // Create new parking capacity record (use existing gate_log_id for guests)
             const { error: parkingError } = await supabase
                 .from('parking_capacity')
                 .insert({
-                    vehicle_log_id, // Use existing vehicle_log_id for foreign key constraint
-                    campus: entryCampus,
-                    parking_capacity,
-                    slot_occupied: new_occupied,
-                    slot_unoccupied: new_unoccupied,
-                    date_time: new Date().toISOString()
+                    campus_gate: campusGate(entryCampus),
+                    capacity: parking_capacity,
+                    occupied: new_occupied,
+                    available: new_unoccupied,
+                    recorded_at: new Date().toISOString()
                 });
 
             if (parkingError) {
@@ -167,7 +167,7 @@ export const POST: RequestHandler = async ({ request }) => {
                     .update({
                         out: new Date().toISOString(),
                         pic_out: picUrl,
-                        logged_status_out: logged_status || null
+                        logged_status_out: presence_status || null
                     })
                     .eq('guest_id', rows.guest_id);
 
@@ -177,46 +177,45 @@ export const POST: RequestHandler = async ({ request }) => {
                 // Get current parking capacity settings
                 const { data: settingsData } = await supabase
                     .from('parking_capacity')
-                    .select('parking_capacity')
-                    .eq('campus', entryCampus)
-                    .order('date_time', { ascending: false })
+                    .select('capacity')
+                    .eq('campus_gate', campusGate(entryCampus))
+                    .order('recorded_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
 
-                const parking_capacity = settingsData?.parking_capacity ?? 500;
+                const parking_capacity = settingsData?.capacity ?? 500;
 
                 // Get current slot counts from the most recent parking capacity record
                 const { data: lastParkingData } = await supabase
                     .from('parking_capacity')
-                    .select('slot_occupied, slot_unoccupied')
-                    .eq('campus', entryCampus)
-                    .order('date_time', { ascending: false })
+                    .select('occupied, available')
+                    .eq('campus_gate', campusGate(entryCampus))
+                    .order('recorded_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
 
-                const current_occupied = lastParkingData?.slot_occupied || 0;
-                const current_unoccupied = lastParkingData?.slot_unoccupied || parking_capacity;
+                const current_occupied = lastParkingData?.occupied || 0;
+                const current_unoccupied = lastParkingData?.available || parking_capacity;
 
                 // Calculate new slot counts
                 const new_occupied = Math.max(0, current_occupied - 1);
                 const new_unoccupied = Math.min(parking_capacity, current_unoccupied + 1);
 
-                // Get a valid vehicle_log_id for foreign key constraint
+                // Get a valid gate_log_id for foreign key constraint
                 const { data: vehicleLog } = await supabase
-                    .from('vehicle_log')
-                    .select('vehicle_log_id')
-                    .order('vehicle_log_id', { ascending: false })
+                    .from('gate_log')
+                    .select('gate_log_id')
+                    .order('gate_log_id', { ascending: false })
                     .limit(1)
-                const vehicle_log_id = (vehicleLog as any)?.[0]?.vehicle_log_id || null;
+                const gate_log_id = (vehicleLog as any)?.[0]?.gate_log_id || null;
                 const { error: parkingError } = await supabase
                     .from('parking_capacity')
                     .insert({
-                        vehicle_log_id, // Use existing vehicle_log_id for foreign key constraint
-                        campus: entryCampus,
-                        parking_capacity,
-                        slot_occupied: new_occupied,
-                        slot_unoccupied: new_unoccupied,
-                        date_time: new Date().toISOString()
+                        campus_gate: campusGate(entryCampus),
+                        capacity: parking_capacity,
+                        occupied: new_occupied,
+                        available: new_unoccupied,
+                        recorded_at: new Date().toISOString()
                     });
 
                 if (parkingError) {
@@ -249,7 +248,7 @@ export const POST: RequestHandler = async ({ request }) => {
                         in: new Date().toISOString(),
                         out: new Date().toISOString(),
                         pic_out: picUrl,
-                        logged_status_out: logged_status || null
+                        logged_status_out: presence_status || null
                     });
 
                 if (insertError) throw insertError;
@@ -258,50 +257,49 @@ export const POST: RequestHandler = async ({ request }) => {
                 // Get current parking capacity settings
                 const { data: settingsData } = await supabase
                     .from('parking_capacity')
-                    .select('parking_capacity')
-                    .eq('campus', entryCampus)
-                    .order('date_time', { ascending: false })
+                    .select('capacity')
+                    .eq('campus_gate', campusGate(entryCampus))
+                    .order('recorded_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
 
-                const parking_capacity = settingsData?.parking_capacity ?? 500;
+                const parking_capacity = settingsData?.capacity ?? 500;
 
                 // Get current slot counts from the most recent parking capacity record
                 const { data: lastParkingData } = await supabase
                     .from('parking_capacity')
-                    .select('slot_occupied, slot_unoccupied')
-                    .eq('campus', entryCampus)
-                    .order('date_time', { ascending: false })
+                    .select('occupied, available')
+                    .eq('campus_gate', campusGate(entryCampus))
+                    .order('recorded_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
 
-                const current_occupied = lastParkingData?.slot_occupied || 0;
-                const current_unoccupied = lastParkingData?.slot_unoccupied || parking_capacity;
+                const current_occupied = lastParkingData?.occupied || 0;
+                const current_unoccupied = lastParkingData?.available || parking_capacity;
 
                 // Calculate new slot counts
                 const new_occupied = Math.max(0, current_occupied - 1);
                 const new_unoccupied = Math.min(parking_capacity, current_unoccupied + 1);
 
-                // Get a valid vehicle_log_id for foreign key constraint
+                // Get a valid gate_log_id for foreign key constraint
                 const { data: vehicleLog } = await supabase
-                    .from('vehicle_log')
-                    .select('vehicle_log_id')
-                    .order('vehicle_log_id', { ascending: false })
+                    .from('gate_log')
+                    .select('gate_log_id')
+                    .order('gate_log_id', { ascending: false })
                     .limit(1)
                     .maybeSingle();
 
-                const vehicle_log_id = vehicleLog?.vehicle_log_id || null;
+                const gate_log_id = vehicleLog?.gate_log_id || null;
 
-                // Create new parking capacity record (use existing vehicle_log_id for guests)
+                // Create new parking capacity record (use existing gate_log_id for guests)
                 const { error: parkingError } = await supabase
                     .from('parking_capacity')
                     .insert({
-                        vehicle_log_id, // Use existing vehicle_log_id for foreign key constraint
-                        campus: entryCampus,
-                        parking_capacity,
-                        slot_occupied: new_occupied,
-                        slot_unoccupied: new_unoccupied,
-                        date_time: new Date().toISOString()
+                        campus_gate: campusGate(entryCampus),
+                        capacity: parking_capacity,
+                        occupied: new_occupied,
+                        available: new_unoccupied,
+                        recorded_at: new Date().toISOString()
                     });
 
                 if (parkingError) {

@@ -8,7 +8,7 @@ import { env } from '$env/dynamic/private';
  * Admin Google sign-in.
  * The browser completes Google OAuth through Supabase Auth and sends us the resulting
  * access token. We verify it with Supabase, match the verified email against the
- * existing `users` table (the admin allowlist), link `auth_user_id`, and issue the
+ * existing `users` table (the admin allowlist), link `google_auth_id`, and issue the
  * `gateqr_session` cookie. Google sign-in is the only admin login (no passwords).
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
@@ -31,7 +31,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         const { data: userList, error: queryError } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, department_id, is_active, auth_user_id')
+            .select('user_id, email, account_role, account_type, department_id, is_active, google_auth_id')
             .ilike('email', email)
             .limit(1);
 
@@ -50,12 +50,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             return json({ error: 'Account is deactivated. Please contact OSA administration.' }, { status: 403 });
         }
 
-        // Map user_type and identification to system role (OSA, Security, Dean, Administrative)
+        // Map account_role and account_type to system role (OSA, Security, Dean, Administrative)
         let role = 'applicant';
         let redirectUrl = '/status';
 
-        const uType = (user.user_type || '').toLowerCase();
-        const ident = (user.identification || '').toLowerCase();
+        const uType = (user.account_role || '').toLowerCase();
+        const ident = (user.account_type || '').toLowerCase();
 
         if (uType === 'osa') {
             role = 'osa';
@@ -93,16 +93,16 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         }
 
         // Link the Google identity to the user row (one-time), or reject a mismatch
-        if (!user.auth_user_id) {
+        if (!user.google_auth_id) {
             const { error: linkError } = await supabase
                 .from('users')
-                .update({ auth_user_id: authUser.id })
+                .update({ google_auth_id: authUser.id })
                 .eq('user_id', user.user_id);
             if (linkError) {
-                console.error('[Google Login] Failed to link auth_user_id:', linkError);
+                console.error('[Google Login] Failed to link google_auth_id:', linkError);
                 return json({ error: 'Could not link your Google account. Please contact OSA administration.' }, { status: 500 });
             }
-        } else if (user.auth_user_id !== authUser.id) {
+        } else if (user.google_auth_id !== authUser.id) {
             return json({ error: 'This account is linked to a different Google identity.' }, { status: 403 });
         }
 
@@ -113,7 +113,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
                 email: user.email,
                 name: googleName || null,
                 role,
-                user_type: user.user_type,
+                account_role: user.account_role,
                 department_id: user.department_id || null,
                 user_id: user.user_id
             },
@@ -134,7 +134,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         return json({
             message: 'Login successful',
             role,
-            user_type: user.user_type,
+            account_role: user.account_role,
             redirectUrl
         });
     } catch (error) {

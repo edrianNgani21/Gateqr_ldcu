@@ -19,15 +19,15 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
         const { count: currentlyIn } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select('*', { count: 'exact', head: true })
-            .is('check_out', null);
+            .is('exited_at', null);
 
         const { count: visitsToday } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select('*', { count: 'exact', head: true })
-            .gte('check_in', today)
-            .lt('check_in', tomorrow);
+            .gte('entered_at', today)
+            .lt('entered_at', tomorrow);
 
         // Also count guests currently in (have `in` but no `out` yet)
         const { count: guestCurrentlyIn } = await supabase
@@ -62,37 +62,37 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         const totalCurrentlyIn = (currentlyIn || 0) + (guestCurrentlyIn || 0) + vipCurrentlyIn;
         const totalVisitsToday = (visitsToday || 0) + (guestVisitsToday || 0) + vipVisitsToday;
 
-        // Anomalies today (registered + guest entries with a logged_status)
+        // Anomalies today (registered + guest entries with a presence_status)
         const { count: anomalyRegCount } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select('*', { count: 'exact', head: true })
-            .gte('check_in', today)
-            .lt('check_in', tomorrow)
-            .not('logged_status', 'is', null)
-            .neq('logged_status', '')
-            .neq('logged_status', 'OK')
-            .neq('logged_status', 'Inside');
+            .gte('entered_at', today)
+            .lt('entered_at', tomorrow)
+            .not('presence_status', 'is', null)
+            .neq('presence_status', '')
+            .neq('presence_status', 'OK')
+            .neq('presence_status', 'Inside');
 
         const { count: anomalyGuestCount } = await supabase
             .from('guestlog')
             .select('*', { count: 'exact', head: true })
             .gte('in', today)
             .lt('in', tomorrow)
-            .not('logged_status', 'is', null)
-            .neq('logged_status', '');
+            .not('presence_status', 'is', null)
+            .neq('presence_status', '');
 
         const anomaliesToday = (anomalyRegCount || 0) + (anomalyGuestCount || 0);
 
         // Role breakdown for today (registered entries only)
         const { data: roleBreakdownData } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select(`
                 registration:registration_id(
                     role
                 )
             `)
-            .gte('check_in', today)
-            .lt('check_in', tomorrow);
+            .gte('entered_at', today)
+            .lt('entered_at', tomorrow);
 
         const roleBreakdown: Record<string, number> = { 
             student: 0, 
@@ -114,10 +114,10 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
 
         // Hourly breakdown for today (entries only)
         const { data: hourlyData } = await supabase
-            .from('vehicle_log')
-            .select('check_in')
-            .gte('check_in', today)
-            .lt('check_in', tomorrow);
+            .from('gate_log')
+            .select('entered_at')
+            .gte('entered_at', today)
+            .lt('entered_at', tomorrow);
 
         const { data: guestHourlyData } = await supabase
             .from('guestlog')
@@ -136,7 +136,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
 
         if (hourlyData) {
             hourlyData.forEach(row => {
-                const hour = new Date(row.check_in).getHours();
+                const hour = new Date(row.entered_at).getHours();
                 hourlyChart[hour]++;
             });
         }
@@ -157,29 +157,29 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
 
         const { data: settingsData } = await supabase
             .from('parking_capacity')
-            .select('parking_capacity')
-            .order('date_time', { ascending: false })
+            .select('capacity')
+            .order('recorded_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        const maxCapacity = settingsData?.parking_capacity ?? -1;
+        const maxCapacity = settingsData?.capacity ?? -1;
 
         // Vehicle classification breakdown (currently in)
         const { data: vehicleTypeData } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select(`
-                vehicle_information:vehicle_information_id(
-                    type
+                vehicle:vehicle_id(
+                    vehicle_type
                 )
             `)
-            .is('check_out', null);
+            .is('exited_at', null);
 
         let total_2_wheelers = 0;
         let total_4_wheelers = 0;
 
         if (vehicleTypeData) {
             vehicleTypeData.forEach((log: any) => {
-                const vehicleType = log.vehicle_information?.type || '';
+                const vehicleType = log.vehicle?.vehicle_type || '';
                 if (vehicleType && (vehicleType.includes('2-Wheeler') || vehicleType.includes('Motorcycle') || vehicleType.includes('2-wheel'))) {
                     total_2_wheelers++;
                 } else if (vehicleType && (vehicleType.includes('4-Wheeler') || vehicleType.includes('Car') || vehicleType.includes('4-wheel'))) {

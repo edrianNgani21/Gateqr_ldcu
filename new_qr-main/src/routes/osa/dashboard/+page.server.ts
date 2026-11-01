@@ -26,14 +26,14 @@ export const load: PageServerLoad = async ({ locals }) => {
             pendingChangeRequestsResult,
             recentlyDeletedResult
         ] = await Promise.all([
-            supabase.from('registration').select('*', { count: 'exact', head: true }).neq('status', 'deleted'),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'osa_validated', 'security_checked']).is('sticker_released_at', null),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
-            supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).neq('status', 'deleted'),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'osa_validated', 'security_checked']).is('sticker_released_at', null),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
             supabase.from('department').select('*', { count: 'exact', head: true }),
-            supabase.from('registration').select('status, osa_dist_at, sticker_released_at').neq('status', 'deleted').order('created_at', { ascending: false }),
-            supabase.from('registration').select(`
+            supabase.from('sticker_application').select('status, hardcopy_received_at, sticker_released_at').neq('status', 'deleted').order('created_at', { ascending: false }),
+            supabase.from('sticker_application').select(`
                 *,
                 user:user_id(email),
                 department:department_id(
@@ -42,7 +42,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     administrative_department
                 )
             `).neq('status', 'deleted').order('created_at', { ascending: false }).limit(5),
-            supabase.from('modification_request').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('profile_update_request').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
             supabase.from('recycle_bin').select('*', { count: 'exact', head: true })
         ]);
 
@@ -86,7 +86,7 @@ export const load: PageServerLoad = async ({ locals }) => {
         const stageOf = (a: any) => String(a.status || '').toLowerCase();
         const actionCounts = {
             screening: (statusBreakdown || []).filter((a: any) => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(stageOf(a))).length,
-            hardcopy: (statusBreakdown || []).filter((a: any) => ['distributed', 'osa_validated'].includes(stageOf(a)) && !a.sticker_released_at && !a.osa_dist_at).length,
+            hardcopy: (statusBreakdown || []).filter((a: any) => ['distributed', 'osa_validated'].includes(stageOf(a)) && !a.sticker_released_at && !a.hardcopy_received_at).length,
             release: (statusBreakdown || []).filter((a: any) => stageOf(a) === 'receipt_submitted' && !a.sticker_released_at).length,
             profileUpdates: pendingChangeRequestsResult?.count || 0,
             recentlyDeleted: recentlyDeletedResult?.count || 0

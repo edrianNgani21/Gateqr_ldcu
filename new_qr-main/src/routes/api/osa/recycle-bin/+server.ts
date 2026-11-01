@@ -22,7 +22,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             registration:registration_id(
                 first_name, last_name, role, school_id,
                 user:user_id(email),
-                vehicle_information:vehicle_information_id(plate_number, brand, color, type)
+                vehicle:vehicle_id(plate_number, brand, color, vehicle_type)
             )
         `)
         .order('deleted_at', { ascending: false });
@@ -35,7 +35,7 @@ export const GET: RequestHandler = async ({ locals }) => {
     const items = await Promise.all(
         (data || []).map(async (row: any) => {
             const reg = row.registration || row.snapshot?.registration || {};
-            const vehicle = row.registration?.vehicle_information || row.snapshot?.vehicle || {};
+            const vehicle = row.registration?.vehicle || row.snapshot?.vehicle || {};
             return {
                 registration_id: row.registration_id,
                 name: `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || 'Unknown applicant',
@@ -44,7 +44,7 @@ export const GET: RequestHandler = async ({ locals }) => {
                 school_id: reg.school_id || null,
                 plate: vehicle.plate_number || null,
                 vehicle: [vehicle.brand, vehicle.color].filter(Boolean).join(' · ') || null,
-                vehicle_type: vehicle.type || null,
+                vehicle_type: vehicle.vehicle_type || null,
                 previous_status: row.previous_status,
                 reason: row.reason,
                 deleted_by_role: row.deleted_by_role,

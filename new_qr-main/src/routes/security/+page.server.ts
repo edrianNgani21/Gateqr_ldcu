@@ -34,7 +34,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
             { data: parkingData }
         ] = await Promise.all([
             supabase
-                .from('registration')
+                .from('sticker_application')
                 .select(`
                     *,
                     department:department_id(
@@ -45,29 +45,29 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                     user:user_id(
                         email
                     ),
-                    vehicle_information:vehicle_information_id(
-                        "or",
-                        cr,
-                        authorization_letter,
+                    vehicle:vehicle_id(
+                        "official_receipt_file",
+                        certificate_of_registration_file,
+                        authorization_letter_file,
                         plate_number,
                         brand,
                         color,
-                        type
+                        vehicle_type
                     )
                 `).neq('status', 'deleted')
                 .in('status', ['approved', 'distributed', 'completed', 'security_checked', 'revoked', 'osa_validated', 'rejected'])
                 .order('created_at', { ascending: false }),
             supabase
-                .from('modification_request')
+                .from('profile_update_request')
                 .select('*')
                 .in('status', ['pending', 'approved']),
             supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select('*')
-                .gte('check_in', today)
-                .lt('check_in', tomorrow),
+                .gte('entered_at', today)
+                .lt('entered_at', tomorrow),
             supabase
-                .from('registration')
+                .from('sticker_application')
                 .select('*', { count: 'exact', head: true }).neq('status', 'deleted')
                 .in('status', ['approved', 'distributed', 'completed', 'security_checked']),
             supabase
@@ -76,8 +76,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                 .eq('status', 'pending'),
             supabase
                 .from('parking_capacity')
-                .select('parking_capacity, slot_occupied, slot_unoccupied, date_time')
-                .order('date_time', { ascending: false })
+                .select('capacity, occupied, available, recorded_at')
+                .order('recorded_at', { ascending: false })
                 .limit(1)
                 .maybeSingle()
         ]);
@@ -95,51 +95,50 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         const vehicles = (rows || []).map(v => {
             const changeReq = changeReqMap.get(v.registration_id);
             const isChangeInProgress = !!changeReq && ['approved', 'pending'].includes(changeReq.status) && v.status !== 'approved';
-            const changeReqTime = changeReq ? new Date(changeReq.request_at || changeReq.requested_at || 0).getTime() : 0;
+            const changeReqTime = changeReq ? new Date(changeReq.requested_at || changeReq.requested_at || 0).getTime() : 0;
 
-            const rawOsaDist = typeof v.osa_dist_at === 'string' ? v.osa_dist_at : v.osa_dist_at?.toISOString?.();
-            const rawSecCheck = typeof v.security_check_at === 'string' ? v.security_check_at : (v.security_check_at?.toISOString?.() || v.security_checked_at);
+            const rawOsaDist = typeof v.hardcopy_received_at === 'string' ? v.hardcopy_received_at : v.hardcopy_received_at?.toISOString?.();
+            const rawSecCheck = typeof v.security_checked_at === 'string' ? v.security_checked_at : (v.security_checked_at?.toISOString?.() || v.security_checked_at);
             const rawStickerRel = typeof v.sticker_released_at === 'string' ? v.sticker_released_at : v.sticker_released_at?.toISOString?.();
 
-            const osa_dist_at = isChangeInProgress && rawOsaDist && new Date(rawOsaDist).getTime() < changeReqTime ? null : rawOsaDist;
-            const security_check_at = isChangeInProgress && rawSecCheck && new Date(rawSecCheck).getTime() < changeReqTime ? null : rawSecCheck;
+            const hardcopy_received_at = isChangeInProgress && rawOsaDist && new Date(rawOsaDist).getTime() < changeReqTime ? null : rawOsaDist;
+            const security_checked_at = isChangeInProgress && rawSecCheck && new Date(rawSecCheck).getTime() < changeReqTime ? null : rawSecCheck;
             const sticker_released_at = isChangeInProgress && rawStickerRel && new Date(rawStickerRel).getTime() < changeReqTime ? null : rawStickerRel;
 
             return {
                 ...v,
                 active_block: activeBlocks.get(v.registration_id) ?? null,
-                osa_dist_at,
-                security_check_at,
-                security_checked_at: security_check_at,
+                hardcopy_received_at,
+                security_checked_at,
                 sticker_released_at,
                 department_name: v.department?.academic_department || v.department?.administrative_department || (v.department as any)?.department_name || (v.department as any)?.department || 'Unknown Department',
                 department_email: '-',
                 user_email: v.user?.email,
-                vehicle_information: v.vehicle_information,
-                vehicle_make: v.vehicle_information?.brand || '',
-                vehicle_color: v.vehicle_information?.color || '',
-                vehicle_plate: v.vehicle_information?.plate_number || '',
-                vehicle_type: v.vehicle_information?.type || '',
-                doc_id: (v as any).doc_id || 
-                        (v.agreement_form && typeof v.agreement_form === 'string' && v.agreement_form.startsWith('http') ? v.agreement_form : null) || 
+                vehicle: v.vehicle,
+                vehicle_make: v.vehicle?.brand || '',
+                vehicle_color: v.vehicle?.color || '',
+                vehicle_plate: v.vehicle?.plate_number || '',
+                vehicle_type: v.vehicle?.vehicle_type || '',
+                school_id_file: (v as any).school_id_file || 
+                        (v.agreement_form_file && typeof v.agreement_form_file === 'string' && v.agreement_form_file.startsWith('http') ? v.agreement_form_file : null) || 
                         (v.school_id && typeof v.school_id === 'string' && v.school_id.startsWith('http') ? v.school_id : null) || null,
-                doc_load: v.enrollment_form || null,
-                doc_or: v.vehicle_information?.or || (v.vehicle_information as any)?.or_document || null,
-                doc_cr: v.vehicle_information?.cr || (v.vehicle_information as any)?.cr_document || null,
-                doc_license: v.drivers_license || (v.vehicle_information as any)?.drivers_license || null,
-                doc_letter: v.vehicle_information?.authorization_letter || null,
+                doc_load: v.enrollment_form_file || null,
+                doc_or: v.vehicle?.official_receipt_file || (v.vehicle as any)?.or_document || null,
+                doc_cr: v.vehicle?.certificate_of_registration_file || (v.vehicle as any)?.cr_document || null,
+                doc_license: v.drivers_license_file || (v.vehicle as any)?.drivers_license_file || null,
+                doc_letter: v.vehicle?.authorization_letter_file || null,
                 is_change_vehicle: changeReqMap.has(v.registration_id),
-                qr_code: v.qr_code || v.vehicle_information?.qr_code || null,
-                qr_unique_code: v.qr_unique_code || v.vehicle_information?.qr_unique_code || null
+                qr_image: v.qr_image || v.vehicle?.qr_image || null,
+                qr_code: v.qr_code || v.vehicle?.qr_code || null
             };
         });
 
-        const max_capacity = parkingData?.parking_capacity ?? 500;
+        const max_capacity = parkingData?.capacity ?? 500;
 
-        const parking_capacity = parkingData?.parking_capacity ?? max_capacity;
-        const slot_occupied = parkingData?.slot_occupied || 0;
-        const slot_unoccupied = parkingData?.slot_unoccupied || parking_capacity;
-        const parking_last_updated = parkingData?.date_time || null;
+        const parking_capacity = parkingData?.capacity ?? max_capacity;
+        const slot_occupied = parkingData?.occupied || 0;
+        const slot_unoccupied = parkingData?.available || parking_capacity;
+        const parking_last_updated = parkingData?.recorded_at || null;
 
         // Calculate stats
         const stats = {
@@ -170,14 +169,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
         if (statsRows) {
             statsRows.forEach((log: any) => {
-                const hour = new Date(log.check_in).getHours();
+                const hour = new Date(log.entered_at).getHours();
                 hourlyChart[hour]++;
                 
-                if (!log.check_out) {
+                if (!log.exited_at) {
                     stats.registeredIn++;
                 }
                 
-                if (log.logged_status && log.logged_status !== 'OK' && log.logged_status !== 'Inside' && log.logged_status !== 'REGISTERED') {
+                if (log.presence_status && log.presence_status !== 'OK' && log.presence_status !== 'Inside' && log.presence_status !== 'REGISTERED') {
                     stats.anomaliesToday++;
                 }
             });

@@ -63,8 +63,8 @@
     ];
 
     function getAdminCategoryKey(admin: any): string {
-        const ut = (admin?.user_type || '').toLowerCase();
-        const id = (admin?.identification || '').toLowerCase();
+        const ut = (admin?.account_role || '').toLowerCase();
+        const id = (admin?.account_type || '').toLowerCase();
         const dept = admin?.department;
         const isAdminDept = id === 'staff' || (dept && (dept.administrative_department || dept['Administrative Department']));
 
@@ -88,8 +88,8 @@
     }
 
     function formatRole(admin: any) {
-        const ut = (admin?.user_type || '').toLowerCase();
-        const id = (admin?.identification || '').toLowerCase();
+        const ut = (admin?.account_role || '').toLowerCase();
+        const id = (admin?.account_type || '').toLowerCase();
         const deptName = getDepartmentDisplay(admin);
 
         if (ut === 'osa') return 'Office of Student Affairs';
@@ -103,7 +103,7 @@
             }
             return deptName !== '—' ? `Academic Department Head (${deptName})` : 'Academic Department Head';
         }
-        return admin?.user_type || 'Admin';
+        return admin?.account_role || 'Admin';
     }
 
     async function loadAdmins() {
@@ -162,7 +162,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: adminEmail.trim(),
-                    user_type: adminType,
+                    account_role: adminType,
                     department_id: selectedDepartmentId ? parseInt(selectedDepartmentId) : null
                 })
             });

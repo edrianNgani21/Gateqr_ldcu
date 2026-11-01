@@ -63,10 +63,10 @@ async function createNotification(
 ) {
     try {
         await supabase.from('notification').insert({
-            user_id: userId,
+            recipient_user_id: userId,
             notification_type: notificationType,
             message: message,
-            activity: message,
+            title: message,
             actor_id: actorId || null,
             action_type: actionType || null,
             target_entity_type: targetEntityType || null,
@@ -90,7 +90,7 @@ async function notifyAllOsa(
     metadata?: any
 ) {
     try {
-        const osaFilters = ['user_type.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
+        const osaFilters = ['account_role.eq.osa', `email.eq.${PRIMARY_OSA_EMAIL}`];
         const { data: osaUsers } = await supabase
             .from('users')
             .select('user_id, email')
@@ -102,8 +102,8 @@ async function notifyAllOsa(
 
         if (uniqueOsaUsers.length > 0) {
             const notifs = uniqueOsaUsers.map(u => ({
-                user_id: u.user_id,
-                activity: message,
+                recipient_user_id: u.user_id,
+                title: message,
                 notification_type: notificationType,
                 message: message,
                 actor_id: actorId || null,

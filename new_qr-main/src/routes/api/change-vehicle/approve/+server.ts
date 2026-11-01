@@ -16,8 +16,8 @@ async function createNotification(
 ) {
     try {
         await supabaseAdmin.from('notification').insert({
-            user_id: userId,
-            activity: message,
+            recipient_user_id: userId,
+            title: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -39,7 +39,7 @@ export async function POST({ request, locals }: RequestEvent) {
     }
 
     try {
-        const { request_id, action, schedule, rejection_reason } = await request.json();
+        const { request_id, action, schedule, rejected_reason } = await request.json();
 
         if (!request_id || !action) {
             return json({ error: 'Request ID and action are required' }, { status: 400 });
@@ -47,16 +47,16 @@ export async function POST({ request, locals }: RequestEvent) {
 
         // Get the change request details
         const { data: changeRequest, error: queryError } = await supabaseAdmin
-            .from('modification_request')
+            .from('profile_update_request')
             .select(`
                 *,
                 registration:registration_id(
                     *,
                     user:user_id(user_id, email),
-                    vehicle_information:vehicle_information_id(*)
+                    vehicle:vehicle_id(*)
                 )
             `)
-            .eq('change_vehicle_request_id', request_id)
+            .eq('profile_update_request_id', request_id)
             .single();
 
         if (queryError || !changeRequest) {
@@ -83,43 +83,43 @@ export async function POST({ request, locals }: RequestEvent) {
 
             // 1. Update change request status to approved
             const { error: updateReqError } = await supabaseAdmin
-                .from('modification_request')
+                .from('profile_update_request')
                 .update({ 
                     status: 'approved',
-                    process_at: new Date().toISOString()
+                    processed_at: new Date().toISOString()
                 })
-                .eq('change_vehicle_request_id', request_id);
+                .eq('profile_update_request_id', request_id);
 
             if (updateReqError) throw updateReqError;
 
             // 2. Update vehicle information if proposed changes exist
             const proposed = changeRequest.proposed_changes || {};
-            const vehicleInfoId = registration?.vehicle_information_id;
+            const vehicleInfoId = registration?.vehicle_id;
             if (vehicleInfoId && (proposed.vehicle_plate || proposed.plate_number)) {
                 await supabaseAdmin
-                    .from('vehicle_information')
+                    .from('vehicle')
                     .update({
                         brand: proposed.vehicle_make || proposed.brand || 'Unknown',
                         plate_number: proposed.vehicle_plate || proposed.plate_number,
                         color: proposed.vehicle_color || proposed.color || 'Not Specified',
-                        type: (proposed.vehicle_type || proposed.type || '2_wheels') as any,
-                        "or": proposed.doc_or || proposed.or || 'N/A',
-                        cr: proposed.doc_cr || proposed.cr || 'N/A',
-                        authorization_letter: proposed.doc_letter || proposed.authorization_letter || ''
+                        vehicle_type: (proposed.vehicle_type || proposed.type || '2_wheels') as any,
+                        official_receipt_file: proposed.doc_or || proposed.or || 'N/A',
+                        certificate_of_registration_file: proposed.doc_cr || proposed.cr || 'N/A',
+                        authorization_letter_file: proposed.doc_letter || proposed.authorization_letter_file || ''
                     })
-                    .eq('vehicle_information_id', vehicleInfoId);
+                    .eq('vehicle_id', vehicleInfoId);
             }
 
             // 3. Move registration to osa_validated and set schedule, resetting previous timestamps so it follows the compliance flow for the new vehicle
             const { error: updateRegError } = await supabaseAdmin
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'osa_validated',
-                    schedule: scheduleDate,
-                    osa_dist_at: null,
-                    security_check_at: null,
+                    hardcopy_due_at: scheduleDate,
+                    hardcopy_received_at: null,
+                    security_checked_at: null,
                     sticker_released_at: null,
-                    receipt: null
+                    payment_receipt_file: null
                 })
                 .eq('registration_id', changeRequest.registration_id);
 
@@ -153,7 +153,7 @@ export async function POST({ request, locals }: RequestEvent) {
                     `Your request to change vehicle has been accepted! Please visit the OSA office on ${schedStr} to comply with your hard copy requirements for your new vehicle.`,
                     actorId,
                     'approve_registration_change',
-                    'modification_request',
+                    'profile_update_request',
                     request_id,
                     changeRequest.registration_id,
                     { schedule: scheduleDate }
@@ -166,15 +166,15 @@ export async function POST({ request, locals }: RequestEvent) {
             });
         } 
         else if (action === 'reject') {
-            const reason = (rejection_reason || 'Request did not meet requirements').trim();
+            const reason = (rejected_reason || 'Request did not meet requirements').trim();
 
             const { error: updateReqError } = await supabaseAdmin
-                .from('modification_request')
+                .from('profile_update_request')
                 .update({ 
                     status: 'rejected',
-                    process_at: new Date().toISOString()
+                    processed_at: new Date().toISOString()
                 })
-                .eq('change_vehicle_request_id', request_id);
+                .eq('profile_update_request_id', request_id);
 
             if (updateReqError) throw updateReqError;
 
@@ -198,7 +198,7 @@ export async function POST({ request, locals }: RequestEvent) {
                     `Your request to change registration details was rejected by OSA. Reason: ${reason}`,
                     actorId,
                     'reject_registration_change',
-                    'modification_request',
+                    'profile_update_request',
                     request_id,
                     changeRequest.registration_id,
                     { reason }

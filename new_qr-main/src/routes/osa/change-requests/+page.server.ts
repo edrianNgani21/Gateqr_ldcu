@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
     try {
         const { data: rows, error } = await supabase
-            .from('modification_request')
+            .from('profile_update_request')
             .select(`
                 *,
                 user:user_id(
@@ -23,25 +23,25 @@ export const load: PageServerLoad = async ({ locals }) => {
                     mobile,
                     role,
                     status,
-                    schedule,
+                    hardcopy_due_at,
                     department:department_id(
                         department_id,
                         academic_department,
                         administrative_department
                     ),
-                    vehicle_information:vehicle_information_id(
-                        vehicle_information_id,
+                    vehicle:vehicle_id(
+                        vehicle_id,
                         brand,
                         color,
                         plate_number,
-                        type,
-                        "or",
-                        cr,
-                        authorization_letter
+                        vehicle_type,
+                        "official_receipt_file",
+                        certificate_of_registration_file,
+                        authorization_letter_file
                     )
                 )
             `)
-            .order('request_at', { ascending: false });
+            .order('requested_at', { ascending: false });
 
         if (error) {
             console.error('Error fetching change vehicle requests:', error);
@@ -49,18 +49,18 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         const requests = (rows || []).map((req: any) => {
             const reg = req.registration || {};
-            const orig = reg.vehicle_information || {};
+            const orig = reg.vehicle || {};
             const proposed = req.proposed_changes || {};
 
             return {
-                request_id: req.change_vehicle_request_id,
-                change_vehicle_request_id: req.change_vehicle_request_id,
+                request_id: req.profile_update_request_id,
+                profile_update_request_id: req.profile_update_request_id,
                 user_id: req.user_id,
                 registration_id: req.registration_id,
                 reason: req.reason || 'No reason provided',
                 status: req.status || 'pending',
-                requested_at: req.request_at,
-                processed_at: req.process_at,
+                requested_at: req.requested_at,
+                processed_at: req.processed_at,
                 applicant: {
                     name: `${reg.first_name || ''} ${reg.last_name || ''}`.trim() || 'Unknown Applicant',
                     email: req.user?.email || '-',
@@ -71,13 +71,13 @@ export const load: PageServerLoad = async ({ locals }) => {
                     department_email: '-',
                     year_level: null,
                     registration_status: reg.status || '-',
-                    dist_sched: reg.schedule || null
+                    dist_sched: reg.hardcopy_due_at || null
                 },
                 current_vehicle: {
                     brand: orig.brand || 'Unknown',
                     color: orig.color || '-',
                     plate_number: orig.plate_number || '-',
-                    type: orig.type || '-'
+                    type: orig.vehicle_type || '-'
                 },
                 new_vehicle: {
                     brand: proposed.vehicle_make || proposed.brand || 'Unknown',
@@ -88,7 +88,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     doc_or: proposed.doc_or || proposed.or || null,
                     doc_cr: proposed.doc_cr || proposed.cr || null,
                     doc_license: proposed.doc_license || null,
-                    doc_letter: proposed.doc_letter || proposed.authorization_letter || null
+                    doc_letter: proposed.doc_letter || proposed.authorization_letter_file || null
                 }
             };
         });

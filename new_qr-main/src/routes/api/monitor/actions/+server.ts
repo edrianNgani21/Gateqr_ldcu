@@ -16,8 +16,8 @@ async function createNotification(
 ) {
     try {
         await supabase.from('notification').insert({
-            user_id: userId,
-            activity: message,
+            recipient_user_id: userId,
+            title: message,
             notification_type: notificationType,
             message: message,
             actor_id: actorId || null,
@@ -47,7 +47,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Fetch user id & user email from registration to send notification
         const { data: reg, error: fetchError } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('user_id, users:user_id(email)')
             .eq('registration_id', vehicle_id)
             .single();
@@ -63,7 +63,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (action === 'security_check') {
             updateData = { 
-                security_check_at: new Date().toISOString(),
+                security_checked_at: new Date().toISOString(),
                 status: 'security_checked'
             };
             notifType = 'security_checked';
@@ -77,7 +77,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             updateData = {
                 status: 'rejected',
                 rejected_at: new Date().toISOString(),
-                rejection_reason: rejectReason
+                rejected_reason: rejectReason
             };
             notifType = 'rejected';
             notifMessage = `Your vehicle registration was rejected during Security Document Review. Reason: ${rejectReason}`;
@@ -87,7 +87,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { error: updateError } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .update(updateData)
             .eq('registration_id', vehicle_id);
 

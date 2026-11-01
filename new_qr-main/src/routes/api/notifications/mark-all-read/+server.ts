@@ -18,7 +18,7 @@ export const POST: RequestHandler = async ({ locals }) => {
             .eq('is_read', false);
 
         if (locals.user.role !== 'osa') {
-            updateQuery = updateQuery.eq('user_id', userId);
+            updateQuery = updateQuery.eq('recipient_user_id', userId);
         }
 
         const { error } = await updateQuery;

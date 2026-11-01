@@ -25,9 +25,9 @@ function formatManila(iso: string): string {
 async function getViolations(registrationId: number) {
     const { data, error } = await supabase
         .from('blocklist')
-        .select('blocklist_id, violation_level, reason, evidence_image, block_by, recorded_at, blocked_until')
+        .select('blocklist_id, violation_level, reason, evidence_image_file, blocked_by, blocked_at, blocked_until')
         .eq('registration_id', registrationId)
-        .order('recorded_at', { ascending: true });
+        .order('blocked_at', { ascending: true });
     if (error) throw error;
     return data || [];
 }
@@ -70,8 +70,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         const { data: reg } = await supabase
-            .from('registration')
-            .select('registration_id, vehicle_information_id, status, first_name, last_name, user:user_id(email, user_id), vehicle_information:vehicle_information_id(plate_number)').neq('status', 'deleted')
+            .from('sticker_application')
+            .select('registration_id, vehicle_id, status, first_name, last_name, user:user_id(email, user_id), vehicle:vehicle_id(plate_number)').neq('status', 'deleted')
             .eq('registration_id', registrationId)
             .maybeSingle();
 
@@ -116,23 +116,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .from('blocklist')
             .insert({
                 registration_id: registrationId,
-                vehicle_id: reg.vehicle_information_id,
+                vehicle_id: reg.vehicle_id,
                 violation_level: level,
                 reason,
-                evidence_image: evidenceUrl,
-                block_by: blockBy,
+                evidence_image_file: evidenceUrl,
+                blocked_by: blockBy,
                 blocked_until: blockedUntil
             })
-            .select('blocklist_id, violation_level, reason, evidence_image, block_by, recorded_at, blocked_until')
+            .select('blocklist_id, violation_level, reason, evidence_image_file, blocked_by, blocked_at, blocked_until')
             .single();
 
         if (insertError) throw insertError;
 
         // Notify the applicant by email and in-app notification
         const applicant = reg.user as any;
-        const plate = (reg.vehicle_information as any)?.plate_number || 'your vehicle';
+        const plate = (reg.vehicle as any)?.plate_number || 'your vehicle';
         const recordedBy = blockBy === 'osa_admin' ? 'the Office of Student Affairs' : 'Safety and Security';
-        const recordedAt = formatManila(inserted.recorded_at);
+        const recordedAt = formatManila(inserted.blocked_at);
         const levelLabel = VIOLATION_LEVEL_LABELS[level];
 
         let subject: string;
@@ -164,8 +164,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
         if (applicant?.user_id) {
             await supabase.from('notification').insert({
-                user_id: applicant.user_id,
-                activity: text,
+                recipient_user_id: applicant.user_id,
+                title: text,
                 message: text,
                 notification_type: level === 'gate_block' ? 'gate_blocked' : 'violation_warning',
                 actor_id: locals.user.user_id || null,

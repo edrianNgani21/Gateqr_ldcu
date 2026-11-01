@@ -20,10 +20,10 @@ async function createNotification(
 ) {
     try {
         await supabase.from('notification').insert({
-            user_id: userId,
+            recipient_user_id: userId,
             notification_type: notificationType,
             message: message,
-            activity: message,
+            title: message,
             actor_id: actorId || null,
             action_type: actionType || null,
             target_entity_type: targetEntityType || null,
@@ -53,7 +53,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     try {
         const { data: rows } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 department:department_id(
@@ -90,7 +90,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const { registration_id, action, reason, schedule, school_year, expires_at } = await request.json();
 
         const { data: rows } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 user:user_id(
@@ -119,9 +119,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 attempts++;
                 uniqueCode = generateUniqueCode(8);
                 const { data: duplicateCode } = await supabase
-                    .from('registration')
+                    .from('sticker_application')
                     .select('registration_id')
-                    .eq('qr_unique_code', uniqueCode)
+                    .eq('qr_code', uniqueCode)
                     .maybeSingle();
                 if (!duplicateCode) {
                     isCodeUnique = true;
@@ -142,10 +142,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             const updatePayload: any = {
                 status: 'osa_validated',
-                osa_val_at: new Date().toISOString(),
-                qr_code: qrUrl,
-                qr_unique_code: uniqueCode,
-                schedule: new Date(schedule).toISOString(),
+                osa_approved_at: new Date().toISOString(),
+                qr_image: qrUrl,
+                qr_code: uniqueCode,
+                hardcopy_due_at: new Date(schedule).toISOString(),
                 expires_at: finalExpiresAt
             };
             if (school_year) {
@@ -153,7 +153,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
 
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update(updatePayload)
                 .eq('registration_id', registration_id);
 
@@ -207,11 +207,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'rejected', 
                     rejected_at: new Date().toISOString(), 
-                    rejection_reason: reason 
+                    rejected_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -256,15 +256,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             const isVps = (reg.role || '').toLowerCase().trim() === 'vps';
             const nowHardcopyIso = new Date().toISOString();
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update(isVps ? {
                     // VPS applications skip the Security document review
                     status: 'security_checked',
-                    osa_dist_at: nowHardcopyIso,
-                    security_check_at: nowHardcopyIso
+                    hardcopy_received_at: nowHardcopyIso,
+                    security_checked_at: nowHardcopyIso
                 } : { 
                     status: 'distributed',
-                    osa_dist_at: nowHardcopyIso
+                    hardcopy_received_at: nowHardcopyIso
                 })
                 .eq('registration_id', registration_id);
 
@@ -316,11 +316,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         else if (action === 'release_sticker' && ['receipt_submitted'].includes((reg.status || '').toLowerCase())) {
             // Check if this application was undergoing a Request to Change Registration Details
             const { data: changeReq } = await supabase
-                .from('modification_request')
+                .from('profile_update_request')
                 .select('*')
                 .eq('registration_id', registration_id)
                 .in('status', ['approved', 'pending'])
-                .order('request_at', { ascending: false })
+                .order('requested_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
@@ -333,7 +333,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             };
 
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update(updateData)
                 .eq('registration_id', registration_id);
 
@@ -342,22 +342,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             // If change request, update the vehicle info and mark change request as completed/approved
             if (isChangeRequest) {
                 const proposed = changeReq.proposed_changes || {};
-                const currentVehId = reg.vehicle_information_id;
+                const currentVehId = reg.vehicle_id;
                 if (currentVehId && (proposed.vehicle_plate || proposed.plate_number)) {
                     await supabase
-                        .from('vehicle_information')
+                        .from('vehicle')
                         .update({
                             plate_number: proposed.vehicle_plate || proposed.plate_number,
                             brand: proposed.vehicle_make || proposed.brand || undefined,
-                            type: proposed.vehicle_type || proposed.type || undefined
+                            vehicle_type: proposed.vehicle_type || proposed.type || undefined
                         })
-                        .eq('vehicle_information_id', currentVehId);
+                        .eq('vehicle_id', currentVehId);
                 }
 
                 await supabase
-                    .from('modification_request')
-                    .update({ status: 'approved', process_at: nowIso })
-                    .eq('change_vehicle_request_id', changeReq.change_vehicle_request_id);
+                    .from('profile_update_request')
+                    .update({ status: 'approved', processed_at: nowIso })
+                    .eq('profile_update_request_id', changeReq.profile_update_request_id);
 
                 await sendEmail(
                     reg.user.email,
@@ -420,9 +420,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
 
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
-                    schedule: new Date(schedule).toISOString()
+                    hardcopy_due_at: new Date(schedule).toISOString()
                 })
                 .eq('registration_id', registration_id);
 
@@ -465,9 +465,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         else if (action === 'proceed_overdue' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
             const newSchedule = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
-                    schedule: newSchedule
+                    hardcopy_due_at: newSchedule
                 })
                 .eq('registration_id', registration_id);
 
@@ -503,11 +503,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (!reason) return json({ error: 'Reason required' }, { status: 400 });
             
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'revoked', 
-                    revoke_at: new Date().toISOString(), 
-                    revoke_reason: reason 
+                    revoked_at: new Date().toISOString(), 
+                    revoked_reason: reason 
                 })
                 .eq('registration_id', registration_id);
 
@@ -550,14 +550,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
         else if (action === 'retract') {
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: 'osa_validated', 
-                    security_check_at: null, 
-                    revoke_at: null, 
+                    security_checked_at: null, 
+                    revoked_at: null, 
                     rejected_at: null, 
-                    rejection_reason: null, 
-                    revoke_reason: null
+                    rejected_reason: null, 
+                    revoked_reason: null
                 })
                 .eq('registration_id', registration_id);
 
@@ -602,13 +602,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 return json({ error: 'Cannot unrevoke an expired registration' }, { status: 400 });
             }
             
-            const restoredStatus = reg.security_check_at ? 'approved' : 'osa_validated';
+            const restoredStatus = reg.security_checked_at ? 'approved' : 'osa_validated';
             const { error: updateError } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .update({ 
                     status: restoredStatus, 
-                    revoke_at: null, 
-                    revoke_reason: null 
+                    revoked_at: null, 
+                    revoked_reason: null 
                 })
                 .eq('registration_id', registration_id);
 

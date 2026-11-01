@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { env } from '$env/dynamic/private';
+import { campusGate, campusLabel } from '$lib/campus';
 
 export const GET: RequestHandler = async ({ request, url, locals }) => {
     const isGate = request.headers.get('X-Gate-Key') === env.GATE_API_KEY;
@@ -32,44 +33,44 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         // ── Registered, Guest, & VIP entries ────────────────────────────────
         let regRows: any[] = [];
         let query = supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .select(`
-                vehicle_log_id,
-                deleted_owner_name,
-                deleted_plate,
-                vehicle_information:vehicle_information_id(plate_number),
+                gate_log_id,
+                owner_name_snapshot,
+                plate_snapshot,
+                vehicle:vehicle_id(plate_number),
                 registration:registration_id(first_name, last_name, role),
-                guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
+                guest:guest_id(guest_id, plate_number, guest_id_number, purpose, arrived_at),
                 guest_id,
-                check_in,
-                check_out,
-                logged_status,
-                vip_access,
-                reason,
-                campus,
+                entered_at,
+                exited_at,
+                presence_status,
+                is_vip,
+                note,
+                campus_gate,
                 created_at
             `)
-            .gte('check_in', dateFilter)
-            .lt('check_in', tomorrow);
+            .gte('entered_at', dateFilter)
+            .lt('entered_at', tomorrow);
 
         let { data, error } = await query;
         if ((!data || data.length === 0) && !error) {
             const { data: createdData } = await supabase
-                .from('vehicle_log')
+                .from('gate_log')
                 .select(`
-                    vehicle_log_id,
-                    deleted_owner_name,
-                    deleted_plate,
-                    vehicle_information:vehicle_information_id(plate_number),
+                    gate_log_id,
+                    owner_name_snapshot,
+                    plate_snapshot,
+                    vehicle:vehicle_id(plate_number),
                     registration:registration_id(first_name, last_name, role),
-                    guest:guest_id(guest_id, plate_number, id_number, purpose, timestamp),
+                    guest:guest_id(guest_id, plate_number, guest_id_number, purpose, arrived_at),
                     guest_id,
-                    check_in,
-                    check_out,
-                    logged_status,
-                    vip_access,
-                    reason,
-                    campus,
+                    entered_at,
+                    exited_at,
+                    presence_status,
+                    is_vip,
+                    note,
+                    campus_gate,
                     created_at
                 `)
                 .gte('created_at', dateFilter)
@@ -86,14 +87,14 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         const normalizedRolesFilter = rolesFilter.map(r => r.toLowerCase().trim());
 
         regRows.forEach(row => {
-            const inDate = new Date(row.check_in || row.created_at || Date.now());
-            const hasCheckout = row.check_out !== null && String(row.check_out).trim() !== '' && String(row.check_out).trim() !== 'null';
-            const isInside = !hasCheckout && String(row.logged_status || '').toLowerCase() !== 'exited' && String(row.logged_status || '').toLowerCase() !== 'out' && String(row.logged_status || '').toLowerCase() !== 'exited_campus';
+            const inDate = new Date(row.entered_at || row.created_at || Date.now());
+            const hasCheckout = row.exited_at !== null && String(row.exited_at).trim() !== '' && String(row.exited_at).trim() !== 'null';
+            const isInside = !hasCheckout && String(row.presence_status || '').toLowerCase() !== 'exited' && String(row.presence_status || '').toLowerCase() !== 'out' && String(row.presence_status || '').toLowerCase() !== 'exited_campus';
             const statusDisplay = isInside ? 'INSIDE CAMPUS' : 'EXITED';
 
-            const st = String(row.logged_status || '').toLowerCase();
+            const st = String(row.presence_status || '').toLowerCase();
             const guestRecord = Array.isArray(row.guest) ? row.guest[0] : row.guest;
-            const isVip = Boolean(row.vip_access) || Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
+            const isVip = Boolean(row.is_vip) || st === 'vip' || st.includes('vip');
             const isGuest = Boolean(guestRecord) || st === 'guest' || st.includes('guest');
 
             let rawRole = (row.registration?.role || '').toLowerCase().trim();
@@ -104,8 +105,8 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             else if (rawRole === 'administrator' || rawRole === 'admin') role = 'Administrator';
             else if (rawRole) role = rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
 
-            let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || row.deleted_owner_name || 'Driver';
-            let plate = row.vehicle_information?.plate_number || row.deleted_plate || 'No Plate';
+            let driverName = `${row.registration?.first_name || ''} ${row.registration?.last_name || ''}`.trim() || row.owner_name_snapshot || 'Driver';
+            let plate = row.vehicle?.plate_number || row.plate_snapshot || 'No Plate';
 
             if (isVip) {
                 role = 'VIP';
@@ -114,7 +115,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             } else if (isGuest) {
                 role = 'Guest';
                 if (guestRecord) {
-                    driverName = guestRecord.purpose ? `Guest (${guestRecord.purpose})` : (guestRecord.id_number ? `Guest (ID: ${guestRecord.id_number})` : 'Guest');
+                    driverName = guestRecord.purpose ? `Guest (${guestRecord.purpose})` : (guestRecord.guest_id_number ? `Guest (ID: ${guestRecord.guest_id_number})` : 'Guest');
                     plate = guestRecord.plate_number || 'Guest Vehicle';
                 } else {
                     driverName = 'Guest';
@@ -142,14 +143,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
 
             // Campus filter check: only show logs for the specific campus
             if (campusFilter && campusFilter.trim() !== '') {
-                const cf = campusFilter.toLowerCase().trim();
-                const targetCampus = cf.includes('main') ? 'main' : (cf.includes('rnp') ? 'rnp' : (cf.includes('paseo') ? 'paseo' : cf));
-                const rowCampus = (row.campus || row.registration?.campus || '').toLowerCase().trim();
-                const matchesCampus = targetCampus === 'main'
-                    ? (rowCampus.includes('main') || rowCampus === '')
-                    : rowCampus.includes(targetCampus);
-
-                if (!matchesCampus) {
+                if (campusGate(row.campus_gate) !== campusGate(campusFilter)) {
                     return;
                 }
             }
@@ -158,9 +152,9 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             if (boundFilter === 'all' || 
                 (boundFilter === 'in' && isInside) || 
                 (boundFilter === 'out' && !isInside)) {
-                const displayCampus = row.campus || row.registration?.campus || 'Main Campus';
+                const displayCampus = campusLabel(row.campus_gate);
                 logs.push({
-                    vehicle_log_id: row.vehicle_log_id,
+                    gate_log_id: row.gate_log_id,
                     plate: plate,
                     driver_name: driverName,
                     role: role,
@@ -169,21 +163,21 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                     guest_details: guestRecord ? {
                         guest_id: guestRecord.guest_id,
                         plate_number: guestRecord.plate_number,
-                        id_number: guestRecord.id_number,
+                        guest_id_number: guestRecord.guest_id_number,
                         purpose: guestRecord.purpose,
-                        timestamp: guestRecord.timestamp
+                        timestamp: guestRecord.arrived_at
                     } : (isGuest ? {
                         guest_id: row.guest_id || null,
                         plate_number: plate,
-                        id_number: 'N/A',
-                        purpose: row.reason || 'Visitor',
-                        timestamp: row.check_in || row.created_at
+                        guest_id_number: 'N/A',
+                        purpose: row.note || 'Visitor',
+                        timestamp: row.entered_at || row.created_at
                     } : null),
-                    campus: displayCampus || 'Main Campus',
+                    campus: displayCampus,
                     bound: isInside ? 'in' : 'out',
-                    check_in: row.check_in,
-                    check_out: row.check_out,
-                    logged_status: statusDisplay,
+                    entered_at: row.entered_at,
+                    exited_at: row.exited_at,
+                    presence_status: statusDisplay,
                     created_at: row.created_at,
                     timestamp: inDate.getTime()
                 });
@@ -201,11 +195,11 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
             const terms = search.split(/\s+/).filter(Boolean);
             filtered = logs.filter(l => {
                 const searchableFields = [
-                    String(l.vehicle_log_id),
+                    String(l.gate_log_id),
                     String(l.plate),
                     String(l.driver_name),
                     String(l.role),
-                    String(l.logged_status),
+                    String(l.presence_status),
                     String(l.campus)
                 ].join(' ').toLowerCase();
                 return terms.every(term => searchableFields.includes(term));

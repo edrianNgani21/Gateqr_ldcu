@@ -28,7 +28,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             if (rows) {
                 complaints = await Promise.all(rows.map(async (complaint) => {
                     const { data: regData } = await supabase
-                        .from('registration')
+                        .from('sticker_application')
                         .select('first_name, last_name, mobile, role')
                         .eq('user_id', complaint.user_id)
                         .order('created_at', { ascending: false })
@@ -112,7 +112,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         let senderName = locals.user.email;
         try {
             const { data: regInfo } = await supabase
-                .from('registration')
+                .from('sticker_application')
                 .select('first_name, last_name, role')
                 .eq('user_id', userData.user_id)
                 .order('created_at', { ascending: false })
@@ -133,7 +133,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // 1. Notify Security Admins via in-app notification
         let secEmails: string[] = [];
         try {
-            const orFilters = ['user_type.eq.safety_security', 'user_type.eq.security'];
+            const orFilters = ['account_role.eq.safety_security', 'account_role.eq.security'];
             if (env.SECURITY_EMAIL) {
                 orFilters.push(`email.eq.${env.SECURITY_EMAIL}`);
             }
@@ -146,15 +146,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             if (secUsers && secUsers.length > 0) {
                 secEmails = secUsers.map(u => u.email).filter(Boolean);
                 const secNotifications = secUsers.map(u => ({
-                    user_id: u.user_id,
-                    activity: `New Incident Report from ${senderName}: "${snippet}"`,
+                    recipient_user_id: u.user_id,
+                    title: `New Incident Report from ${senderName}: "${snippet}"`,
                     message: `New Incident Report submitted by ${senderName}: "${snippet}"`,
                     notification_type: 'incident_report',
                     actor_id: userData.user_id,
                     action_type: 'incident_report_submitted',
                     target_entity_type: 'incident_report',
-                    target_entity_id: newIncident?.complaint_id,
-                    target_id: newIncident?.complaint_id,
+                    target_entity_id: newIncident?.incident_report_id,
+                    target_id: newIncident?.incident_report_id,
                     is_read: false
                 }));
 
@@ -167,15 +167,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         // 2. Notify Complainant (Applicant) via in-app notification
         try {
             await supabase.from('notification').insert({
-                user_id: userData.user_id,
-                activity: 'Your incident report has been submitted successfully to Safety & Security.',
+                recipient_user_id: userData.user_id,
+                title: 'Your incident report has been submitted successfully to Safety & Security.',
                 message: 'Your incident report has been submitted successfully to Safety & Security.',
                 notification_type: 'incident_report',
                 actor_id: userData.user_id,
                 action_type: 'incident_report_submitted',
                 target_entity_type: 'incident_report',
-                target_entity_id: newIncident?.complaint_id,
-                target_id: newIncident?.complaint_id,
+                target_entity_id: newIncident?.incident_report_id,
+                target_id: newIncident?.incident_report_id,
                 is_read: false
             });
         } catch (complainantNotifErr) {

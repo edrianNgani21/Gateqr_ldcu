@@ -21,7 +21,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
                     email
                 )
             `)
-            .eq('complaint_id', id)
+            .eq('incident_report_id', id)
             .single();
 
         if (queryError || !complaint) {
@@ -30,7 +30,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
 
         // Update fields if provided
         const updateData: Record<string, any> = {};
-        if (schedule !== undefined) updateData.schedule = schedule;
+        if (schedule !== undefined) updateData.scheduled_at = schedule;
         if (status !== undefined) updateData.status = status;
         if (status === 'resolved') {
             updateData.resolved_at = new Date().toISOString();
@@ -41,13 +41,13 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
             const { error: updateError } = await supabase
                 .from('incident_report')
                 .update(updateData)
-                .eq('complaint_id', id);
+                .eq('incident_report_id', id);
 
             if (updateError) throw updateError;
         }
 
         // Send email if schedule or status changed
-        if (schedule && schedule !== complaint.schedule) {
+        if (schedule && schedule !== complaint.scheduled_at) {
             const formattedDate = new Date(schedule).toLocaleString();
             await sendEmail(
                 complaint.user?.email,
@@ -89,7 +89,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
                     email
                 )
             `)
-            .eq('complaint_id', id)
+            .eq('incident_report_id', id)
             .single();
 
         if (queryError || !complaint) {
@@ -106,7 +106,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
         const { error: deleteError } = await supabase
             .from('incident_report')
             .delete()
-            .eq('complaint_id', id);
+            .eq('incident_report_id', id);
 
         if (deleteError) throw deleteError;
 

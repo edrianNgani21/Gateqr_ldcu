@@ -30,7 +30,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
     if (userRow?.user_id) {
         const { data: existingApp } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select(`
                 *,
                 department:department_id(
@@ -38,7 +38,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                     academic_department,
                     administrative_department
                 ),
-                vehicle_information:vehicle_information_id(*)
+                vehicle:vehicle_id(*)
             `).neq('status', 'deleted')
             .eq('user_id', userRow.user_id)
             .not('status', 'in', '("rejected","revoked")')

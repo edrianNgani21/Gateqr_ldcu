@@ -19,24 +19,24 @@ export const GET: RequestHandler = async ({ request, locals }) => {
         // Get current parking capacity settings
         const { data: settingsData } = await supabase
             .from('parking_capacity')
-            .select('parking_capacity')
-            .order('date_time', { ascending: false })
+            .select('capacity')
+            .order('recorded_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        const parking_capacity = settingsData?.parking_capacity ?? 0;
+        const parking_capacity = settingsData?.capacity ?? 0;
 
         // Get current slot counts from the most recent parking availability record
         const { data: lastParkingData } = await supabase
             .from('parking_capacity')
-            .select('slot_occupied, slot_unoccupied, date_time')
-            .order('date_time', { ascending: false })
+            .select('occupied, available, recorded_at')
+            .order('recorded_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        const current_occupied = lastParkingData?.slot_occupied || 0;
-        const current_unoccupied = lastParkingData?.slot_unoccupied || parking_capacity;
-        const last_updated = lastParkingData?.date_time || null;
+        const current_occupied = lastParkingData?.occupied || 0;
+        const current_unoccupied = lastParkingData?.available || parking_capacity;
+        const last_updated = lastParkingData?.recorded_at || null;
 
         // Calculate availability percentage
         const availability_percentage = parking_capacity > 0

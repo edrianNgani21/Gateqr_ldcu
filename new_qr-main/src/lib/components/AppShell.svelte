@@ -100,6 +100,13 @@
     userRole === 'dean' ? 'Academic Department Head' :
     'OSA Administrator'
   );
+  // Short role chip under the office name in the sidebar logo block
+  let roleChip = $derived(
+    userRole === 'security' ? 'Security' :
+    userRole === 'dean' || userRole === 'administrative' ? 'Dept Head' :
+    userRole === 'applicant' ? 'Applicant' :
+    'OSA'
+  );
   let portalSubtitle = $derived(
     userRole === 'applicant' ? 'Application Form' :
     userRole === 'administrative' ? 'Administrative Department Portal' :
@@ -438,11 +445,9 @@
             <img src="/liceo-logo.png" alt="LICEO DE CAGAYAN UNIVERSITY" />
           </div>
           <div class="brand-info">
-            <div class="brand-top-row">
-              <span class="brand-name">GateQR</span>
-              <span class="brand-tag">ADMIN PORTAL</span>
-            </div>
+            <span class="brand-name">GateQR</span>
             <span class="brand-sub">{portalSubtitle}</span>
+            <span class="brand-tag">{roleChip}</span>
           </div>
         </div>
         <button
@@ -890,16 +895,13 @@
   }
 
   .brand-logo {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.08);
-    padding: 4px;
+    width: 56px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.25));
   }
 
   .brand-logo img {
@@ -911,40 +913,36 @@
   .brand-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    align-items: flex-start;
+    gap: 3px;
     min-width: 0;
   }
 
-  .brand-top-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
   .brand-name {
-    font-size: 1.15rem;
+    font-size: 1.3rem;
     font-weight: 800;
-    color: #ffffff;
+    color: #E9C25E;
     letter-spacing: -0.01em;
-  }
-
-  .brand-tag {
-    font-size: 0.6rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    background: #E9C25E;
-    color: #3D0818;
-    padding: 1px 6px;
-    border-radius: 4px;
-    text-transform: uppercase;
+    line-height: 1.1;
   }
 
   .brand-sub {
-    font-size: 0.7rem;
-    color: #94a3b8;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
-    line-height: 1.2;
+    line-height: 1.25;
+  }
+
+  .brand-tag {
+    margin-top: 3px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #E9C25E;
+    border: 1px solid rgba(233, 194, 94, 0.55);
+    padding: 1px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
   }
 
   /* Navigation Tree */

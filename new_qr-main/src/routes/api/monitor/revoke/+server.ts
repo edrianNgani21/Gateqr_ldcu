@@ -16,16 +16,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         // Get user for email notification
         const { data: reg } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('user_id, users:user_id(email)')
             .eq('registration_id', targetId)
             .single();
 
         const { error: updateError } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .update({ 
                 status: 'revoked', 
-                revoke_at: new Date().toISOString() 
+                revoked_at: new Date().toISOString() 
             })
             .eq('registration_id', targetId);
 
@@ -34,8 +34,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         if (reg?.user_id) {
             const notifMsg = 'Your vehicle registration has been revoked by Safety & Security Admin.';
             await supabase.from('notification').insert({
-                user_id: reg.user_id,
-                activity: notifMsg,
+                recipient_user_id: reg.user_id,
+                title: notifMsg,
                 notification_type: 'revoked',
                 message: notifMsg,
                 actor_id: locals.user.user_id,
@@ -75,17 +75,17 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         if (!targetId) return json({ error: 'Missing registration_id' }, { status: 400 });
 
         const { data: reg } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('user_id, users:user_id(email)')
             .eq('registration_id', targetId)
             .single();
 
         // Restore to approved (fully approved) and clear the revoked timestamp
         const { error: updateError } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .update({
                 status: 'approved',
-                revoke_at: null
+                revoked_at: null
             })
             .eq('registration_id', targetId)
             .eq('status', 'revoked');
@@ -95,8 +95,8 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         if (reg?.user_id) {
             const notifMsg = 'Your vehicle registration has been restored to active status.';
             await supabase.from('notification').insert({
-                user_id: reg.user_id,
-                activity: notifMsg,
+                recipient_user_id: reg.user_id,
+                title: notifMsg,
                 notification_type: 'restored',
                 message: notifMsg,
                 actor_id: locals.user.user_id,

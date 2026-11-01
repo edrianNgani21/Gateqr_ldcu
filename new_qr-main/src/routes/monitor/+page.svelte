@@ -25,7 +25,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'monitor-vehicles-realtime',
-            tables: ['registration']
+            tables: ['sticker_application']
         });
     });
 

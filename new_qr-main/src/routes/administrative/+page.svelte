@@ -42,7 +42,7 @@
   $effect(() => {
     return startLiveSync({
       channelName: "administrative-applications-realtime",
-      tables: ["registration", "department"]
+      tables: ["sticker_application", "department"]
     });
   });
 
@@ -87,7 +87,7 @@
         ? {
             ...a,
             status: "dept_validated",
-            dept_val_at: new Date().toISOString()
+            dept_approved_at: new Date().toISOString()
           }
         : a
     );
@@ -191,8 +191,8 @@
       {@const deptName = app.department_name || app.department?.administrative_department || app.department?.department_name || app.department?.department || data.departmentName || 'Department'}
       {@const isApproving = approvingId === appId}
       {@const isPending = ['dept_val', 'pending'].includes((app.status || '').toLowerCase())}
-      {@const employeeIdDoc = app.doc_id || (typeof app.agreement_form === 'string' && app.agreement_form.startsWith('http') ? app.agreement_form : null) || (typeof app.school_id === 'string' && app.school_id.startsWith('http') ? app.school_id : null)}
-      {@const teachingLoadDoc = app.enrollment_form || app.doc_load}
+      {@const employeeIdDoc = app.school_id_file || (typeof app.agreement_form_file === 'string' && app.agreement_form_file.startsWith('http') ? app.agreement_form_file : null) || (typeof app.school_id === 'string' && app.school_id.startsWith('http') ? app.school_id : null)}
+      {@const teachingLoadDoc = app.enrollment_form_file || app.doc_load}
 
       <div class="dean-app-card">
         <div class="card-left-section">

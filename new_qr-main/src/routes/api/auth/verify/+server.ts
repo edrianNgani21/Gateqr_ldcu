@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         // 2. Fetch or create applicant in the database
         const { data: userList, error: queryError } = await supabase
             .from('users')
-            .select('user_id, email, user_type, identification, department_id, is_active')
+            .select('user_id, email, account_role, account_type, department_id, is_active')
             .ilike('email', email)
             .limit(1);
 
@@ -47,11 +47,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
                 .from('users')
                 .insert({
                     email,
-                    user_type: 'applicant',
-                    identification: 'student',
+                    account_role: 'applicant',
+                    account_type: 'student',
                     is_active: true
                 })
-                .select('user_id, email, user_type, identification, department_id, is_active')
+                .select('user_id, email, account_role, account_type, department_id, is_active')
                 .single();
 
             if (createError || !newUser) {
@@ -64,7 +64,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         // 3. Check for existing vehicle sticker application
         const { data: regList } = await supabase
-            .from('registration')
+            .from('sticker_application')
             .select('registration_id, status').neq('status', 'deleted')
             .eq('user_id', user.user_id)
             .order('created_at', { ascending: false })
@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             {
                 email: user.email,
                 role: 'applicant',
-                user_type: 'Applicants',
+                account_role: 'Applicants',
                 department_id: null,
                 user_id: user.user_id
             },

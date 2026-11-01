@@ -9,11 +9,11 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
 
     try {
-        // Fetch all deans (identification = faculty or user_type = applicant/dean with department_id)
+        // Fetch all deans (account_type = faculty or account_role = applicant/dean with department_id)
         const { data: deanRows } = await supabase
             .from('users')
             .select('*')
-            .or('identification.eq.faculty,user_type.eq.dean')
+            .or('account_type.eq.faculty,account_role.eq.dean')
             .order('created_at', { ascending: false });
 
         const deans = (deanRows || []).map(dean => ({

@@ -52,7 +52,7 @@
             });
 
             if (res.ok) {
-                complaints = complaints.map(c => c.complaint_id === id ? { ...c, status } : c);
+                complaints = complaints.map(c => c.incident_report_id === id ? { ...c, status } : c);
             } else {
                 const json = await res.json();
                 showAlert(json.error || 'Failed to update incident report');
@@ -71,7 +71,7 @@
             });
 
             if (res.ok) {
-                complaints = complaints.map(c => c.complaint_id === id ? { ...c, schedule } : c);
+                complaints = complaints.map(c => c.incident_report_id === id ? { ...c, schedule } : c);
             } else {
                 const json = await res.json();
                 showAlert(json.error || 'Failed to schedule meeting');
@@ -178,7 +178,7 @@
   {:else}
     <div class="complaints-list">
       {#each filteredComplaints as complaint}
-        <div class="complaint-card" class:card-scheduled={complaint.schedule && complaint.status !== 'Resolved'} class:card-resolved={complaint.status === 'Resolved'}>
+        <div class="complaint-card" class:card-scheduled={complaint.scheduled_at && complaint.status !== 'Resolved'} class:card-resolved={complaint.status === 'Resolved'}>
           <div class="card-header">
             <div class="header-left">
               <span class="complaint-email">{complaint.sender_email || complaint.user_email}</span>
@@ -190,7 +190,7 @@
             <div class="header-right">
               {#if complaint.status === 'Resolved'}
                 <span class="status-badge resolved">✓ Resolved</span>
-              {:else if complaint.schedule}
+              {:else if complaint.scheduled_at}
                 <span class="status-badge scheduled">📅 Scheduled</span>
               {:else}
                 <span class="status-badge pending">Pending</span>
@@ -202,12 +202,12 @@
             <p class="complaint-message">{complaint.message}</p>
           </div>
 
-          {#if complaint.schedule && complaint.status !== 'Resolved'}
+          {#if complaint.scheduled_at && complaint.status !== 'Resolved'}
             <div class="schedule-banner">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
               <div>
                 <span class="schedule-label">Meeting scheduled for</span>
-                <strong>{new Date(complaint.schedule).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
+                <strong>{new Date(complaint.scheduled_at).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
               </div>
             </div>
           {/if}
@@ -218,13 +218,13 @@
                 <input 
                   type="datetime-local" 
                   class="schedule-input"
-                  value={complaint.schedule || ''}
-                  onchange={(e) => scheduleMeeting(complaint.complaint_id, (e.target as HTMLInputElement).value)}
+                  value={complaint.scheduled_at || ''}
+                  onchange={(e) => scheduleMeeting(complaint.incident_report_id, (e.target as HTMLInputElement).value)}
                 />
                 <button 
                   class="btn-action btn-confirm" 
-                  onclick={() => confirmSchedule(complaint.complaint_id, complaint.schedule)}
-                  disabled={!complaint.schedule || confirmLoading}
+                  onclick={() => confirmSchedule(complaint.incident_report_id, complaint.scheduled_at)}
+                  disabled={!complaint.scheduled_at || confirmLoading}
                 >
                   {#if confirmLoading}
                     Sending…
@@ -234,7 +234,7 @@
                 </button>
                 <button 
                   class="btn-action btn-resolve" 
-                  onclick={() => updateComplaintStatus(complaint.complaint_id, 'Resolved')}
+                  onclick={() => updateComplaintStatus(complaint.incident_report_id, 'Resolved')}
                 >
                   Mark Resolved
                 </button>

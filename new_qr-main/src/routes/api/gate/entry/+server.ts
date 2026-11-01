@@ -15,16 +15,16 @@ export const POST: RequestHandler = async ({ request }) => {
     }
 
     try {
-        const { registration_id, pic_base64, logged_status, reason, campus } = await request.json();
+        const { registration_id, pic_base64, presence_status, reason, campus } = await request.json();
 
         if (!registration_id) {
             return json({ error: 'Missing registration_id' }, { status: 400 });
         }
 
-        // Get vehicle_information_id from registration
+        // Get vehicle_id from registration
         const { data: regData } = await supabase
-            .from('registration')
-            .select('vehicle_information_id')
+            .from('sticker_application')
+            .select('vehicle_id')
             .eq('registration_id', registration_id)
             .single();
 
@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         // Deactivate QR if there is an approved change request pending sticker release
         const { data: activeChange } = await supabase
-            .from('modification_request')
+            .from('profile_update_request')
             .select('status')
             .eq('registration_id', registration_id)
             .eq('status', 'approved')
@@ -44,7 +44,7 @@ export const POST: RequestHandler = async ({ request }) => {
             return json({ error: 'QR Code is deactivated pending new vehicle sticker release.' }, { status: 403 });
         }
 
-        const vehicle_information_id = regData.vehicle_information_id;
+        const vehicle_id = regData.vehicle_id;
 
         let picUrl = null;
         if (pic_base64) {
@@ -64,81 +64,24 @@ export const POST: RequestHandler = async ({ request }) => {
         let gateVal: 'main' | 'rnp' | 'paseo' = 'main';
         if (rawCampus.includes('rnp')) gateVal = 'rnp';
         else if (rawCampus.includes('paseo')) gateVal = 'paseo';
-        const entryCampus = gateVal === 'rnp' ? 'RNP' : (gateVal === 'paseo' ? 'PASEO' : 'Main Campus');
 
         const { error: insertError, data: logData } = await supabase
-            .from('vehicle_log')
+            .from('gate_log')
             .insert({
                 registration_id,
-                vehicle_information_id,
-                check_in: new Date().toISOString(),
-                logged_status: 'inside_campus',
+                vehicle_id,
+                entered_at: new Date().toISOString(),
+                presence_status: 'inside_campus',
                 sticker_status: 'registered',
                 campus_gate: gateVal,
-                reason: reason || null
+                note: reason || null
             })
-            .select('vehicle_log_id')
+            .select('gate_log_id')
             .single();
 
         if (insertError) throw insertError;
 
-        // Create parking availability record
-        const vehicle_log_id = logData.vehicle_log_id;
-
-        // Get current parking capacity settings
-        const { data: settingsData } = await supabase
-            .from('parking_capacity')
-            .select('parking_capacity')
-            .eq('campus', entryCampus)
-            .order('date_time', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        const parking_capacity = settingsData?.parking_capacity ?? 500;
-
-        // Get current slot counts from the most recent parking availability record
-        const { data: lastParkingData } = await supabase
-            .from('parking_capacity')
-            .select('slot_occupied, slot_unoccupied')
-            .eq('campus', entryCampus)
-            .order('date_time', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        let current_occupied = lastParkingData?.slot_occupied;
-        if (current_occupied === undefined || current_occupied === null) {
-            const { data: insideLogs } = await supabase
-                .from('vehicle_log')
-                .select('campus, registration:registration_id(campus)')
-                .is('check_out', null);
-
-            current_occupied = (insideLogs || []).filter((l: any) => {
-                const c = (l.campus || l.registration?.campus || '').toLowerCase();
-                if (entryCampus === 'RNP') return c.includes('rnp');
-                if (entryCampus === 'PASEO') return c.includes('paseo');
-                return !c.includes('rnp') && !c.includes('paseo');
-            }).length;
-        }
-
-        // Calculate new slot counts
-        const new_occupied = current_occupied + 1;
-        const new_unoccupied = Math.max(0, parking_capacity - new_occupied);
-
-        // Create new parking availability record
-        const { error: parkingError } = await supabase
-            .from('parking_capacity')
-            .insert({
-                vehicle_log_id,
-                campus: entryCampus,
-                parking_capacity,
-                slot_occupied: new_occupied,
-                slot_unoccupied: new_unoccupied,
-                date_time: new Date().toISOString()
-            });
-
-        if (parkingError) {
-            console.error('[Gate] Parking capacity insert error:', parkingError);
-        }
+        // The database trigger on gate_log writes the new parking snapshot
 
         return json({ success: true, message: 'Entry recorded' });
     } catch (error) {

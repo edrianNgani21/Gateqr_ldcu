@@ -64,11 +64,11 @@ export const GET: RequestHandler = async ({ request, url }) => {
                     mobile: data.mobile,
                     make_model: data.make_model,
                     plate: data.plate,
-                    id_number: data.id_number,
+                    guest_id_number: data.guest_id_number,
                     purpose: data.purpose,
                     reason: data.reason,
                     in_time: data.in,
-                    logged_status: data.logged_status
+                    presence_status: data.presence_status
                 }
             });
         } else {

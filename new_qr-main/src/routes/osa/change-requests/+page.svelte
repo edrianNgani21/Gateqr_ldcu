@@ -11,7 +11,7 @@
   $effect(() => {
     const channel = supabaseClient
       .channel('osa-change-requests-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'modification_request' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profile_update_request' }, () => {
         invalidateAll();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registration' }, () => {
@@ -171,7 +171,7 @@
         body: JSON.stringify({
           request_id: selectedRequest.request_id,
           action: 'reject',
-          rejection_reason: rejectReason.trim()
+          rejected_reason: rejectReason.trim()
         })
       });
 

@@ -39,8 +39,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             try {
                 // Fetch registration details for QR and notification
                 const { data: reg } = await supabase
-                    .from('registration')
-                    .select('user_id, role, created_at, qr_code, qr_unique_code').neq('status', 'deleted')
+                    .from('sticker_application')
+                    .select('user_id, role, created_at, qr_image, qr_code').neq('status', 'deleted')
                     .eq('registration_id', registration_id)
                     .single();
 
@@ -48,8 +48,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     // Bulk accept with schedule
                     const updateData: any = {
                         status: 'osa_validated',
-                        schedule: schedule || null,
-                        osa_val_at: new Date().toISOString()
+                        hardcopy_due_at: schedule || null,
+                        osa_approved_at: new Date().toISOString()
                     };
 
                     if (school_year) {
@@ -61,8 +61,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     }
 
                     // /api/apply stores 'PENDING' until the application is scheduled
-                    if (!reg?.qr_code || reg.qr_code === 'PENDING') {
-                        let uniqueCode = reg?.qr_unique_code;
+                    if (!reg?.qr_image || reg.qr_image === 'PENDING') {
+                        let uniqueCode = reg?.qr_code;
                         if (uniqueCode === 'PENDING') uniqueCode = null;
                         if (!uniqueCode) {
                             let isCodeUnique = false;
@@ -71,9 +71,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                                 attempts++;
                                 uniqueCode = generateUniqueCode(8);
                                 const { data: duplicateCode } = await supabase
-                                    .from('registration')
+                                    .from('sticker_application')
                                     .select('registration_id')
-                                    .eq('qr_unique_code', uniqueCode)
+                                    .eq('qr_code', uniqueCode)
                                     .maybeSingle();
                                 if (!duplicateCode) {
                                     isCodeUnique = true;
@@ -83,8 +83,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                         const filename = `qr-codes/qr-${registration_id}-${Date.now()}.png`;
                         const qrBuffer = await generateStyledQRBuffer(uniqueCode as string, reg?.role || 'student', registration_id);
                         const qrUrl = await uploadToStorage(filename, qrBuffer, 'image/png');
-                        updateData.qr_code = qrUrl;
-                        updateData.qr_unique_code = uniqueCode;
+                        updateData.qr_image = qrUrl;
+                        updateData.qr_code = uniqueCode;
 
                         if (!expires_at) {
                             const expiryMonths = parseInt(process.env.QR_EXPIRY_MONTHS || '6', 10);
@@ -93,7 +93,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     }
 
                     const { error } = await supabase
-                        .from('registration')
+                        .from('sticker_application')
                         .update(updateData)
                         .eq('registration_id', registration_id);
 
@@ -103,8 +103,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     if (reg?.user_id) {
                         const notifMsg = `Your vehicle registration application has been accepted by OSA!${schedule ? ' Scheduled visit: ' + new Date(schedule).toLocaleString() : ''}`;
                         await supabase.from('notification').insert({
-                            user_id: reg.user_id,
-                            activity: notifMsg,
+                            recipient_user_id: reg.user_id,
+                            title: notifMsg,
                             notification_type: 'application_approved',
                             message: notifMsg,
                             actor_id: locals.user.user_id,
@@ -120,12 +120,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     // Bulk reject with reason
                     const updateData: any = {
                         status: 'rejected',
-                        rejection_reason: reason || 'Bulk rejection',
+                        rejected_reason: reason || 'Bulk rejection',
                         rejected_at: new Date().toISOString()
                     };
 
                     const { error } = await supabase
-                        .from('registration')
+                        .from('sticker_application')
                         .update(updateData)
                         .eq('registration_id', registration_id);
 
@@ -135,8 +135,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                     if (reg?.user_id) {
                         const notifMsg = `Your vehicle registration application was rejected by OSA. Reason: ${reason || 'Bulk rejection'}`;
                         await supabase.from('notification').insert({
-                            user_id: reg.user_id,
-                            activity: notifMsg,
+                            recipient_user_id: reg.user_id,
+                            title: notifMsg,
                             notification_type: 'application_rejected',
                             message: notifMsg,
                             actor_id: locals.user.user_id,

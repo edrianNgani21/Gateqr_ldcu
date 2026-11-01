@@ -67,7 +67,7 @@
     load();
     return startLiveSync({
       channelName: 'osa-recycle-bin-realtime',
-      tables: ['recycle_bin', 'registration'],
+      tables: ['recycle_bin', 'sticker_application'],
       invalidate: false,
       onSync: load
     });
