@@ -158,8 +158,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         const { data: settingsData } = await supabase
             .from('parking_capacity')
             .select('capacity')
-            .order('recorded_at', { ascending: false })
-            .limit(1)
+            .eq('campus_gate', 'main')
             .maybeSingle();
 
         const maxCapacity = settingsData?.capacity ?? -1;

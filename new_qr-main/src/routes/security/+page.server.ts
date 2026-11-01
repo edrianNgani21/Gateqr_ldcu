@@ -75,10 +75,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
                 .select('*', { count: 'exact', head: true })
                 .eq('status', 'pending'),
             supabase
-                .from('parking_capacity')
-                .select('capacity, occupied, available, recorded_at')
-                .order('recorded_at', { ascending: false })
-                .limit(1)
+                .from('campus_occupancy')
+                .select('capacity, occupied, available, updated_at')
+                .eq('campus_gate', 'main')
                 .maybeSingle()
         ]);
 
@@ -138,7 +137,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         const parking_capacity = parkingData?.capacity ?? max_capacity;
         const slot_occupied = parkingData?.occupied || 0;
         const slot_unoccupied = parkingData?.available || parking_capacity;
-        const parking_last_updated = parkingData?.recorded_at || null;
+        const parking_last_updated = parkingData?.updated_at || null;
 
         // Calculate stats
         const stats = {

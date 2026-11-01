@@ -377,12 +377,12 @@ def get_campus_gate_and_name():
     return gate, norm
 
 def get_latest_parking_row():
-    """Latest parking_availability row for the campus selected at boot."""
+    """parking_capacity row (limits) for the campus selected at boot."""
     campus = globals().get('SELECTED_CAMPUS')
     if not campus:
         return _EmptyResponse()
     gate, norm_campus = get_campus_gate_and_name()
-    return supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
+    return supabase.table('parking_capacity').select('*').eq('campus_gate', gate).limit(1).execute()
 
 def get_campus_occupied(campus_name=None):
     """Count active occupied vehicles inside campus (entry records +1 occupied, exit records -1 occupied).
@@ -447,17 +447,16 @@ def get_live_currently_in(campus_name=None):
     return get_campus_occupied(campus_name)
 
 def sync_parking_availability(occupied_count=None):
-    """Sync live counts to parking_availability in Supabase so web dashboard matches 1:1.
-    Entry adds 1 to occupied and subtracts 1 from unoccupied.
-    Exit subtracts 1 from occupied and adds 1 to unoccupied.
-    Applies to all campuses."""
+    """Refresh the gate screen's parking numbers for the selected campus.
+    parking_capacity holds the campus limits; occupancy is counted from gate_log (the web reads the
+    same count from the campus_occupancy view), so nothing is written back."""
     campus = globals().get('SELECTED_CAMPUS')
     if not campus:
         return
     gate, norm_campus = get_campus_gate_and_name()
         
     try:
-        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).limit(1).execute()
         capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
         global_stats['cap2'] = cap2
         global_stats['cap4'] = cap4
@@ -466,8 +465,7 @@ def sync_parking_availability(occupied_count=None):
             occupied_count = get_campus_occupied(norm_campus)
             
         unoccupied = max(0, capacity - occupied_count)
-        now_iso = datetime.now().isoformat()
-        
+
         ev_name = (pa_res.data[0].get('event_name') or pa_res.data[0].get('event') or '') if pa_res.data else ''
         if not ev_name:
             try:
@@ -476,28 +474,6 @@ def sync_parking_availability(occupied_count=None):
                     ev_name = ce_res.data[0]['event_name']
             except:
                 pass
-
-        if pa_res.data:
-            last_id = pa_res.data[0]['parking_capacity_id']
-            supabase.table('parking_capacity').update({
-                "capacity": capacity,
-                "occupied": occupied_count,
-                "available": unoccupied,
-                "occupied_2_wheels": global_stats.get('in2', 0),
-                "occupied_4_wheels": global_stats.get('in4', 0),
-                "campus_gate": gate,
-                "event_name": ev_name.strip() if ev_name else None,
-                "recorded_at": now_iso
-            }).eq('parking_capacity_id', last_id).execute()
-        else:
-            supabase.table('parking_capacity').insert({
-                "campus_gate": gate,
-                "capacity": capacity,
-                "occupied": occupied_count,
-                "available": unoccupied,
-                "event_name": ev_name.strip() if ev_name else None,
-                "recorded_at": now_iso
-            }).execute()
 
         global_stats['maxCapacity'] = capacity
         global_stats['currentlyIn'] = occupied_count
@@ -516,7 +492,7 @@ def refresh_parking_data():
             return
         gate, norm_campus = get_campus_gate_and_name()
 
-        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
+        pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).limit(1).execute()
         capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
         global_stats['cap2'] = cap2
         global_stats['cap4'] = cap4
@@ -549,7 +525,7 @@ def poll_supabase():
             if campus:
                 gate, norm_campus = get_campus_gate_and_name()
 
-                pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).order('recorded_at', desc=True).limit(1).execute()
+                pa_res = supabase.table('parking_capacity').select('*').eq('campus_gate', gate).limit(1).execute()
                 capacity, cap2, cap4 = read_type_limits(pa_res.data[0] if pa_res.data else None)
                 global_stats['cap2'] = cap2
                 global_stats['cap4'] = cap4

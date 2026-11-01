@@ -14,8 +14,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         const { data: row } = await supabase
             .from('parking_capacity')
             .select('capacity')
-            .order('recorded_at', { ascending: false })
-            .limit(1)
+            .eq('campus_gate', 'main')
             .maybeSingle();
 
         const capacity = row?.capacity ?? 500;
@@ -42,26 +41,12 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'parking_capacity must be a number' }, { status: 400 });
         }
 
-        // Try updating latest parking_availability record, or insert one
-        const { data: latest } = await supabase
+        // Main Campus limits row (one row per campus)
+        const { error: updateError } = await supabase
             .from('parking_capacity')
-            .select('parking_capacity_id')
-            .order('recorded_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        if (latest?.parking_capacity_id) {
-            const { error: updateError } = await supabase
-                .from('parking_capacity')
-                .update({ capacity: newCap })
-                .eq('parking_capacity_id', latest.parking_capacity_id);
-            if (updateError) throw updateError;
-        } else {
-            const { error: insertError } = await supabase
-                .from('parking_capacity')
-                .insert({ capacity: newCap });
-            if (insertError) throw insertError;
-        }
+            .update({ capacity: newCap, updated_at: new Date().toISOString() })
+            .eq('campus_gate', 'main');
+        if (updateError) throw updateError;
 
         return json({ success: true, max_capacity: newCap, parking_capacity: newCap });
     } catch (error) {

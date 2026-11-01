@@ -36,18 +36,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 .eq('campus_gate', gate)
                 .eq('is_active', true);
 
-            // Also clear it from parking_capacity just to be safe
-            const { data: latestPa } = await supabase
-                .from('parking_capacity')
-                .select('parking_capacity_id')
-                .eq('campus_gate', gate)
-                .order('recorded_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-                
-            if (latestPa) {
-                await supabase.from('parking_capacity').update({ event_name: null }).eq('parking_capacity_id', latestPa.parking_capacity_id);
-            }
+            // Also clear it from the campus parking row
+            await supabase.from('parking_capacity').update({ event_name: null }).eq('campus_gate', gate);
             invalidateCapacityServerCache();
             return json({ success: true });
         }
@@ -83,35 +73,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 }]);
         }
 
-        // We insert a new record for this campus to act as the latest state
-        // Need to know current occupied to carry it over
-        const { data: lastData } = await supabase
-            .from('parking_capacity')
-            .select('*')
-            .eq('campus_gate', gate)
-            .order('recorded_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        const occupied = lastData?.occupied ?? 0;
-        const available = Math.max(0, parking_capacity - occupied);
-        const nowIso = new Date().toISOString();
-
-        const row = {
-            capacity: parking_capacity,
-            capacity_2_wheels,
-            capacity_4_wheels,
-            occupied,
-            available,
-            campus_gate: gate,
-            event_name: effectiveEventName,
-            recorded_at: nowIso
-        };
-
-        // Update the latest record for this campus, or start one if the campus has none yet
-        const { error } = lastData
-            ? await supabase.from('parking_capacity').update(row).eq('parking_capacity_id', lastData.parking_capacity_id)
-            : await supabase.from('parking_capacity').insert([row]);
+        // One limits row per campus; occupancy is counted live from gate_log (campus_occupancy)
+        const { error } = await supabase.from('parking_capacity').upsert(
+            {
+                campus_gate: gate,
+                capacity: parking_capacity,
+                capacity_2_wheels,
+                capacity_4_wheels,
+                event_name: effectiveEventName,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'campus_gate' }
+        );
         if (error) throw error;
 
         invalidateCapacityServerCache();

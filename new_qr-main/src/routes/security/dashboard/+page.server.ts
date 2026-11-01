@@ -130,8 +130,6 @@ export const load: PageServerLoad = async ({ locals }) => {
                         .from('parking_capacity')
                         .select('*')
                         .eq('campus_gate', gate)
-                        .order('recorded_at', { ascending: false })
-                        .limit(1)
                         .maybeSingle(),
                     supabase
                         .from('campus_event')
@@ -334,7 +332,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
         for (const { name, paData, evData } of (campusResults || [])) {
             const presence = name === 'RNP' ? rnpCampusPresence : (name === 'PASEO' ? paseoCampusPresence : mainCampusPresence);
-            const cap = paData?.capacity ?? paData?.capacity ?? 200;
+            const cap = paData?.capacity ?? 200;
             const occ = presence;
             const avail = Math.max(0, cap - occ);
 

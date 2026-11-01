@@ -44,9 +44,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             // 2. Fetch all latest parking capacities in one consolidated query
             supabase
                 .from('parking_capacity')
-                .select('*')
-                .order('recorded_at', { ascending: false })
-                .limit(20),
+                .select('*'),
 
             // 3. Fetch all events (active & past) in one consolidated query
             supabase
@@ -136,7 +134,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             const capacity4 = paData?.capacity_4_wheels ?? null;
             const capacity = capacity2 !== null && capacity4 !== null
                 ? capacity2 + capacity4
-                : (paData?.capacity ?? paData?.capacity ?? 200);
+                : (paData?.capacity ?? 200);
             const occupied = stats.occupied;
             const available = Math.max(0, capacity - occupied);
 
