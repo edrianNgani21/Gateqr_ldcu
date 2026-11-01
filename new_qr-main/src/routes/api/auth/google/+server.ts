@@ -106,9 +106,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             return json({ error: 'This account is linked to a different Google identity.' }, { status: 403 });
         }
 
+        const googleName = String(authUser.user_metadata?.full_name || authUser.user_metadata?.name || '').trim();
+
         const token = jwt.sign(
             {
                 email: user.email,
+                name: googleName || null,
                 role,
                 user_type: user.user_type,
                 department_id: user.department_id || null,

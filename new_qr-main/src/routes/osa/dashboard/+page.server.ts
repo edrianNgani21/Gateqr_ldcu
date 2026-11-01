@@ -22,7 +22,9 @@ export const load: PageServerLoad = async ({ locals }) => {
             rejectedTodayResult,
             totalDepartmentsResult,
             statusBreakdownResult,
-            recentApplicationsResult
+            recentApplicationsResult,
+            pendingChangeRequestsResult,
+            recentlyDeletedResult
         ] = await Promise.all([
             supabase.from('registration').select('*', { count: 'exact', head: true }).neq('status', 'deleted'),
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
@@ -30,7 +32,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             supabase.from('registration').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
             supabase.from('registration').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),
             supabase.from('department').select('*', { count: 'exact', head: true }),
-            supabase.from('registration').select('status').neq('status', 'deleted').order('created_at', { ascending: false }),
+            supabase.from('registration').select('status, osa_dist_at, sticker_released_at').neq('status', 'deleted').order('created_at', { ascending: false }),
             supabase.from('registration').select(`
                 *,
                 user:user_id(email),
@@ -39,7 +41,9 @@ export const load: PageServerLoad = async ({ locals }) => {
                     academic_department,
                     administrative_department
                 )
-            `).neq('status', 'deleted').order('created_at', { ascending: false }).limit(5)
+            `).neq('status', 'deleted').order('created_at', { ascending: false }).limit(5),
+            supabase.from('modification_request').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('recycle_bin').select('*', { count: 'exact', head: true })
         ]);
 
         const totalApplications = totalApplicationsResult?.count || 0;
@@ -78,6 +82,16 @@ export const load: PageServerLoad = async ({ locals }) => {
             }
         });
 
+        // Needs-action counts, matching the OSA Applications tabs
+        const stageOf = (a: any) => String(a.status || '').toLowerCase();
+        const actionCounts = {
+            screening: (statusBreakdown || []).filter((a: any) => ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(stageOf(a))).length,
+            hardcopy: (statusBreakdown || []).filter((a: any) => ['distributed', 'osa_validated'].includes(stageOf(a)) && !a.sticker_released_at && !a.osa_dist_at).length,
+            release: (statusBreakdown || []).filter((a: any) => stageOf(a) === 'receipt_submitted' && !a.sticker_released_at).length,
+            profileUpdates: pendingChangeRequestsResult?.count || 0,
+            recentlyDeleted: recentlyDeletedResult?.count || 0
+        };
+
         return {
             stats: {
                 totalApplications,
@@ -88,6 +102,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 totalDepartments
             },
             statusBreakdown: statusCounts,
+            actionCounts,
             recentApplications: recentApplications || [],
             applicationOpen: formStatus.open,
             formStatus,
@@ -113,6 +128,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                 rejected: 0,
                 revoked: 0
             },
+            actionCounts: { screening: 0, hardcopy: 0, release: 0, profileUpdates: 0, recentlyDeleted: 0 },
             recentApplications: [],
             applicationOpen: formStatus.open,
             formStatus,

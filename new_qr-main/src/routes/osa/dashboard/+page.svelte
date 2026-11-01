@@ -1,7 +1,7 @@
 <script lang="ts">
     import AppShell from '$lib/components/AppShell.svelte';
-    import NavBar from '$lib/components/NavBar.svelte';
-    import { invalidateAll } from '$app/navigation';
+    import { page } from '$app/stores';
+    import { askConfirm } from '$lib/utils/dialog';
     import { startLiveSync } from '$lib/utils/liveSync';
 
     let { data } = $props();
@@ -10,7 +10,7 @@
     $effect(() => {
         return startLiveSync({
             channelName: 'osa-dashboard-realtime',
-            tables: ['registration', 'department', 'modification_request']
+            tables: ['registration', 'department', 'modification_request', 'recycle_bin']
         });
     });
 
@@ -86,7 +86,62 @@
         return { label: app.status || 'Unknown', tone: 'pending' };
     }
 
-    const maxStatusCount = $derived(Math.max(...Object.values(statusBreakdown), 1));
+    // Where each Recent Activity row opens (the matching OSA Applications tab)
+    function getAppHref(app: any): string {
+        const s = (app.status || '').toLowerCase();
+        if (['pending', 'dept_val', 'dept_validated', 'osa_val'].includes(s)) return '/osa?tab=validation';
+        if (['distributed', 'osa_validated'].includes(s) && !app.osa_dist_at) return '/osa?tab=distribution';
+        if (s === 'receipt_submitted') return '/osa?tab=release';
+        if (['completed', 'approved'].includes(s)) return '/osa?tab=registered';
+        if (['rejected', 'revoked'].includes(s)) return '/osa?tab=rejected';
+        return '/osa';
+    }
+
+    function applicantName(app: any): string {
+        const name = `${app.first_name || ''} ${app.last_name || ''}`.trim();
+        return name || app.user?.email || 'Applicant';
+    }
+
+    function timeAgo(value: string | null | undefined): string {
+        if (!value) return '';
+        const mins = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `${days}d ago`;
+        return new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    // Needs-action tiles: each opens the page where that work is done
+    let actionCounts = $derived((data.actionCounts as any) || { screening: 0, hardcopy: 0, release: 0, profileUpdates: 0, recentlyDeleted: 0 });
+    let actionTiles = $derived([
+        { label: 'Screening', count: actionCounts.screening, href: '/osa?tab=validation', color: '#D4A62A' },
+        { label: 'Hardcopy submission', count: actionCounts.hardcopy, href: '/osa?tab=distribution', color: '#3B82F6' },
+        { label: 'Ready for release', count: actionCounts.release, href: '/osa?tab=release', color: '#10B981' },
+        { label: 'Profile updates', count: actionCounts.profileUpdates, href: '/osa/change-requests', color: '#8B5CF6' },
+        { label: 'Recently deleted', count: actionCounts.recentlyDeleted, href: '/osa/recently-deleted', color: '#EF4444' }
+    ]);
+
+    // Ring chart segments (circumference of r=54 is 339.29)
+    const RING = 2 * Math.PI * 54;
+    let ringSegments = $derived.by(() => {
+        const parts = [
+            { label: 'Pending', count: groupedStatus.pending, color: '#F59E0B' },
+            { label: 'Completed', count: groupedStatus.completed, color: '#10B981' },
+            { label: 'Rejected', count: groupedStatus.rejected, color: '#EF4444' }
+        ];
+        let offset = 0;
+        return parts.map((part) => {
+            const length = groupedStatus.total > 0 ? (part.count / groupedStatus.total) * RING : 0;
+            const seg = { ...part, length, offset };
+            offset += length;
+            return seg;
+        });
+    });
+
+    let firstName = $derived(String(($page.data as any)?.userName || '').trim().split(/\s+/)[0] || 'Admin');
 
     // ── Application form open/close control ─────────────────────────────────────
     let formOpen = $state<boolean>(data.applicationOpen !== false);
@@ -96,6 +151,14 @@
 
     async function setFormOpen(open: boolean) {
         if (formSaving) return;
+        if (!open) {
+            const ok = await askConfirm('Applicants will not be able to open or submit the application form until you open it again.', {
+                title: 'Close the application form?',
+                confirmLabel: 'Close form',
+                danger: true
+            });
+            if (!ok) return;
+        }
         formSaving = true;
         formError = '';
         try {
@@ -119,208 +182,97 @@
 </script>
 
 <AppShell userEmail={data.userEmail} showSidebar={true}>
-    <NavBar title="Office of Student Affairs Dashboard" />
-    
     <div class="dashboard-container">
-        <!-- Welcome Banner matching Dashboard Aesthetic -->
+        <!-- Header: greeting plus the application form switch -->
         <div class="welcome-banner">
             <div class="wb-content">
-                <h1 class="wb-title">Welcome back, Admin!</h1>
-                <p class="wb-sub">Here's what's happening with GateQR vehicle sticker operations today.</p>
+                <h1 class="wb-title">Welcome back, {firstName}!</h1>
+                <p class="wb-sub">Office of Student Affairs dashboard</p>
             </div>
-            <div class="wb-icon-shield">
-                <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.75">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                </svg>
+            <div class="form-switch" class:is-closed={!formOpen}>
+                <span class="form-status-dot"></span>
+                <span class="form-switch-label">Application form: <strong>{formOpen ? 'Open' : 'Closed'}</strong></span>
+                <button class="form-toggle-btn" class:close={formOpen} onclick={() => setFormOpen(!formOpen)} disabled={formSaving}>
+                    {#if formSaving}Saving…{:else}{formOpen ? 'Close' : 'Open'}{/if}
+                </button>
             </div>
+        </div>
+        {#if formError}<p class="form-control-error">{formError}</p>{/if}
+
+        <!-- Needs action -->
+        <div class="action-tiles">
+            {#each actionTiles as tile (tile.label)}
+                <a class="action-tile" href={tile.href} style="--tile-color: {tile.color};">
+                    <span class="action-count">{tile.count}</span>
+                    <span class="action-label">{tile.label}</span>
+                </a>
+            {/each}
         </div>
 
-        <!-- Application Form Control -->
-        <div class="form-control-bar" class:is-closed={!formOpen}>
-            <div class="form-control-info">
-                <span class="form-status-dot"></span>
-                <div>
-                    <div class="form-control-title">Application Form: {formOpen ? 'Open' : 'Closed'}</div>
-                    <div class="form-control-desc">
-                        {formOpen ? 'Applicants can access and submit the application form.' : 'Applicants cannot access the Application form.'}
-                    </div>
-                    {#if formError}<div class="form-control-error">{formError}</div>{/if}
-                </div>
-            </div>
-            <button class="form-toggle-btn" class:close={formOpen} onclick={() => setFormOpen(!formOpen)} disabled={formSaving}>
-                {#if formSaving}Saving…{:else}{formOpen ? 'Close Application' : 'Open Application'}{/if}
-            </button>
-        </div>
-        
         <div class="dashboard-grid">
-            <!-- Application Status Breakdown Diagram -->
+            <!-- Application Status -->
             <div class="breakdown-section">
                 <div class="section-header">
-                    <div class="section-title-wrap">
-                        <h2>Application Status</h2>
-                        <span class="section-total-badge">Total Applications: <strong>{groupedStatus.total}</strong></span>
-                    </div>
+                    <h2>Application Status</h2>
                 </div>
-
                 <div class="diagram-container">
-                    <!-- Donut Chart -->
                     <div class="donut-chart-box">
                         <svg class="donut-svg" viewBox="0 0 140 140">
-                            <!-- Background Track -->
-                            <circle
-                                cx="70"
-                                cy="70"
-                                r="54"
-                                fill="none"
-                                stroke="#f1f5f9"
-                                stroke-width="12"
-                            />
-
-                            {#if groupedStatus.total > 0}
-                                <!-- Pending Segment (Amber / Gold) -->
-                                {#if groupedStatus.pending > 0}
+                            <circle cx="70" cy="70" r="54" fill="none" stroke="#f1f5f9" stroke-width="12" />
+                            {#each ringSegments as seg (seg.label)}
+                                {#if seg.length > 0}
                                     <circle
                                         cx="70"
                                         cy="70"
                                         r="54"
                                         fill="none"
-                                        stroke="#f59e0b"
+                                        stroke={seg.color}
                                         stroke-width="12"
-                                        stroke-dasharray="{((groupedStatus.pendingPct / 100) * 339.29)} 339.29"
-                                        stroke-dashoffset="0"
+                                        stroke-dasharray="{seg.length} {RING}"
+                                        stroke-dashoffset={-seg.offset}
                                         class="donut-segment"
                                     />
                                 {/if}
-
-                                <!-- Completed Segment (Emerald Green) -->
-                                {#if groupedStatus.completed > 0}
-                                    <circle
-                                        cx="70"
-                                        cy="70"
-                                        r="54"
-                                        fill="none"
-                                        stroke="#10b981"
-                                        stroke-width="12"
-                                        stroke-dasharray="{((groupedStatus.completedPct / 100) * 339.29)} 339.29"
-                                        stroke-dashoffset="-{((groupedStatus.pendingPct / 100) * 339.29)}"
-                                        class="donut-segment"
-                                    />
-                                {/if}
-
-                                <!-- Rejected Segment (Rose / Red) -->
-                                {#if groupedStatus.rejected > 0}
-                                    <circle
-                                        cx="70"
-                                        cy="70"
-                                        r="54"
-                                        fill="none"
-                                        stroke="#ef4444"
-                                        stroke-width="12"
-                                        stroke-dasharray="{((groupedStatus.rejectedPct / 100) * 339.29)} 339.29"
-                                        stroke-dashoffset="-{(((groupedStatus.pendingPct + groupedStatus.completedPct) / 100) * 339.29)}"
-                                        class="donut-segment"
-                                    />
-                                {/if}
-                            {/if}
+                            {/each}
                         </svg>
-
                         <div class="donut-center-text">
                             <span class="donut-total">{groupedStatus.total}</span>
                             <span class="donut-sub">Total</span>
                         </div>
                     </div>
-
-                    <!-- Status Items Legend with Percentages -->
-                    <div class="status-legend-cards">
-                        <!-- Pending -->
-                        <div class="legend-card legend-pending">
-                            <div class="legend-top">
-                                <div class="legend-title-row">
-                                    <span class="indicator-dot dot-pending"></span>
-                                    <span class="legend-title">Pending</span>
-                                </div>
-                                <div class="legend-stats">
-                                    <span class="legend-pct pct-pending">{groupedStatus.pendingPctFormatted}%</span>
-                                    <span class="legend-count">({groupedStatus.pending})</span>
-                                </div>
-                            </div>
-                            <div class="legend-progress-bar">
-                                <div class="progress-fill fill-pending" style="width: {groupedStatus.pendingPct}%"></div>
-                            </div>
-                        </div>
-
-                        <!-- Completed -->
-                        <div class="legend-card legend-completed">
-                            <div class="legend-top">
-                                <div class="legend-title-row">
-                                    <span class="indicator-dot dot-completed"></span>
-                                    <span class="legend-title">Completed</span>
-                                </div>
-                                <div class="legend-stats">
-                                    <span class="legend-pct pct-completed">{groupedStatus.completedPctFormatted}%</span>
-                                    <span class="legend-count">({groupedStatus.completed})</span>
-                                </div>
-                            </div>
-                            <div class="legend-progress-bar">
-                                <div class="progress-fill fill-completed" style="width: {groupedStatus.completedPct}%"></div>
-                            </div>
-                        </div>
-
-                        <!-- Rejected -->
-                        <div class="legend-card legend-rejected">
-                            <div class="legend-top">
-                                <div class="legend-title-row">
-                                    <span class="indicator-dot dot-rejected"></span>
-                                    <span class="legend-title">Rejected</span>
-                                </div>
-                                <div class="legend-stats">
-                                    <span class="legend-pct pct-rejected">{groupedStatus.rejectedPctFormatted}%</span>
-                                    <span class="legend-count">({groupedStatus.rejected})</span>
-                                </div>
-                            </div>
-                            <div class="legend-progress-bar">
-                                <div class="progress-fill fill-rejected" style="width: {groupedStatus.rejectedPct}%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Combined Proportional Ratio Bar at bottom -->
-                <div class="stacked-ratio-track" title="Overall Distribution: {groupedStatus.pendingPctFormatted}% Pending | {groupedStatus.completedPctFormatted}% Completed | {groupedStatus.rejectedPctFormatted}% Rejected">
-                    {#if groupedStatus.pending > 0}
-                        <div class="ratio-segment ratio-pending" style="width: {groupedStatus.pendingPct}%"></div>
-                    {/if}
-                    {#if groupedStatus.completed > 0}
-                        <div class="ratio-segment ratio-completed" style="width: {groupedStatus.completedPct}%"></div>
-                    {/if}
-                    {#if groupedStatus.rejected > 0}
-                        <div class="ratio-segment ratio-rejected" style="width: {groupedStatus.rejectedPct}%"></div>
-                    {/if}
-                    {#if groupedStatus.total === 0}
-                        <div class="ratio-segment ratio-empty" style="width: 100%"></div>
-                    {/if}
+                    <ul class="status-legend">
+                        {#each ringSegments as seg (seg.label)}
+                            <li>
+                                <span class="legend-dot" style="background: {seg.color};"></span>
+                                <span class="legend-name">{seg.label}</span>
+                                <strong class="legend-num">{seg.count}</strong>
+                            </li>
+                        {/each}
+                    </ul>
                 </div>
             </div>
 
-            <!-- Recent Applications -->
+            <!-- Recent Activity -->
             <div class="recent-section">
                 <div class="section-header">
                     <h2>Recent Activity</h2>
-                    <span class="section-badge">Latest</span>
                 </div>
                 {#if recentApplications.length > 0}
                     <div class="recent-list">
                         {#each recentApplications as app}
                             {@const stage = getStageLabel(app)}
-                            <div class="recent-item">
+                            <a class="recent-item" href={getAppHref(app)}>
                                 <div class="recent-info">
-                                    <div class="recent-email">{app.user?.email || 'Unknown'}</div>
-                                    <div class="recent-dept">{app.department?.department || app.department?.department_name || 'No Department'}</div>
+                                    <div class="recent-name">{applicantName(app)}</div>
+                                    <div class="recent-dept">
+                                        {app.department?.department_name || 'No Department'}
+                                        {#if app.created_at}<span class="recent-time"> · {timeAgo(app.created_at)}</span>{/if}
+                                    </div>
                                 </div>
                                 <div class="recent-status status-{stage.tone}">
                                     {stage.label}
                                 </div>
-                            </div>
+                            </a>
                         {/each}
                     </div>
                 {:else}
@@ -350,16 +302,18 @@
     .welcome-banner {
         background: linear-gradient(135deg, #7A1734 0%, #4a0d1e 100%);
         border-radius: 18px;
-        padding: 1.75rem 2.25rem;
+        padding: 1.1rem 1.5rem;
         color: #ffffff;
         display: flex;
         justify-content: space-between;
         align-items: center;
         box-shadow: 0 10px 25px -5px rgba(122, 23, 52, 0.35);
         border: 1px solid rgba(233, 194, 94, 0.25);
-        margin-bottom: 1.5rem;
+        margin-bottom: 1rem;
         position: relative;
         overflow: hidden;
+        gap: 1rem;
+        flex-wrap: wrap;
     }
 
     .wb-content {
@@ -384,35 +338,23 @@
         font-weight: 500;
     }
 
-    .wb-icon-shield {
-        display: flex;
+    .form-switch {
+        display: inline-flex;
         align-items: center;
-        justify-content: center;
-        opacity: 0.85;
+        gap: 0.65rem;
+        padding: 0.45rem 0.5rem 0.45rem 0.9rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.18);
     }
 
-    /* Application form open/close control */
-    .form-control-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-md);
-        padding: var(--space-md) var(--space-lg);
-        margin-bottom: var(--space-lg);
-        background: #fffdf5;
-        border: 1.5px solid #fde68a;
-        border-radius: var(--radius-lg);
+    .form-switch-label {
+        font-size: 0.85rem;
+        color: #F5D5DE;
     }
 
-    .form-control-bar.is-closed {
-        background: #FEF2F2;
-        border-color: #FCA5A5;
-    }
-
-    .form-control-info {
-        display: flex;
-        align-items: center;
-        gap: var(--space-md);
+    .form-switch-label strong {
+        color: #ffffff;
     }
 
     .form-status-dot {
@@ -429,17 +371,6 @@
         box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.2);
     }
 
-    .form-control-title {
-        font-weight: 700;
-        font-size: 0.95rem;
-        color: var(--text-primary);
-    }
-
-    .form-control-desc {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-    }
-
     .form-control-error {
         font-size: 0.8rem;
         color: #B91C1C;
@@ -447,7 +378,8 @@
     }
 
     .form-toggle-btn {
-        padding: 0.6rem 1.25rem;
+        padding: 0.4rem 1rem;
+        border-radius: 999px !important;
         border: none;
         border-radius: var(--radius-md);
         font-size: 0.85rem;
@@ -473,9 +405,6 @@
         opacity: 0.6;
         cursor: wait;
     }
-
-
-
 
     .stats-grid {
         display: grid;
@@ -549,6 +478,44 @@
         opacity: 1;
     }
 
+    .action-tiles {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .action-tile {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        padding: 0.85rem 1rem;
+        background: #ffffff;
+        border-radius: 14px;
+        border-left: 4px solid var(--tile-color);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+        text-decoration: none;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .action-tile:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
+    }
+
+    .action-count {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: #1e293b;
+        line-height: 1.1;
+    }
+
+    .action-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #64748b;
+    }
+
     .dashboard-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -562,6 +529,12 @@
         border-radius: 16px;
         padding: 1.75rem;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+    }
+
+    /* Status card fills the height set by Recent Activity, with the ring centred */
+    .breakdown-section {
+        display: flex;
+        flex-direction: column;
     }
 
     .section-header {
@@ -578,48 +551,35 @@
         margin: 0;
     }
 
-    .section-title-wrap {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-        gap: 1rem;
-        flex-wrap: wrap;
-    }
-
-    .section-total-badge {
-        font-size: 0.85rem;
-        color: #64748b;
-        background: #f8fafc;
-        padding: 0.35rem 0.85rem;
-        border-radius: 999px;
-        border: 1px solid #e2e8f0;
-    }
-
-    .section-total-badge strong {
-        color: #7A1734;
-        font-weight: 800;
-        margin-left: 0.25rem;
-    }
-
     .diagram-container {
+        flex: 1;
         display: flex;
         align-items: center;
-        gap: 1.75rem;
-        margin-bottom: 1.25rem;
+        justify-content: center;
+        gap: 2.5rem;
+        padding: 0.5rem 0 1rem;
     }
 
     @media (max-width: 640px) {
         .diagram-container {
             flex-direction: column;
-            text-align: center;
+            gap: 1.25rem;
+        }
+
+        .donut-chart-box {
+            width: min(60%, 200px);
+        }
+
+        .status-legend {
+            width: 100%;
+            max-width: none;
         }
     }
 
     .donut-chart-box {
         position: relative;
-        width: 130px;
-        height: 130px;
+        width: clamp(150px, 40%, 230px);
+        aspect-ratio: 1;
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -647,180 +607,56 @@
     }
 
     .donut-total {
-        font-size: 1.5rem;
+        font-size: 2.4rem;
         font-weight: 800;
         color: #1e293b;
         line-height: 1.1;
     }
 
     .donut-sub {
-        font-size: 0.68rem;
+        font-size: 0.78rem;
         font-weight: 700;
         color: #64748b;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
 
-    .status-legend-cards {
+    .status-legend {
+        list-style: none;
+        margin: 0;
+        padding: 0;
         flex: 1;
+        max-width: 260px;
         display: flex;
         flex-direction: column;
+        gap: 0;
+    }
+
+    .status-legend li {
+        display: flex;
+        align-items: center;
         gap: 0.75rem;
-        min-width: 0;
+        padding: 0.55rem 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 1rem;
+        color: #475569;
     }
 
-    .legend-card {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 0.65rem 0.85rem;
-        transition: all 0.2s ease;
-    }
-
-    .legend-card:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
-    }
-
-    .legend-card.legend-pending:hover {
-        border-color: #fde68a;
-        background: #fffdf5;
-    }
-
-    .legend-card.legend-completed:hover {
-        border-color: #a7f3d0;
-        background: #f0fdf4;
-    }
-
-    .legend-card.legend-rejected:hover {
-        border-color: #fca5a5;
-        background: #fef2f2;
-    }
-
-    .legend-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.4rem;
-    }
-
-    .legend-title-row {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .indicator-dot {
-        width: 8px;
-        height: 8px;
+    .legend-dot {
+        width: 12px;
+        height: 12px;
         border-radius: 50%;
         flex-shrink: 0;
     }
 
-    .dot-pending {
-        background: #f59e0b;
-        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+    .status-legend li:last-child {
+        border-bottom: none;
     }
 
-    .dot-completed {
-        background: #10b981;
-        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
-    }
-
-    .dot-rejected {
-        background: #ef4444;
-        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
-    }
-
-    .legend-title {
-        font-size: 0.82rem;
-        font-weight: 600;
-        color: #334155;
-    }
-
-    .legend-stats {
-        display: flex;
-        align-items: baseline;
-        gap: 0.35rem;
-    }
-
-    .legend-pct {
-        font-size: 0.9rem;
-        font-weight: 800;
-    }
-
-    .pct-pending {
-        color: #b45309;
-    }
-
-    .pct-completed {
-        color: #047857;
-    }
-
-    .pct-rejected {
-        color: #b91c1c;
-    }
-
-    .legend-count {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #64748b;
-    }
-
-    .legend-progress-bar {
-        height: 5px;
-        background: #e2e8f0;
-        border-radius: 999px;
-        overflow: hidden;
-    }
-
-    .progress-fill {
-        height: 100%;
-        border-radius: 999px;
-        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .fill-pending {
-        background: linear-gradient(90deg, #f59e0b, #fbbf24);
-    }
-
-    .fill-completed {
-        background: linear-gradient(90deg, #10b981, #34d399);
-    }
-
-    .fill-rejected {
-        background: linear-gradient(90deg, #ef4444, #f87171);
-    }
-
-    .stacked-ratio-track {
-        display: flex;
-        height: 7px;
-        background: #f1f5f9;
-        border-radius: 999px;
-        overflow: hidden;
-        gap: 2px;
-        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-    }
-
-    .ratio-segment {
-        height: 100%;
-        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .ratio-pending {
-        background: #f59e0b;
-    }
-
-    .ratio-completed {
-        background: #10b981;
-    }
-
-    .ratio-rejected {
-        background: #ef4444;
-    }
-
-    .ratio-empty {
-        background: #e2e8f0;
+    .legend-num {
+        margin-left: auto;
+        font-size: 1.15rem;
+        color: #1e293b;
     }
 
     .recent-list {
@@ -830,6 +666,8 @@
     }
 
     .recent-item {
+        text-decoration: none;
+        color: inherit;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -857,10 +695,14 @@
         gap: var(--space-xs);
     }
 
-    .recent-email {
-        font-size: 0.85rem;
+    .recent-name {
+        font-size: 0.9rem;
         font-weight: 600;
         color: var(--text-primary);
+    }
+
+    .recent-time {
+        color: #94a3b8;
     }
 
     .recent-dept {
@@ -936,6 +778,10 @@
             grid-template-columns: 1fr;
         }
 
+        .action-tiles {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
         .stats-grid {
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         }
@@ -956,23 +802,18 @@
             font-size: 1.25rem;
         }
 
+        .form-switch {
+            width: 100%;
+            justify-content: space-between;
+            box-sizing: border-box;
+        }
+
+        .action-tiles {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .wb-sub {
             font-size: 0.825rem;
-        }
-
-        .wb-icon-shield {
-            display: none;
-        }
-
-        .form-control-bar {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 0.75rem;
-            padding: 1rem;
-        }
-
-        .form-control-info {
-            width: 100%;
         }
 
         .form-toggle-btn {

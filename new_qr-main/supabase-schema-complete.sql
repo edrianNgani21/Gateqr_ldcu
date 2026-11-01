@@ -102,8 +102,6 @@ CREATE TABLE users (
   user_type         user_type_enum      NOT NULL DEFAULT 'applicant',
   email             VARCHAR(100) NOT NULL UNIQUE,
   identification    identification_enum NOT NULL DEFAULT 'student',
-  password_hash     VARCHAR(255),                                              -- bcrypt hash for custom auth
-  security_pin_hash VARCHAR(255),                                              -- 4-digit security PIN hash
   is_active         BOOLEAN      NOT NULL DEFAULT TRUE,
   created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -613,61 +611,6 @@ AS $$
   LIMIT 1;
 $$;
 
--- Function to check if a user has configured a security PIN
-CREATE OR REPLACE FUNCTION user_has_pin(p_user_id INTEGER)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT security_pin_hash IS NOT NULL
-  FROM users
-  WHERE user_id = p_user_id;
-$$;
-
--- Function to verify user PIN using pgcrypto crypt()
-CREATE OR REPLACE FUNCTION verify_user_pin(p_user_id INTEGER, p_pin VARCHAR)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_hash VARCHAR(255);
-BEGIN
-  SELECT security_pin_hash INTO v_hash
-  FROM users
-  WHERE user_id = p_user_id;
-
-  IF v_hash IS NULL THEN
-    RETURN FALSE;
-  END IF;
-
-  RETURN v_hash = crypt(p_pin, v_hash);
-END;
-$$;
-
--- Function to set user PIN using pgcrypto gen_salt()
-CREATE OR REPLACE FUNCTION set_user_pin(p_user_id INTEGER, p_pin VARCHAR)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF p_pin !~ '^\d{4}$' THEN
-    RAISE EXCEPTION 'PIN must be exactly 4 digits';
-  END IF;
-
-  UPDATE users
-  SET security_pin_hash = crypt(p_pin, gen_salt('bf', 10))
-  WHERE user_id = p_user_id;
-
-  RETURN FOUND;
-END;
-$$;
-
 -- RPC Function for Raspberry Pi Gate Fast Verification
 CREATE OR REPLACE FUNCTION verify_gate_entry(
   p_qr_code   VARCHAR,
@@ -964,24 +907,21 @@ END $$;
 -- ---------------------------------------------------------------------
 -- 12. SEED INITIAL DATA (Default Admin, Form Setting)
 -- ---------------------------------------------------------------------
--- Default OSA Administrator (Password: Admin123!)
+-- Default OSA Administrator (signs in with Google)
 INSERT INTO users (
   department_id,
   user_type,
   email,
-  identification,
-  password_hash
+  identification
 ) VALUES (
   NULL,
   'osa',
   'aluban98304@liceo.edu.ph',
-  'admin',
-  '$2b$10$/ShvmvVm2Uk8nfCqVNFg9.3fxQs4K8cIqmAayu77FuOKHcahsJPvW'
+  'admin'
 )
 ON CONFLICT (email) DO UPDATE SET
   user_type = 'osa',
-  identification = 'admin',
-  password_hash = '$2b$10$/ShvmvVm2Uk8nfCqVNFg9.3fxQs4K8cIqmAayu77FuOKHcahsJPvW';
+  identification = 'admin';
 
 -- Default initial application form setting
 INSERT INTO form_settings (status, updated_by)
@@ -1292,6 +1232,14 @@ $$;
 -- ---------------------------------------------------------------------
 DROP TABLE IF EXISTS public.login_confirmation;
 DROP TYPE IF EXISTS login_confirmation_status_enum;
+
+-- No passwords or PINs: remove the old columns and PIN helpers on existing databases
+DROP FUNCTION IF EXISTS public.user_has_pin(integer);
+DROP FUNCTION IF EXISTS public.verify_user_pin(integer, character varying);
+DROP FUNCTION IF EXISTS public.set_user_pin(integer, character varying);
+ALTER TABLE public.users DROP COLUMN IF EXISTS password_hash;
+ALTER TABLE public.users DROP COLUMN IF EXISTS security_pin_hash;
+ALTER TABLE public.users DROP COLUMN IF EXISTS login_locked_until;
 
 -- ---------------------------------------------------------------------
 -- 19. GATE ALERTS ON vehicle_log (idempotent)

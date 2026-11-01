@@ -11,6 +11,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		try {
 			const decoded = jwt.verify(token, env.JWT_SECRET as string) as {
 				email: string;
+				name?: string | null;
 				role: string;
 				department_id: number | null;
 				user_id: number;

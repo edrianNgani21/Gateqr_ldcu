@@ -746,9 +746,9 @@
         </select>
         <select bind:value={selectedCampus} class="filter-select">
           <option value="all">All Campuses</option>
-          <option value="Main campus">Main campus</option>
-          <option value="rnp campus">rnp campus</option>
-          <option value="Paseo">Paseo</option>
+          <option value="Main campus">Main Campus</option>
+          <option value="rnp campus">RNP</option>
+          <option value="Paseo">PASEO</option>
         </select>
       </div>
     </div>
@@ -1737,10 +1737,11 @@
 
   .filter-select {
     height: 32px;
-    padding: 0 0.625rem;
+    /* Room for the dropdown arrow from the global select style */
+    padding: 0 2rem 0 0.625rem;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background-color: var(--surface);
     color: var(--text);
     font-size: 0.8125rem;
     font-family: inherit;

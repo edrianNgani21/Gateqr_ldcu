@@ -126,7 +126,8 @@
     {
       label: 'MAIN CAMPUS',
       value: statsData.mainCampusPresence || 0,
-      desc: `2-Wheels: ${statsData.main2W || 0} • 4-Wheels: ${statsData.main4W || 0}`,
+      wheels2: statsData.main2W || 0,
+      wheels4: statsData.main4W || 0,
       capacity: statsData.mainCapacity,
       icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
       color: '#8B1A3C',
@@ -136,7 +137,8 @@
     {
       label: 'RNP',
       value: statsData.rnpCampusPresence || 0,
-      desc: `2-Wheels: ${statsData.rnp2W || 0} • 4-Wheels: ${statsData.rnp4W || 0}`,
+      wheels2: statsData.rnp2W || 0,
+      wheels4: statsData.rnp4W || 0,
       capacity: statsData.rnpCapacity,
       icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
       color: '#D4A62A',
@@ -146,7 +148,8 @@
     {
       label: 'PASEO',
       value: statsData.paseoCampusPresence || 0,
-      desc: `2-Wheels: ${statsData.paseo2W || 0} • 4-Wheels: ${statsData.paseo4W || 0}`,
+      wheels2: statsData.paseo2W || 0,
+      wheels4: statsData.paseo4W || 0,
       capacity: statsData.paseoCapacity,
       icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
       color: '#A21C46',
@@ -156,6 +159,16 @@
   ]);
 
   const maxChartValue = $derived(Math.max(...hourlyChart, 1));
+
+  // Campus cards: roles with 0 entries are hidden unless "Show all roles" is on
+  let showAllRoles = $state<Record<string, boolean>>({});
+
+  function occupancyLevel(occupied: number, capacity: number) {
+    if (!capacity) return { pct: 0, color: '#22c55e' };
+    const pct = Math.min(100, (occupied / capacity) * 100);
+    const color = pct >= 90 ? '#dc2626' : pct >= 75 ? '#f59e0b' : '#22c55e';
+    return { pct, color };
+  }
 </script>
 
 <svelte:head>
@@ -183,6 +196,9 @@
     <div class="stats-grid">
       {#each statCards as card}
         {@const roleStats = getCampusRoleStats(card.label, card.capacity?.occupied ?? card.value ?? 0)}
+        {@const occupied = card.capacity?.occupied ?? card.value ?? 0}
+        {@const capacityTotal = card.capacity?.capacity ?? 0}
+        {@const level = occupancyLevel(occupied, capacityTotal)}
         <div class="stat-card" style="--card-color: {card.color}; --card-bg: {card.bg};">
           {#if card.event}
             <div class="event-badge">
@@ -195,7 +211,7 @@
             </div>
           {/if}
 
-          <!-- Top: Campus Header & Active Count -->
+          <!-- Top: Campus name, occupancy and vehicle types -->
           <div class="stat-card-top">
             <div class="stat-icon-box">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -203,17 +219,26 @@
               </svg>
             </div>
             <div class="stat-details">
-              <div class="stat-value">{card.value}</div>
               <div class="stat-label">{card.label}</div>
-              <div class="stat-desc">{card.desc}</div>
+              <div class="stat-value">{occupied}<span class="stat-capacity"> / {capacityTotal}</span></div>
             </div>
           </div>
 
-          <!-- Capacity Bar / Stats -->
-          <div class="capacity-stats">
-            <div class="cap-item"><span>Capacity:</span> {card.capacity?.capacity ?? 0}</div>
-            <div class="cap-item"><span>Occupied:</span> <strong style="color:#e53e3e">{card.capacity?.occupied ?? 0}</strong></div>
-            <div class="cap-item"><span>Unoccupied:</span> <strong style="color:#D4A62A">{card.capacity?.available ?? card.capacity?.unoccupied ?? 0}</strong></div>
+          <div class="occupancy" title="{occupied} occupied, {card.capacity?.available ?? card.capacity?.unoccupied ?? 0} free">
+            <div class="occupancy-track">
+              <div class="occupancy-fill" style="width: {level.pct}%; background: {level.color};"></div>
+            </div>
+            <div class="occupancy-meta">
+              <span class="wheels" title="2-Wheels">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17l4-8h5l4 8M9.5 9H7"/></svg>
+                {card.wheels2}
+              </span>
+              <span class="wheels" title="4-Wheels">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 13l2-5a2 2 0 0 1 2-1.3h10A2 2 0 0 1 19 8l2 5v4h-2M5 17H3v-4h18"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+                {card.wheels4}
+              </span>
+              <span class="occupancy-pct" style="color: {level.color};">{Math.round(level.pct)}% full</span>
+            </div>
           </div>
 
           <!-- Role Percentage Diagram & Details Section -->
@@ -223,6 +248,9 @@
               <span class="role-section-total">Total: <strong>{roleStats.total}</strong></span>
             </div>
 
+            {#if roleStats.total === 0 && !showAllRoles[card.label]}
+              <p class="role-empty">No entries yet</p>
+            {:else}
             <div class="role-diagram-row">
               <!-- Mini Donut Chart (Radius 30, Circumference 188.5) -->
               <div class="role-donut-box">
@@ -254,7 +282,7 @@
 
               <!-- Role Percentage Breakdown Details -->
               <div class="role-details-list">
-                {#each roleStats.items as item}
+                {#each roleStats.items.filter((i) => i.count > 0 || showAllRoles[card.label]) as item}
                   <div class="role-detail-item">
                     <div class="role-detail-header">
                       <div class="role-name-wrap">
@@ -273,6 +301,15 @@
                 {/each}
               </div>
             </div>
+            {/if}
+
+            <button
+              type="button"
+              class="role-toggle"
+              onclick={() => (showAllRoles = { ...showAllRoles, [card.label]: !showAllRoles[card.label] })}
+            >
+              {showAllRoles[card.label] ? 'Hide empty roles' : 'Show all roles'}
+            </button>
 
             <!-- Stacked Proportion Bar -->
             <div class="role-stacked-bar" title="{roleStats.items.map(i => `${i.label}: ${i.pctFormatted}%`).join(' | ')}">
@@ -473,10 +510,72 @@
     gap: 1rem;
   }
 
-  .stat-desc {
-    font-size: 0.75rem;
+  .stat-capacity {
+    font-size: 0.55em;
+    font-weight: 600;
     color: #a0aec0;
-    margin-top: 4px;
+  }
+
+  .occupancy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .occupancy-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #edf2f7;
+    overflow: hidden;
+  }
+
+  .occupancy-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.4s ease, background 0.4s ease;
+  }
+
+  .occupancy-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #64748b;
+  }
+
+  .wheels {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .occupancy-pct {
+    margin-left: auto;
+    font-weight: 700;
+  }
+
+  .role-empty {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #a0aec0;
+    text-align: center;
+  }
+
+  .role-toggle {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #8B1A3C;
+    cursor: pointer;
+  }
+
+  .role-toggle:hover {
+    text-decoration: underline;
   }
 
   /* Campus Role Percentage Section */
@@ -1107,22 +1206,6 @@
     transition: width 0.4s ease;
   }
 
-  .capacity-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem 0.75rem;
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px dashed #e2e8f0;
-    font-size: 0.7rem;
-    color: #4a5568;
-    width: 100%;
-  }
-
-  .cap-item span {
-    color: #a0aec0;
-    margin-right: 2px;
-  }
 
 
 
@@ -1151,10 +1234,6 @@
     }
     .chart-bars {
       min-width: 480px;
-    }
-    .capacity-stats {
-      flex-wrap: wrap;
-      gap: 0.5rem;
     }
   }
 

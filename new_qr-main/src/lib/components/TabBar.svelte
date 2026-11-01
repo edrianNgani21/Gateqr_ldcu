@@ -83,13 +83,13 @@
     font-size: 0.72rem;
     font-weight: 700;
     border-radius: 10px;
-    background: rgba(0, 0, 0, 0.08);
-    color: inherit;
+    background: #8B1A3C;
+    color: #ffffff;
   }
 
   .tab-active .tab-badge-pill {
-    background: rgba(255, 255, 255, 0.25);
-    color: #ffffff;
+    background: #ffffff;
+    color: #8B1A3C;
   }
 
   @media (max-width: 640px) {

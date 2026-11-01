@@ -6,6 +6,7 @@ declare global {
 		interface Locals {
 			user: {
 				email: string;
+				name?: string | null;
 				role: string;
 				department_id: number | null;
 				user_id?: number;

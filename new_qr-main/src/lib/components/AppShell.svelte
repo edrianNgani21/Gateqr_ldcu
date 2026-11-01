@@ -81,13 +81,16 @@
   let notificationDropdownOpen = $state(false);
   let loadingNotifications = $state(false);
 
-  // User display helper
+  // User display helper: the Google account name when signed in with Google, else from the email
+  let accountName = $derived(String(($page.data as any)?.userName || '').trim());
   let userInitials = $derived(
     userRole === 'applicant' ? 'AP' :
+    accountName ? accountName.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() :
     (userEmail ? userEmail.slice(0, 2).toUpperCase() : 'AD')
   );
   let userDisplayName = $derived(
     userRole === 'applicant' ? 'Applicant' :
+    accountName ||
     (userEmail ? userEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Admin User')
   );
   let userRoleLabel = $derived(
@@ -491,7 +494,7 @@
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
                   </svg>
                 </div>
-                <span class="menu-item-label">Manage Applications</span>
+                <span class="menu-item-label">Applications</span>
                 {#if currentPath !== '/osa' && !openedAppTabs['validation'] && unreadApplicationsCount > 0}
                   <span class="menu-badge-indicator">{unreadApplicationsCount > 99 ? '99+' : unreadApplicationsCount}</span>
                 {/if}
@@ -669,7 +672,7 @@
           </button>
         {/if}
 
-        <span class="meta-system-badge">
+        <span class="meta-system-badge" class:sidebar-has-it={showSidebar}>
           <img src="/liceo-logo.png" alt="LDCU" class="badge-mini-logo" />
           <span class="meta-title">GateQR</span>
           <span class="meta-sep">•</span>
@@ -1275,6 +1278,13 @@
   .header-left-meta {
     display: flex;
     align-items: center;
+  }
+
+  /* The sidebar already names the office on desktop; keep the badge for the mobile menu layout */
+  @media (min-width: 1025px) {
+    .meta-system-badge.sidebar-has-it {
+      display: none;
+    }
   }
 
   .meta-system-badge {

@@ -106,12 +106,6 @@
   }
 
   async function fetchLogs() {
-    if (!selectedCampus) {
-      logs = [];
-      totalLogs = 0;
-      totalPages = 1;
-      return;
-    }
     loading = true;
     try {
       const params = new URLSearchParams({
@@ -273,6 +267,23 @@
   let selectedFeedCampus = $state<'Main' | 'Rnp' | 'Paseo'>('Main');
   let selectedGateView = $state<'active' | 'in' | 'out'>('active');
   let camError = $state<Record<string, boolean>>({ Main: false, Rnp: false, Paseo: false });
+  let camLoaded = $state<Record<string, boolean>>({ Main: false, Rnp: false, Paseo: false });
+  const feedCampusNames: Record<string, string> = { Main: 'Main Campus', Rnp: 'RNP', Paseo: 'PASEO' };
+
+  // Badge shows the real state: Live only once video frames arrive
+  let camStatus = $derived<'live' | 'connecting' | 'offline'>(
+    camError[selectedFeedCampus] ? 'offline' : camLoaded[selectedFeedCampus] ? 'live' : 'connecting'
+  );
+
+  // MJPEG streams do not always fire `load`, so also watch for the first decoded frame
+  $effect(() => {
+    const campus = selectedFeedCampus;
+    const timer = setInterval(() => {
+      const img = document.querySelector('.live-stream-img') as HTMLImageElement | null;
+      if (img && img.naturalWidth > 0 && !camLoaded[campus]) camLoaded[campus] = true;
+    }, 1000);
+    return () => clearInterval(timer);
+  });
   let isCamSettingsOpen = $state(false);
 
   let campusHosts = $state({
@@ -301,6 +312,7 @@
 
   function retryCamFeed() {
     camError[selectedFeedCampus] = false;
+    camLoaded[selectedFeedCampus] = false;
     const current = campusHosts[selectedFeedCampus];
     campusHosts[selectedFeedCampus] = '';
     setTimeout(() => {
@@ -355,17 +367,6 @@
 <AppShell showSidebar={true} userEmail={data.userEmail} userRole={userRole}>
   <NavBar title="Vehicle Log" />
   <div class="page-container">
-    <div class="header-section" style="justify-content: flex-end; margin-bottom: 1rem;">
-      <div class="header-stats">
-        <select bind:value={selectedCampus} onchange={() => { currentPage = 1; fetchLogs(); }} class="select-control top-campus-select">
-          <option value="">Select Campus</option>
-          <option value="Liceo Main">Liceo Main</option>
-          <option value="RNP">RNP</option>
-          <option value="PASEO">PASEO</option>
-        </select>
-      </div>
-    </div>
-
     <div class="card">
       <div class="controls-toolbar">
         <div class="search-wrap">
@@ -385,10 +386,17 @@
         </div>
 
         <div class="filters-row">
+          <select bind:value={selectedCampus} onchange={() => { currentPage = 1; fetchLogs(); }} class="select-control" aria-label="Campus">
+            <option value="">All Campuses</option>
+            <option value="Liceo Main">Main Campus</option>
+            <option value="RNP">RNP</option>
+            <option value="PASEO">PASEO</option>
+          </select>
+
           <select bind:value={boundFilter} onchange={() => { currentPage = 1; fetchLogs(); }} class="select-control">
-            <option value="all">All (In &amp; Out)</option>
-            <option value="in">Entry Only</option>
-            <option value="out">Exit Only</option>
+            <option value="all">In &amp; Out</option>
+            <option value="in">Inside only</option>
+            <option value="out">Exited only</option>
           </select>
 
           <input
@@ -473,7 +481,7 @@
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
               <rect x="6" y="14" width="12" height="8"/>
             </svg>
-            {printModeActive ? 'Cancel Selection' : 'Print Select'}
+            {printModeActive ? 'Cancel' : 'Print selected'}
           </button>
 
           {#if printModeActive}
@@ -484,15 +492,7 @@
         </div>
       </div>
 
-      {#if !selectedCampus}
-        <div class="empty-campus-state">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-          <h3>Select a Campus</h3>
-          <p>Please select a specific campus from the dropdown above to view its real-time vehicle logs.</p>
-        </div>
-      {:else if loading}
+      {#if loading}
         <div class="loading-state">
           <div class="spinner"></div>
           <p>Loading vehicle logs…</p>
@@ -509,6 +509,7 @@
                 {/if}
                 <th>Log ID</th>
                 <th>Plate Number</th>
+                {#if !selectedCampus}<th>Campus</th>{/if}
                 <th>Driver / Role</th>
                 <th>Check In</th>
                 <th>Check Out</th>
@@ -547,6 +548,7 @@
                       <span class="plate-badge">{log.vehicle_plate || log.plate || 'No Plate'}</span>
                     {/if}
                   </td>
+                  {#if !selectedCampus}<td class="td-campus">{log.campus || '—'}</td>{/if}
                   <td>
                     <div class="driver-info">
                       <span class="driver-name">{log.driver_name || log.name || 'Driver'}</span>
@@ -620,7 +622,7 @@
                 </tr>
               {:else}
                 <tr>
-                  <td colspan={printModeActive ? 8 : 7} class="empty-state-cell">
+                  <td colspan={(printModeActive ? 8 : 7) + (selectedCampus ? 0 : 1)} class="empty-state-cell">
                     No vehicle logs found for this date or search filter.
                   </td>
                 </tr>
@@ -647,14 +649,11 @@
     <div class="card camera-feed-card" id="cctv-camera-container">
       <div class="camera-card-header">
         <div class="cam-header-left">
-          <div class="live-indicator">
+          <div class="live-indicator status-{camStatus}">
             <span class="live-dot"></span>
-            <span class="live-text">LIVE CCTV</span>
+            <span class="live-text">{camStatus === 'live' ? 'LIVE' : camStatus === 'connecting' ? 'CONNECTING' : 'OFFLINE'}</span>
           </div>
-          <div>
-            <h2 class="cam-title">Campus Real-Time Gate Camera Feeds</h2>
-            <p class="cam-subtitle">Monitor live gate camera video streams across all university campuses on local network</p>
-          </div>
+          <h2 class="cam-title">Gate Cameras</h2>
         </div>
 
         <div class="cam-header-controls">
@@ -702,24 +701,21 @@
           class:active={selectedFeedCampus === 'Main'}
           style="--tab-color: #8B1A3C;"
           onclick={() => { selectedFeedCampus = 'Main'; retryCamFeed(); }}>
-          <span class="tab-badge">GATE 1</span>
-          MAIN CAMPUS FEED
+          Main Campus
         </button>
         <button 
           class="campus-tab-btn" 
           class:active={selectedFeedCampus === 'Rnp'}
           style="--tab-color: #D4A62A;"
           onclick={() => { selectedFeedCampus = 'Rnp'; retryCamFeed(); }}>
-          <span class="tab-badge">GATE 2</span>
-          RNP CAMPUS FEED
+          RNP
         </button>
         <button 
           class="campus-tab-btn" 
           class:active={selectedFeedCampus === 'Paseo'}
           style="--tab-color: #8B1A3C;"
           onclick={() => { selectedFeedCampus = 'Paseo'; retryCamFeed(); }}>
-          <span class="tab-badge">GATE 3</span>
-          PASEO CAMPUS FEED
+          PASEO
         </button>
       </div>
 
@@ -757,13 +753,9 @@
         <div class="cctv-osd-top">
           <div class="osd-cam-label">
             <span class="osd-rec-dot"></span>
-            <strong>{selectedFeedCampus.toUpperCase()} CAMPUS</strong>
+            <strong>{feedCampusNames[selectedFeedCampus].toUpperCase()}</strong>
             <span class="osd-divider">•</span>
             <span>{selectedGateView === 'in' ? 'ENTRANCE CAMERA' : (selectedGateView === 'out' ? 'EXIT CAMERA' : 'ACTIVE VIEW')}</span>
-          </div>
-          <div class="osd-meta">
-            <span class="osd-res">720P • 25 FPS</span>
-            <span class="osd-ip">{campusHosts[selectedFeedCampus]}</span>
           </div>
         </div>
 
@@ -774,6 +766,7 @@
               src={activeStreamUrl} 
               alt="{selectedFeedCampus} Campus Live Feed"
               class="live-stream-img"
+              onload={() => { camLoaded[selectedFeedCampus] = true; }}
               onerror={() => { camError[selectedFeedCampus] = true; }}
             />
           {/if}
@@ -786,19 +779,15 @@
                   <line x1="1" y1="1" x2="23" y2="23"/>
                 </svg>
               </div>
-              <h3>Camera Feed Standby / Connecting...</h3>
-              <p>Waiting for connection from <strong>{selectedFeedCampus} Campus</strong> Raspberry Pi stream:</p>
-              <code>{activeStreamUrl}</code>
-              <div class="offline-help-text">
-                Ensure <code>main.py</code> is running on the Raspberry Pi camera server and both devices are connected to the same Wi-Fi.
-              </div>
+              <h3>Camera offline</h3>
+              <p>The {feedCampusNames[selectedFeedCampus]} gate camera isn't responding.</p>
               <div class="offline-btn-row">
                 <button class="btn-retry-feed" onclick={retryCamFeed}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                  Retry Stream
+                  Retry
                 </button>
                 <button class="btn-config-ip" onclick={() => isCamSettingsOpen = true}>
-                  Configure IP Address
+                  Camera settings
                 </button>
               </div>
             </div>
@@ -808,7 +797,7 @@
         <!-- OSD Overlay: Bottom Bar -->
         <div class="cctv-osd-bottom">
           <div class="osd-time">
-            MONITORING ACTIVE • {selectedFeedCampus.toUpperCase()} GATE
+            {camStatus === 'live' ? 'MONITORING' : camStatus === 'connecting' ? 'CONNECTING' : 'NO SIGNAL'} • {feedCampusNames[selectedFeedCampus].toUpperCase()} GATE
           </div>
           <div class="osd-actions">
             <button class="osd-btn" onclick={captureSnapshot} title="Capture Snapshot">
@@ -952,15 +941,6 @@
     margin: 0 0 0.25rem 0;
   }
 
-  .top-campus-select {
-    background: #2d3748;
-    color: white;
-    border: none;
-    font-weight: 600;
-    padding: 0.6rem 1rem;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  }
 
   .subtitle {
     font-size: 0.875rem;
@@ -989,16 +969,24 @@
 
   .controls-toolbar {
     display: flex;
-    flex-direction: column;
-    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
     margin-bottom: 1.25rem;
   }
 
   .search-wrap {
     position: relative;
-    width: 100%;
+    flex: 1 1 260px;
+    min-width: 0;
     display: flex;
     align-items: center;
+  }
+
+  .td-campus {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
   }
 
   .search-icon {
@@ -1043,17 +1031,22 @@
   }
 
   .select-control {
-    height: 38px;
+    width: auto;
+    height: 42px;
     padding: 0 0.875rem;
     border: 1.5px solid var(--border-light);
     border-radius: 8px;
-    background: #ffffff;
+    background-color: #ffffff;
     color: var(--text-primary);
     font-size: 0.85rem;
     font-family: inherit;
     outline: none;
     cursor: pointer;
     transition: all 0.2s;
+  }
+
+  select.select-control {
+    padding-right: 2.25rem;
   }
 
   .select-control:focus {
@@ -1495,36 +1488,6 @@
     color: var(--text-secondary);
   }
 
-  .empty-campus-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 5rem 2rem;
-    text-align: center;
-    color: #4a5568;
-    background: #f7fafc;
-    border-radius: 12px;
-    margin: 2rem;
-    border: 1px dashed #cbd5e0;
-  }
-  .empty-campus-state svg {
-    color: #718096;
-    margin-bottom: 1rem;
-    opacity: 0.6;
-  }
-  .empty-campus-state h3 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-    color: #2d3748;
-  }
-  .empty-campus-state p {
-    margin: 0;
-    font-size: 0.95rem;
-    color: #718096;
-    max-width: 400px;
-  }
 
   .loading-state {
     display: flex;
@@ -1602,14 +1565,7 @@
       width: 100%;
     }
 
-    .top-campus-select {
-      width: 100%;
-    }
 
-    .empty-campus-state {
-      padding: 2.5rem 1rem;
-      margin: 1rem 0;
-    }
 
     .logs-table th,
     .logs-table td {
@@ -1982,6 +1938,20 @@
     animation: cctv-live-pulse 1.5s infinite;
   }
 
+  .live-indicator.status-connecting {
+    background: rgba(212, 166, 42, 0.1);
+    border-color: rgba(212, 166, 42, 0.35);
+  }
+  .live-indicator.status-connecting .live-dot { background: #D4A62A; animation: none; }
+  .live-indicator.status-connecting .live-text { color: #a16207; }
+
+  .live-indicator.status-offline {
+    background: #f1f5f9;
+    border-color: #cbd5e0;
+  }
+  .live-indicator.status-offline .live-dot { background: #94a3b8; animation: none; }
+  .live-indicator.status-offline .live-text { color: #64748b; }
+
   @keyframes cctv-live-pulse {
     0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.7); }
     70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(229, 62, 62, 0); }
@@ -2000,12 +1970,6 @@
     font-weight: 800;
     color: #1a202c;
     margin: 0;
-  }
-
-  .cam-subtitle {
-    font-size: 0.82rem;
-    color: #718096;
-    margin: 2px 0 0 0;
   }
 
   .cam-header-controls {
@@ -2076,6 +2040,11 @@
     border-bottom: 2px solid #edf2f7;
     padding-bottom: 0.5rem;
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .campus-tabs-bar::-webkit-scrollbar {
+    display: none;
   }
 
   .campus-tab-btn {
@@ -2095,15 +2064,6 @@
     position: relative;
   }
 
-  .tab-badge {
-    font-size: 0.65rem;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 6px;
-    background: #e2e8f0;
-    color: #4a5568;
-  }
-
   .campus-tab-btn:hover {
     color: #2d3748;
     background: #f8fafc;
@@ -2112,11 +2072,6 @@
   .campus-tab-btn.active {
     color: var(--tab-color, #8B1A3C);
     background: rgba(139, 26, 60, 0.06);
-  }
-
-  .campus-tab-btn.active .tab-badge {
-    background: var(--tab-color, #8B1A3C);
-    color: #ffffff;
   }
 
   .campus-tab-btn.active::after {
@@ -2262,18 +2217,6 @@
     color: #64748b;
   }
 
-  .osd-meta {
-    display: flex;
-    gap: 12px;
-    color: #94a3b8;
-    font-size: 0.78rem;
-  }
-
-  .osd-res {
-    color: #D4A62A;
-    font-weight: 700;
-  }
-
   .video-display-area {
     min-height: 440px;
     max-height: 580px;
@@ -2323,22 +2266,6 @@
     margin: 0;
     font-size: 0.85rem;
     color: #94a3b8;
-  }
-
-  .cam-offline-standby code {
-    background: #1e293b;
-    color: #D4A62A;
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-family: monospace;
-  }
-
-  .offline-help-text {
-    font-size: 0.78rem;
-    color: #64748b;
-    max-width: 480px;
-    margin-top: 4px;
   }
 
   .offline-btn-row {
@@ -2487,9 +2414,6 @@
     .cam-title {
       font-size: 1.05rem;
     }
-    .cam-subtitle {
-      font-size: 0.75rem;
-    }
     .campus-tabs-bar {
       gap: 0.35rem;
       padding-bottom: 0.35rem;
@@ -2498,9 +2422,6 @@
     .campus-tab-btn {
       padding: 6px 10px;
       font-size: 0.75rem;
-    }
-    .tab-badge {
-      display: none;
     }
     .video-display-area {
       min-height: 190px;
@@ -2512,7 +2433,7 @@
     .cam-offline-standby h3 {
       font-size: 0.95rem;
     }
-    .cam-offline-standby p, .cam-offline-standby code {
+    .cam-offline-standby p {
       font-size: 0.75rem;
       word-break: break-all;
     }
