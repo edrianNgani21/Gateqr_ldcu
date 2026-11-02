@@ -5,8 +5,9 @@ export interface StatusPill {
     tone: StatusTone;
 }
 
-function isVps(role: string | null | undefined): boolean {
-    return (role || '').toLowerCase().trim() === 'vps';
+/** VPS and concessionnaire applications skip the Security document review: OSA checks the hardcopies and sends them straight to payment. */
+export function skipsSecurityReview(role: string | null | undefined): boolean {
+    return ['vps', 'concessionnaire'].includes((role || '').toLowerCase().trim());
 }
 
 /**
@@ -15,7 +16,7 @@ function isVps(role: string | null | undefined): boolean {
  * OSA  Screening of Applications : PENDING DPT APRVL -> DPT APPROVE
  * OSA  Submission of Hardcopies  : PENDING
  * SEC  Document Review           : OSA CHECKED
- * OSA  Releasing of Stickers     : CHECKED BY SECURITY + PAID  (VPS: CHECKED + PAID)
+ * OSA  Releasing of Stickers     : CHECKED BY SECURITY + PAID  (VPS, concessionnaire: CHECKED + PAID)
  *
  * Returns null when the tab has no workflow-specific label, so the caller falls back to the raw status.
  */
@@ -41,7 +42,7 @@ export function getWorkflowStatusPills(tab: string, status: string | null | unde
 
     if (t === 'release') {
         return [
-            { label: isVps(role) ? 'CHECKED' : 'CHECKED BY SECURITY', tone: 'success' },
+            { label: skipsSecurityReview(role) ? 'CHECKED' : 'CHECKED BY SECURITY', tone: 'success' },
             { label: 'PAID', tone: 'success' }
         ];
     }

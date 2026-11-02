@@ -3,6 +3,7 @@
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import { uploadDirect } from '$lib/utils/directUpload';
   import { fileSizeError } from '$lib/limits';
+  import { idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
     import AppShell from '$lib/components/AppShell.svelte';
     import { goto } from '$app/navigation';
 
@@ -13,7 +14,9 @@
 
     let role = $state(existing?.role || '');
     let section = $state(1);
-    let owner = $state(existing?.vehicle?.authorization_letter_file ? 'yes' : 'no');
+    // Vehicles without a letter store 'n/a'; only a real file link counts as a letter on file
+    const existingLetter: string | null = /^(https?:\/\/|\/)/.test(existing?.vehicle?.authorization_letter_file || '') ? existing.vehicle.authorization_letter_file : null;
+    let owner = $state(existingLetter ? 'yes' : 'no');
     let dept = $state(existing?.department?.academic_department || existing?.department?.administrative_department || '');
     let campus = $state(existing?.campus || '');
     let year_level = $state(existing?.year_level || '');
@@ -53,7 +56,7 @@
     let files = $state({
         id:         { file: null, url: existing?.school_id_file || null } as FileState,
         enrollment: { file: null, url: null } as FileState,
-        letter:     { file: null, url: existing?.vehicle?.authorization_letter_file || null } as FileState,
+        letter:     { file: null, url: existingLetter } as FileState,
         or:         { file: null, url: existing?.vehicle?.official_receipt_file || null } as FileState,
         cr:         { file: null, url: existing?.vehicle?.certificate_of_registration_file || null } as FileState,
         license:    { file: null, url: existing?.drivers_license_file || null } as FileState,
@@ -77,7 +80,7 @@
             const hasLetter = !!(files.letter.file || files.letter.url);
 
             if (!hasOr || !hasCr || !hasLicense || !hasId) return false;
-            if (['student', 'faculty'].includes(role) && !hasEnrollment) return false;
+            if (needsLoadDocument(role) && !hasEnrollment) return false;
             if (owner === 'yes' && !hasLetter) return false;
             return true;
         }
@@ -92,8 +95,8 @@
 
     function fileLabel(key: keyof typeof files): string {
         return {
-            id: `${role === 'student' ? 'Student' : 'Employee'} ID`,
-            enrollment: role === 'student' ? 'Enrollment Form' : 'Teaching Load',
+            id: idDocumentLabel(role),
+            enrollment: loadDocumentLabel(role),
             letter: 'Signed Letter / DOAS',
             or: 'Vehicle OR',
             cr: 'Vehicle CR',
@@ -595,14 +598,14 @@
 
             <!-- Institutional Documents -->
             {#if true}
-              {@const showEnrollment = ['student', 'faculty'].includes(role)}
+              {@const showEnrollment = needsLoadDocument(role)}
               {@const tileCount = 1 + (showEnrollment ? 1 : 0) + (owner === 'yes' ? 1 : 0)}
               <div class="upload-section-block">
                 <h3 class="upload-section-heading">Institutional Documents</h3>
                 <div class="upload-tiles-grid" style="--cols: {Math.min(tileCount, 3)}">
-                  {@render uploadLabel(`${role === 'student' ? 'Student' : 'Employee'} ID`, 'id')}
+                  {@render uploadLabel(idDocumentLabel(role), 'id')}
                   {#if showEnrollment}
-                    {@render uploadLabel(role === 'student' ? 'Enrollment Form' : 'Teaching Load', 'enrollment')}
+                    {@render uploadLabel(loadDocumentLabel(role), 'enrollment')}
                   {/if}
                   {#if owner === 'yes'}
                     {@render uploadLabel('Signed Letter / DOAS', 'letter')}
@@ -666,7 +669,7 @@
                   <ol type="a">
                     <li>Agreement to Park form (original and photocopy)</li>
                     <li>School ID (photocopy)</li>
-                    <li>Enrollment Form (students) or Load Sheet (Non-Regular Faculty) (photocopy)</li>
+                    <li>Enrollment Form (students) or Load Sheet (faculty) (photocopy)</li>
                     <li>Vehicle official receipt (OR) and certificate of registration (photocopy)</li>
                     <li>Driver's License (photocopy)</li>
                     <li>Authorization letter (If the vehicle is registered under a different name).</li>

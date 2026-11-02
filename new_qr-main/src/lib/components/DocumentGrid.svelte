@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
+
   let { role, owner, clickable = true, documents = {}, onopen }: {
     role: string;
     owner: string;
@@ -8,6 +10,8 @@
   } = $props();
 
   const ltoFull = $derived(!(role === 'visitor' && owner === 'yes'));
+  // A letter on file means the vehicle is registered under someone else's name
+  const hasLetter = $derived(owner === 'yes' || isValidDoc(documents.letter));
 
   function isValidDoc(url: string | null | undefined): boolean {
     if (!url || typeof url !== 'string') return false;
@@ -30,16 +34,18 @@
 <div class="doc-section">
   <!-- Liceo documents for non-visitors/concessionaires (always shown for student/employee) -->
   {#if role !== 'visitor' && role !== 'concessionaire'}
-    <div class="doc-grid" style="--cols: {owner === 'no' ? 3 : 2}">
+    <div class="doc-grid" style="--cols: {1 + (needsLoadDocument(role) ? 1 : 0) + (hasLetter ? 1 : 0)}">
       <button class="doc-tile" class:has-doc={isValidDoc(documents.id)} disabled={!clickable || !isValidDoc(documents.id)} onclick={() => open(documents.id)} title={isValidDoc(documents.id) ? 'View ID Document' : 'ID Document Not Uploaded'}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
-        <span>(Liceo) {role === 'student' ? 'Student ID' : 'Employee ID'}</span>
+        <span>(Liceo) {idDocumentLabel(role)}</span>
       </button>
-      <button class="doc-tile" class:has-doc={isValidDoc(documents.enrollment)} disabled={!clickable || !isValidDoc(documents.enrollment)} onclick={() => open(documents.enrollment)} title={isValidDoc(documents.enrollment) ? 'View Enrollment Form' : 'Enrollment Form Not Uploaded'}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <span>(Liceo) {role === 'student' ? 'Enrollment Form' : 'Load Sheet / DTR'}</span>
-      </button>
-      {#if owner === 'yes'}
+      {#if needsLoadDocument(role)}
+        <button class="doc-tile" class:has-doc={isValidDoc(documents.enrollment)} disabled={!clickable || !isValidDoc(documents.enrollment)} onclick={() => open(documents.enrollment)} title={isValidDoc(documents.enrollment) ? `View ${loadDocumentLabel(role)}` : `${loadDocumentLabel(role)} Not Uploaded`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span>(Liceo) {loadDocumentLabel(role)}</span>
+        </button>
+      {/if}
+      {#if hasLetter}
         <button class="doc-tile" class:has-doc={isValidDoc(documents.letter)} disabled={!clickable || !isValidDoc(documents.letter)} onclick={() => open(documents.letter)} title={isValidDoc(documents.letter) ? 'View Signed Letter' : 'Authorization Letter Not Uploaded'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
           <span>Signed Letter / DOAS</span>

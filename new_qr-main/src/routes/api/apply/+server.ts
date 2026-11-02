@@ -1,6 +1,7 @@
 import { apiFailure } from '$lib/server/apiError';
 import { acceptUploadedFile, UploadRejected } from '$lib/server/directUpload';
 import { PDF_TYPES } from '$lib/limits';
+import { idDocumentLabel, loadDocumentLabel } from '$lib/documents';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -183,8 +184,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const doc_or = await saveFile('doc_or', 'Vehicle OR');
         const doc_cr = await saveFile('doc_cr', 'Vehicle CR');
         const doc_license = await saveFile('doc_license', "Driver's License");
-        const school_id_file = await saveFile('school_id_file', 'ID document');
-        const doc_load = await saveFile('doc_load', 'Enrollment Form or Teaching Load');
+        const school_id_file = await saveFile('school_id_file', idDocumentLabel(role));
+        const doc_load = await saveFile('doc_load', loadDocumentLabel(role));
         const doc_letter = await saveFile('doc_letter', 'Signed Letter');
         const doc_qr = null;
 

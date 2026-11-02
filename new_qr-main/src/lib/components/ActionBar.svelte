@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert } from '$lib/utils/dialog';
+  import { skipsSecurityReview } from '$lib/utils/statusLabels';
   import CharCount from '$lib/components/CharCount.svelte';
   import { MAX_REASON_LENGTH } from '$lib/limits';
   let {
@@ -21,8 +22,8 @@
   let rejectReason = $state('');
 
   let isExpired = $derived(expiresAt ? new Date(expiresAt) < new Date() : false);
-  // VPS skips Security document review: OSA checks the hardcopies and sends the applicant straight to payment
-  let isVps = $derived((role || '').toLowerCase().trim() === 'vps');
+  // These roles skip Security document review: OSA checks the hardcopies and sends the applicant straight to payment
+  let skipsSecurity = $derived(skipsSecurityReview(role));
   let loadingAction = $state<string | null>(null);
 
   async function act(action: string, schedule: string = '') {
@@ -86,7 +87,7 @@
         Processing…
       {:else}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        {#if tab === 'overdue'}Verify Hardcopy{:else if isVps}Mark as Checked{:else}Forward to Security Admin{/if}
+        {#if tab === 'overdue'}Verify Hardcopy{:else if skipsSecurity}Mark as Checked{:else}Forward to Security Admin{/if}
       {/if}
     </button>
     <button

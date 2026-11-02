@@ -1,4 +1,5 @@
 import { apiFailure } from '$lib/server/apiError';
+import { skipsSecurityReview } from '$lib/utils/statusLabels';
 import { json } from '@sveltejs/kit';
 import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
@@ -258,12 +259,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
         else if (action === 'check_hardcopy' && ['distributed', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
-            const isVps = (reg.role || '').toLowerCase().trim() === 'vps';
+            const skipsSecurity = skipsSecurityReview(reg.role);
             const nowHardcopyIso = new Date().toISOString();
             const { error: updateError } = await supabase
                 .from('sticker_application')
-                .update(isVps ? {
-                    // VPS applications skip the Security document review
+                .update(skipsSecurity ? {
+                    // These applications skip the Security document review
                     status: 'security_checked',
                     hardcopy_received_at: nowHardcopyIso,
                     security_checked_at: nowHardcopyIso
@@ -275,7 +276,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
             if (updateError) throw updateError;
 
-            if (isVps) {
+            if (skipsSecurity) {
                 await sendEmail(
                     reg.user.email,
                     'Payment Required - Liceo GateQR',

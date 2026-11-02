@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
   import { showAlert } from '$lib/utils/dialog';
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import AppShell from "$lib/components/AppShell.svelte";
@@ -220,7 +221,7 @@
               </div>
             </div>
 
-            <!-- Documents: Employee ID & Teaching Load -->
+            <!-- Documents: ID and, for students and faculty, Enrollment Form or Load Sheet -->
             <div class="applicant-docs-row">
               <span class="docs-label">Documents:</span>
               <button
@@ -229,27 +230,29 @@
                 class:has-doc={isValidDoc(employeeIdDoc)}
                 disabled={!isValidDoc(employeeIdDoc)}
                 onclick={() => openDoc(employeeIdDoc)}
-                title={isValidDoc(employeeIdDoc) ? 'View Employee ID Document' : 'Employee ID Not Uploaded'}
+                title={isValidDoc(employeeIdDoc) ? `View ${idDocumentLabel(app.role)} Document` : `${idDocumentLabel(app.role)} Not Uploaded`}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>
                 </svg>
-                <span>Employee ID</span>
+                <span>{idDocumentLabel(app.role)}</span>
               </button>
 
-              <button
-                type="button"
-                class="btn-doc-view"
-                class:has-doc={isValidDoc(teachingLoadDoc)}
-                disabled={!isValidDoc(teachingLoadDoc)}
-                onclick={() => openDoc(teachingLoadDoc)}
-                title={isValidDoc(teachingLoadDoc) ? 'View Teaching Load Document' : 'Teaching Load Not Uploaded'}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-                </svg>
-                <span>Teaching Load</span>
-              </button>
+              {#if needsLoadDocument(app.role)}
+                <button
+                  type="button"
+                  class="btn-doc-view"
+                  class:has-doc={isValidDoc(teachingLoadDoc)}
+                  disabled={!isValidDoc(teachingLoadDoc)}
+                  onclick={() => openDoc(teachingLoadDoc)}
+                  title={isValidDoc(teachingLoadDoc) ? `View ${loadDocumentLabel(app.role)} Document` : `${loadDocumentLabel(app.role)} Not Uploaded`}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                  <span>{loadDocumentLabel(app.role)}</span>
+                </button>
+              {/if}
 
               {#if isValidDoc(app.signed_agreement_form)}
                 <button

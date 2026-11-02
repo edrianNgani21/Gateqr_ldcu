@@ -3,6 +3,7 @@
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import { uploadDirect } from '$lib/utils/directUpload';
   import { fileSizeError } from '$lib/limits';
+  import { skipsSecurityReview } from '$lib/utils/statusLabels';
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import CharCount from '$lib/components/CharCount.svelte';
@@ -30,8 +31,8 @@
     let app = $derived((data.application as any) || null);
     let changeRequest = $derived((data.changeRequest as any) || null);
     let skipDean = $derived(app ? ['visitor', 'concessionaire'].includes(app.role) : false);
-    // VPS applications skip the Security document review
-    let skipSec = $derived(app ? (app.role || '').toLowerCase() === 'vps' : false);
+    // These applications skip the Security document review
+    let skipSec = $derived(app ? skipsSecurityReview(app.role) : false);
     let stepOffset = $derived((skipDean ? 1 : 0) + (skipSec ? 1 : 0));
 
     // Receipt upload state
