@@ -32,7 +32,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         if (queryError) {
             console.error('[Verify] Database error querying user:', queryError);
-            return json({ error: 'Database error. Please try again.' }, { status: 500 });
+            return json({ error: 'We could not check your account because the database did not respond. Please try again in a moment.' }, { status: 500 });
         }
 
         let user = userList && userList.length > 0 ? userList[0] : null;
@@ -56,7 +56,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
             if (createError || !newUser) {
                 console.error('[Verify] Failed to create user:', createError);
-                return json({ error: 'Failed to create applicant profile' }, { status: 500 });
+                return json({ error: 'Your code was accepted, but your applicant profile could not be created. Please try again in a moment.' }, { status: 500 });
             }
 
             user = newUser;
@@ -106,6 +106,6 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         });
     } catch (error) {
         console.error('[Verify Error]:', error);
-        return json({ error: 'An unexpected error occurred during OTP verification' }, { status: 500 });
+        return json({ error: 'Your code could not be verified because the server ran into a problem. Please try again in a moment.' }, { status: 500 });
     }
 };

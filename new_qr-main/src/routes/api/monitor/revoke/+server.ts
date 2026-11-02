@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -6,13 +7,13 @@ import { sendEmail, sendEmailAsync } from '$lib/server/email';
 export const POST: RequestHandler = async ({ request, locals }) => {
     // Only Security can revoke
     if (!locals.user || locals.user.role !== 'security') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const body = await request.json();
         const targetId = body.registration_id || body.id || body.vehicle_id;
-        if (!targetId) return json({ error: 'Missing registration_id' }, { status: 400 });
+        if (!targetId) return json({ error: 'No application was selected. Please refresh the page and try again.' }, { status: 400 });
 
         // Get user for email notification
         const { data: reg } = await supabase
@@ -59,20 +60,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true });
     } catch (error) {
         console.error('[Monitor] Revoke error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('revoke the QR code', error);
     }
 };
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
     // Only Security can unrevoke
     if (!locals.user || locals.user.role !== 'security') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const body = await request.json();
         const targetId = body.registration_id || body.id || body.vehicle_id;
-        if (!targetId) return json({ error: 'Missing registration_id' }, { status: 400 });
+        if (!targetId) return json({ error: 'No application was selected. Please refresh the page and try again.' }, { status: 400 });
 
         const { data: reg } = await supabase
             .from('sticker_application')
@@ -120,7 +121,7 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         return json({ success: true });
     } catch (error) {
         console.error('[Monitor] Unrevoke error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('restore the QR code', error);
     }
 };
 

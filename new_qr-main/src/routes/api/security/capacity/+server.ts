@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -5,7 +6,7 @@ import { invalidateCapacityServerCache } from '$lib/server/capacityCache';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'security') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -23,7 +24,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         }
 
         if (!campus) {
-            return json({ error: 'Invalid input data' }, { status: 400 });
+            return json({ error: 'Some of the details entered are not valid. Please check them and try again.' }, { status: 400 });
         }
 
         const gate = campus === 'RNP' ? 'rnp' : (campus === 'PASEO' ? 'paseo' : 'main');
@@ -91,6 +92,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true });
     } catch (error: any) {
         console.error('Error updating capacity:', error);
-        return json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+        return apiFailure('update the parking capacity', error);
     }
 };

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm, askReason } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import AppShell from "$lib/components/AppShell.svelte";
   import NavBar from "$lib/components/NavBar.svelte";
   import TabBar from "$lib/components/TabBar.svelte";
@@ -131,11 +132,10 @@
         editingCapacity = false;
         showAlert("Capacity updated successfully");
       } else {
-        const json = await res.json();
-        showAlert(json.error || "Failed to update capacity");
+        showAlert(await readApiError(res, 'update the parking capacity'));
       }
     } catch (e) {
-      showAlert("Network error");
+      showAlert(networkErrorMessage('update the parking capacity'));
     } finally {
       capacityLoading = false;
     }
@@ -399,12 +399,12 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        showAlert("Failed to revoke QR code.");
+        showAlert(await readApiError(res, 'revoke the QR code'));
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      showAlert("Error revoking QR code.");
+      showAlert(networkErrorMessage('revoke the QR code'));
     }
   }
 
@@ -431,12 +431,12 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        showAlert("Failed to restore QR code.");
+        showAlert(await readApiError(res, 'restore the QR code'));
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      showAlert("Error restoring QR code.");
+      showAlert(networkErrorMessage('restore the QR code'));
     }
   }
 
@@ -465,13 +465,12 @@
         invalidateAll();
       } else {
         vehicles = previous;
-        const body = await res.json().catch(() => ({}));
-        showAlert(body.error || "Failed to delete registration.");
+        showAlert(await readApiError(res, 'delete the registration'));
       }
     } catch (e) {
       vehicles = previous;
       console.error(e);
-      showAlert("Error deleting registration.");
+      showAlert(networkErrorMessage('delete the registration'));
     }
   }
 
@@ -894,12 +893,11 @@
                       invalidateAll();
                     } else {
                       vehicles = previousVehicles;
-                      const errData = await res.json();
-                      showAlert(errData.error || "Failed to perform action.");
+                      showAlert(await readApiError(res, 'process the action'));
                     }
                   } catch (e) {
                     vehicles = previousVehicles;
-                    showAlert("Error performing action.");
+                    showAlert(networkErrorMessage('process the action'));
                   }
                 } else if (action === "security_reject") {
                   const previousVehicles = vehicles;
@@ -928,12 +926,11 @@
                       invalidateAll();
                     } else {
                       vehicles = previousVehicles;
-                      const errData = await res.json();
-                      showAlert(errData.error || "Failed to reject application.");
+                      showAlert(await readApiError(res, 'reject the application'));
                     }
                   } catch (e) {
                     vehicles = previousVehicles;
-                    showAlert("Error rejecting application.");
+                    showAlert(networkErrorMessage('reject the application'));
                   }
                 }
               }}

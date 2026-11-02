@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { onMount } from 'svelte';
@@ -54,11 +55,10 @@
             if (res.ok) {
                 complaints = complaints.map(c => c.incident_report_id === id ? { ...c, status } : c);
             } else {
-                const json = await res.json();
-                showAlert(json.error || 'Failed to update incident report');
+                showAlert(await readApiError(res, 'update the incident report'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('update the incident report'));
         }
     }
 
@@ -73,11 +73,10 @@
             if (res.ok) {
                 complaints = complaints.map(c => c.incident_report_id === id ? { ...c, schedule } : c);
             } else {
-                const json = await res.json();
-                showAlert(json.error || 'Failed to schedule meeting');
+                showAlert(await readApiError(res, 'schedule the meeting'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('schedule the meeting'));
         }
     }
 
@@ -98,11 +97,10 @@
             if (res.ok) {
                 showAlert('Schedule confirmation email sent to reporter');
             } else {
-                const json = await res.json();
-                showAlert(json.error || 'Failed to send confirmation email');
+                showAlert(await readApiError(res, 'send the confirmation email'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('send the confirmation email'));
         } finally {
             confirmLoading = false;
         }

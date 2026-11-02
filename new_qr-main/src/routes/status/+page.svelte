@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { showAlert } from '$lib/utils/dialog';
+  import { showAlert, showError } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
+  import { uploadDirect } from '$lib/utils/directUpload';
+  import { fileSizeError } from '$lib/limits';
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
+    import CharCount from '$lib/components/CharCount.svelte';
+    import { MAX_REASON_LENGTH } from '$lib/limits';
     import { invalidateAll } from '$app/navigation';
     import { startLiveSync } from '$lib/utils/liveSync';
     import type { PageData } from './$types';
@@ -42,7 +47,15 @@
         if (input.files && input.files[0]) {
             const f = input.files[0];
             if (!f.type.startsWith('image/')) {
-                showAlert('Only image files are allowed.');
+                showAlert('Your payment receipt must be an image file (JPG, PNG, or WEBP).');
+                input.value = '';
+                receiptFile = null;
+                receiptPreview = null;
+                return;
+            }
+            const sizeError = fileSizeError('payment receipt', f.size);
+            if (sizeError) {
+                showError(sizeError, 'File is too large');
                 input.value = '';
                 receiptFile = null;
                 receiptPreview = null;
@@ -65,18 +78,17 @@
         receiptError = '';
         try {
             const formData = new FormData();
-            formData.append('receipt', receiptFile);
+            formData.append('receipt', await uploadDirect(receiptFile, 'payment receipt'));
             const res = await fetch('/api/receipt', { method: 'POST', body: formData });
-            const resData = await res.json();
             if (!res.ok) {
-                receiptError = resData.error || 'Failed to upload receipt.';
+                receiptError = await readApiError(res, 'upload your payment receipt');
             } else {
                 receiptFile = null;
                 receiptPreview = null;
                 await invalidateAll();
             }
         } catch (e: any) {
-            receiptError = e.message || 'Network error.';
+            receiptError = e.message || networkErrorMessage('upload your payment receipt');
         } finally {
             receiptLoading = false;
         }
@@ -102,7 +114,14 @@
         if (input.files && input.files[0]) {
             const f = input.files[0];
             if (!['image/jpeg', 'image/png', 'application/pdf'].includes(f.type)) {
-                showAlert('Only JPG, PNG, or PDF files are allowed.');
+                showAlert('Your signed Agreement Form to Park must be a JPG, PNG, or PDF file.');
+                input.value = '';
+                agreementFile = null;
+                return;
+            }
+            const sizeError = fileSizeError('signed Agreement Form to Park', f.size);
+            if (sizeError) {
+                showError(sizeError, 'File is too large');
                 input.value = '';
                 agreementFile = null;
                 return;
@@ -123,18 +142,17 @@
         agreementError = '';
         try {
             const formData = new FormData();
-            formData.append('signed_agreement', agreementFile);
+            formData.append('signed_agreement', await uploadDirect(agreementFile, 'signed Agreement Form to Park'));
             const res = await fetch('/api/signed-agreement', { method: 'POST', body: formData });
-            const resData = await res.json();
             if (!res.ok) {
-                agreementError = resData.error || 'Failed to upload the signed Agreement Form to Park.';
+                agreementError = await readApiError(res, 'upload your signed Agreement Form to Park');
             } else {
                 agreementFile = null;
                 agreementPreview = null;
                 await invalidateAll();
             }
         } catch (e: any) {
-            agreementError = e.message || 'Network error.';
+            agreementError = e.message || networkErrorMessage('upload your signed Agreement Form to Park');
         } finally {
             agreementLoading = false;
         }
@@ -159,14 +177,23 @@
     let changeLoading = $state(false);
     let changeError = $state('');
 
+    const CHANGE_FILE_LABELS = { or: 'Vehicle OR', cr: 'Vehicle CR', license: "Driver's License", letter: 'Signed Letter' };
+
     function handleFileChange(key: keyof typeof changeFiles, e: Event) {
         const input = e.target as HTMLInputElement;
         if (input.files && input.files[0]) {
             const f = input.files[0];
             const isPdf = f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf';
             if (!isPdf) {
-                showAlert('Only PDF files are allowed.');
+                showAlert(`Your ${CHANGE_FILE_LABELS[key]} must be a PDF file.`);
                 input.value = '';
+                return;
+            }
+            const sizeError = fileSizeError(CHANGE_FILE_LABELS[key], f.size);
+            if (sizeError) {
+                showError(sizeError, 'File is too large');
+                input.value = '';
+                changeFiles[key] = null;
                 return;
             }
             changeFiles[key] = f;
@@ -198,19 +225,18 @@
             formData.append('is_owner', newIsOwner);
             if (app?.id) formData.append('registration_id', String(app.id));
 
-            if (changeFiles.or) formData.append('doc_or', changeFiles.or);
-            if (changeFiles.cr) formData.append('doc_cr', changeFiles.cr);
-            if (changeFiles.license) formData.append('doc_license', changeFiles.license);
-            if (changeFiles.letter) formData.append('doc_letter', changeFiles.letter);
+            if (changeFiles.or) formData.append('doc_or', await uploadDirect(changeFiles.or, CHANGE_FILE_LABELS.or));
+            if (changeFiles.cr) formData.append('doc_cr', await uploadDirect(changeFiles.cr, CHANGE_FILE_LABELS.cr));
+            if (changeFiles.license) formData.append('doc_license', await uploadDirect(changeFiles.license, CHANGE_FILE_LABELS.license));
+            if (changeFiles.letter) formData.append('doc_letter', await uploadDirect(changeFiles.letter, CHANGE_FILE_LABELS.letter));
 
             const res = await fetch('/api/change-vehicle/request', {
                 method: 'POST',
                 body: formData
             });
 
-            const resData = await res.json();
             if (!res.ok) {
-                changeError = resData.error || 'Failed to submit change request.';
+                changeError = await readApiError(res, 'submit your change request');
             } else {
                 showAlert('Your request to change registration details has been submitted to OSA for review!');
                 changeModalOpen = false;
@@ -221,7 +247,7 @@
                 await invalidateAll();
             }
         } catch (e: any) {
-            changeError = e.message || 'Network error.';
+            changeError = e.message || networkErrorMessage('submit your change request');
         } finally {
             changeLoading = false;
         }
@@ -632,7 +658,9 @@
                 placeholder="Explain why you need to change your vehicle information (e.g. Sold previous car, bought new vehicle, replacement)..."
                 bind:value={changeReason}
                 class="form-input"
+                maxlength={MAX_REASON_LENGTH}
               ></textarea>
+              <CharCount value={changeReason} />
             </div>
 
             <div class="form-grid">

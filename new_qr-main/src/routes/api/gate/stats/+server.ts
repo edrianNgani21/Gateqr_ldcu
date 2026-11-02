@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -11,7 +12,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
     const isOsa = locals.user && (locals.user.role === 'osa' || locals.user.role === 'security');
     
     if (!isGate && !isOsa) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -62,16 +63,13 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         const totalCurrentlyIn = (currentlyIn || 0) + (guestCurrentlyIn || 0) + vipCurrentlyIn;
         const totalVisitsToday = (visitsToday || 0) + (guestVisitsToday || 0) + vipVisitsToday;
 
-        // Anomalies today (registered + guest entries with a presence_status)
+        // Anomalies today: flagged or denied gate attempts, same rule as the Security dashboard
         const { count: anomalyRegCount } = await supabase
             .from('gate_log')
             .select('*', { count: 'exact', head: true })
             .gte('entered_at', today)
             .lt('entered_at', tomorrow)
-            .not('presence_status', 'is', null)
-            .neq('presence_status', '')
-            .neq('presence_status', 'OK')
-            .neq('presence_status', 'Inside');
+            .or('flagged_alert.not.is.null,presence_status.eq.denied');
 
         const { count: anomalyGuestCount } = await supabase
             .from('guestlog')
@@ -204,6 +202,6 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         });
     } catch (error) {
         console.error('[Gate] Stats error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the gate statistics', error);
     }
 };

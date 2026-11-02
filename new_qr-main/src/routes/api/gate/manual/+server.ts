@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -32,7 +33,7 @@ async function saveImage(pic_base64: string, type: string): Promise<string | nul
 
 export const POST: RequestHandler = async ({ request }) => {
     if (!checkAuth(request)) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -155,6 +156,6 @@ export const POST: RequestHandler = async ({ request }) => {
         }
     } catch (error) {
         console.error('[Gate] Manual entry error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('record the manual gate entry', error);
     }
 };

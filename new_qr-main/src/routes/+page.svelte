@@ -1,5 +1,8 @@
 <script lang="ts">
   import { showAlert, showError } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
+  import { uploadDirect } from '$lib/utils/directUpload';
+  import { fileSizeError } from '$lib/limits';
     import AppShell from '$lib/components/AppShell.svelte';
     import { goto } from '$app/navigation';
 
@@ -87,11 +90,28 @@
         return false;
     })());
 
+    function fileLabel(key: keyof typeof files): string {
+        return {
+            id: `${role === 'student' ? 'Student' : 'Employee'} ID`,
+            enrollment: role === 'student' ? 'Enrollment Form' : 'Teaching Load',
+            letter: 'Signed Letter / DOAS',
+            or: 'Vehicle OR',
+            cr: 'Vehicle CR',
+            license: "Driver's License"
+        }[key];
+    }
+
     function setFile(key: keyof typeof files, file: File | null, inputEl: HTMLInputElement | null = null) {
         if (file) {
             const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
             if (!isPdf) {
                 showAlert('Only PDF files are allowed. (Document allows PDF and Scanned)');
+                if (inputEl) inputEl.value = '';
+                return;
+            }
+            const sizeError = fileSizeError(fileLabel(key), file.size);
+            if (sizeError) {
+                showError(sizeError, 'File is too large');
                 if (inputEl) inputEl.value = '';
                 return;
             }
@@ -149,22 +169,23 @@
                 formData.append('registration_id', String(existing.registration_id));
             }
 
-            if (files.or.file) formData.append('doc_or', files.or.file);
+            // Documents go straight to storage; the form carries where each one was saved
+            if (files.or.file) formData.append('doc_or', await uploadDirect(files.or.file, fileLabel('or')));
             else if (files.or.url) formData.append('existing_doc_or', files.or.url);
 
-            if (files.cr.file) formData.append('doc_cr', files.cr.file);
+            if (files.cr.file) formData.append('doc_cr', await uploadDirect(files.cr.file, fileLabel('cr')));
             else if (files.cr.url) formData.append('existing_doc_cr', files.cr.url);
 
-            if (files.license.file) formData.append('doc_license', files.license.file);
+            if (files.license.file) formData.append('doc_license', await uploadDirect(files.license.file, fileLabel('license')));
             else if (files.license.url) formData.append('existing_doc_license', files.license.url);
 
-            if (files.id.file) formData.append('school_id_file', files.id.file);
+            if (files.id.file) formData.append('school_id_file', await uploadDirect(files.id.file, fileLabel('id')));
             else if (files.id.url) formData.append('existing_doc_id', files.id.url);
 
-            if (files.enrollment.file) formData.append('doc_load', files.enrollment.file);
+            if (files.enrollment.file) formData.append('doc_load', await uploadDirect(files.enrollment.file, fileLabel('enrollment')));
             else if (files.enrollment.url) formData.append('existing_doc_load', files.enrollment.url);
 
-            if (files.letter.file) formData.append('doc_letter', files.letter.file);
+            if (files.letter.file) formData.append('doc_letter', await uploadDirect(files.letter.file, fileLabel('letter')));
             else if (files.letter.url) formData.append('existing_doc_letter', files.letter.url);
 
             const res = await fetch('/api/apply', {
@@ -175,11 +196,10 @@
             if (res.ok) {
                 goto('/status');
             } else {
-                const data = await res.json().catch(() => ({}));
-                showError(data.error, 'Application not submitted');
+                showError(await readApiError(res, 'submit your application'), 'Application not submitted');
             }
-        } catch(e) {
-            showError('Network error', 'Application not submitted');
+        } catch(e: any) {
+            showError(e?.message || networkErrorMessage('submit your application'), 'Application not submitted');
         } finally {
             loading = false;
         }

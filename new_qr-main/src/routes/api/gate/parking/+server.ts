@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -12,7 +13,7 @@ export const GET: RequestHandler = async ({ request, locals }) => {
     const isOsa = locals.user && (locals.user.role === 'osa' || locals.user.role === 'security');
 
     if (!isGate && !isOsa) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -44,6 +45,6 @@ export const GET: RequestHandler = async ({ request, locals }) => {
         });
     } catch (error) {
         console.error('[Gate] Parking availability error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the parking availability', error);
     }
 };

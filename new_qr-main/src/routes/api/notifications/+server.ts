@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -6,7 +7,7 @@ export const GET: RequestHandler = async ({ locals }) => {
     try {
         // Check if user is authenticated
         if (!locals.user) {
-            return json({ error: 'Unauthorized' }, { status: 401 });
+            return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
         }
 
         const userId = locals.user.user_id;
@@ -30,7 +31,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
         if (error) {
             console.error('Error fetching notifications:', error);
-            return json({ error: 'Failed to fetch notifications' }, { status: 500 });
+            return apiFailure('load your notifications', error);
         }
 
         // Safely resolve actor email if actor_id is present
@@ -54,6 +55,6 @@ export const GET: RequestHandler = async ({ locals }) => {
         return json({ notifications: notifications || [] });
     } catch (error) {
         console.error('Notifications API error:', error);
-        return json({ error: 'Internal server error' }, { status: 500 });
+        return apiFailure('load your notifications', error);
     }
 };

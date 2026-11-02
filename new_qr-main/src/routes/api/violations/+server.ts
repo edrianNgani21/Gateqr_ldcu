@@ -1,3 +1,5 @@
+import { apiFailure } from '$lib/server/apiError';
+import { reasonLengthError } from '$lib/limits';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -35,24 +37,24 @@ async function getViolations(registrationId: number) {
 // History and the level the next violation will be recorded at
 export const GET: RequestHandler = async ({ url, locals }) => {
     if (!locals.user || !canRecord(locals.user.role)) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
     const registrationId = Number(url.searchParams.get('registration_id'));
     if (!Number.isInteger(registrationId) || registrationId <= 0) {
-        return json({ error: 'registration_id is required' }, { status: 400 });
+        return json({ error: 'No application was selected. Please refresh the page and try again.' }, { status: 400 });
     }
     try {
         const history = await getViolations(registrationId);
         return json({ history, next_level: nextViolationLevel(history.length) });
     } catch (error) {
         console.error('Failed to load violations:', error);
-        return json({ error: 'Failed to load violation history' }, { status: 500 });
+        return apiFailure('load the violation history', error);
     }
 };
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || !canRecord(locals.user.role)) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -63,11 +65,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const evidence = form.get('evidence');
 
         if (!Number.isInteger(registrationId) || registrationId <= 0) {
-            return json({ error: 'registration_id is required' }, { status: 400 });
+            return json({ error: 'No application was selected. Please refresh the page and try again.' }, { status: 400 });
         }
         if (!reason) {
             return json({ error: 'Please enter the violation reason.' }, { status: 400 });
         }
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
 
         const { data: reg } = await supabase
             .from('sticker_application')
@@ -76,7 +80,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .maybeSingle();
 
         if (!reg) {
-            return json({ error: 'Registration not found' }, { status: 404 });
+            return json({ error: 'This registration could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
         if (!REGISTERED_STATUSES.includes((reg.status || '').toLowerCase())) {
             return json({ error: 'Violations can only be recorded for registered vehicles.' }, { status: 400 });
@@ -181,6 +185,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true, violation: inserted, next_level: nextViolationLevel(history.length + 1) });
     } catch (error) {
         console.error('Failed to record violation:', error);
-        return json({ error: 'Failed to record violation' }, { status: 500 });
+        return apiFailure('record the violation', error);
     }
 };

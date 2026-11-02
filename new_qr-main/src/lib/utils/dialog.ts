@@ -38,7 +38,7 @@ export function closeDialog(ok: boolean, value?: string) {
     dialogState.set(queue.shift() ?? null);
 }
 
-const ERROR_WORDS = /(error|fail|invalid|cannot|can't|unable|not found|denied|unauthori[sz]ed|required|please|must|missing|exceed|duplicate|not allowed|network)/i;
+const ERROR_WORDS = /(error|fail|invalid|cannot|can't|could not|unable|maximum|not found|denied|unauthori[sz]ed|required|please|must|missing|exceed|duplicate|not allowed|network)/i;
 const SUCCESS_WORDS = /(success|submitted|saved|updated|approved|accepted|released|restored|sent|created|deleted|removed|recorded)/i;
 
 /**
@@ -51,8 +51,8 @@ export function explainError(raw: unknown): { message: string; detail?: string }
 
     if (!bare || bare === '<none>' || bare === 'undefined' || bare === 'null' || bare === '[object Object]' || /internal server error/i.test(bare)) {
         return {
-            message: 'Something went wrong on our side and the server did not say why.',
-            detail: 'This is usually a temporary problem while uploading files or saving to the database, not a mistake in what you entered. Please wait a moment and try again. If it keeps happening, contact the Office of Student Affairs.'
+            message: 'The action failed, and the server did not report a specific cause.',
+            detail: 'What you entered was not rejected. Please wait a moment and try again. If it keeps happening, contact the Office of Student Affairs.'
         };
     }
     if (/network|failed to fetch|load failed/i.test(bare)) {
@@ -61,10 +61,10 @@ export function explainError(raw: unknown): { message: string; detail?: string }
             detail: 'Check your internet connection, then try again.'
         };
     }
-    if (/storage|upload/i.test(bare)) {
+    if (/unexpected token|json/i.test(bare)) {
         return {
-            message: bare,
-            detail: 'One of your files could not be uploaded. Please try again; if it keeps failing, re-export the file as a PDF under 10MB.'
+            message: 'The server sent a response that could not be read.',
+            detail: 'The action may not have been completed. Please refresh the page to check, then try again if needed.'
         };
     }
     return { message: bare };
@@ -75,13 +75,13 @@ export function showAlert(raw: unknown, options: { title?: string; tone?: Dialog
     const text = String(raw ?? '');
     const tone: DialogTone = options.tone ?? (ERROR_WORDS.test(text) || !text.trim() ? 'error' : SUCCESS_WORDS.test(text) ? 'success' : 'info');
     const { message, detail } = tone === 'error' ? explainError(text) : { message: text, detail: undefined };
-    const title = options.title ?? (tone === 'error' ? 'Something went wrong' : tone === 'success' ? 'Done' : 'Notice');
+    const title = options.title ?? (tone === 'error' ? 'Action not completed' : tone === 'success' ? 'Done' : 'Notice');
     return new Promise((resolve) =>
         open({ kind: 'alert', tone, title, message, detail, confirmLabel: 'OK', cancelLabel: '', resolve: () => resolve() })
     );
 }
 
-export function showError(raw: unknown, title = 'Something went wrong'): Promise<void> {
+export function showError(raw: unknown, title = 'Action not completed'): Promise<void> {
     return showAlert(raw, { title, tone: 'error' });
 }
 

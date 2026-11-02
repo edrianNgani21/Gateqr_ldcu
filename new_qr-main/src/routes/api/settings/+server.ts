@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -7,7 +8,7 @@ export const GET: RequestHandler = async ({ locals }) => {
     const isOsaOrSecurity = locals.user && (locals.user.role === 'osa' || locals.user.role === 'security');
 
     if (!isOsaOrSecurity) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -22,7 +23,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         return json({ max_capacity: capacity, parking_capacity: capacity });
     } catch (error) {
         console.error('[Settings] GET error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the settings', error);
     }
 };
 
@@ -30,7 +31,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
     const isOsaOrSecurity = locals.user && (locals.user.role === 'osa' || locals.user.role === 'security');
 
     if (!isOsaOrSecurity) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -51,6 +52,6 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         return json({ success: true, max_capacity: newCap, parking_capacity: newCap });
     } catch (error) {
         console.error('[Settings] PUT error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('update the settings', error);
     }
 };

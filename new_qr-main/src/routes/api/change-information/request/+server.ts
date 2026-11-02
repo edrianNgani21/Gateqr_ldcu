@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/server/supabase';
@@ -5,7 +6,7 @@ import { sendEmail } from '$lib/server/email';
 
 export async function POST({ request, locals }: RequestEvent) {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
@@ -19,7 +20,7 @@ export async function POST({ request, locals }: RequestEvent) {
             .single();
 
         if (userError || !userData) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         // Get the user's current registration
@@ -32,7 +33,7 @@ export async function POST({ request, locals }: RequestEvent) {
             .single();
 
         if (regError || !registrations) {
-            return json({ error: 'No registration found' }, { status: 400 });
+            return json({ error: 'You do not have a vehicle registration on file yet.' }, { status: 400 });
         }
 
         const registration = registrations;
@@ -62,6 +63,6 @@ export async function POST({ request, locals }: RequestEvent) {
         return json({ message: 'Change information request submitted successfully. OSA will contact you shortly.' });
     } catch (error) {
         console.error('Change information request error:', error);
-        return json({ error: 'Failed to submit change information request' }, { status: 500 });
+        return apiFailure('submit your change information request', error);
     }
 };

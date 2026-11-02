@@ -1,4 +1,6 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
+import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import QRCode from 'qrcode';
@@ -48,7 +50,7 @@ function generateUniqueCode(length: number = 8): string {
 
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -77,17 +79,20 @@ export const GET: RequestHandler = async ({ locals }) => {
         return json({ applications });
     } catch (error) {
         console.error('Failed to fetch osa applications:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the applications', error);
     }
 };
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || (locals.user.role !== 'osa' && locals.user.role !== 'security')) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const { registration_id, action, reason, schedule, school_year, expires_at } = await request.json();
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
+
 
         const { data: rows } = await supabase
             .from('sticker_application')
@@ -102,7 +107,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (!rows) {
-            return json({ error: 'Application not found' }, { status: 404 });
+            return json({ error: 'This application could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
 
         const reg = rows;
@@ -204,7 +209,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         } 
         else if (action === 'reject' && ['osa_val', 'osa_validated', 'dept_validated', 'dept_val', 'pending'].includes((reg.status || '').toLowerCase())) {
-            if (!reason) return json({ error: 'Reason required' }, { status: 400 });
+            if (!reason) return json({ error: 'Please enter a reason before continuing.' }, { status: 400 });
             
             const { error: updateError } = await supabase
                 .from('sticker_application')
@@ -500,7 +505,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
         else if (action === 'revoke' && ['distributed', 'completed', 'approved', 'security_checked', 'osa_validated'].includes((reg.status || '').toLowerCase())) {
-            if (!reason) return json({ error: 'Reason required' }, { status: 400 });
+            if (!reason) return json({ error: 'Please enter a reason before continuing.' }, { status: 400 });
             
             const { error: updateError } = await supabase
                 .from('sticker_application')
@@ -686,12 +691,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
         else {
-            return json({ error: 'Invalid action for current status' }, { status: 400 });
+            return json({ error: 'This action is not available for the current status of the application. It may already have been processed. Please refresh the page.' }, { status: 400 });
         }
 
         return json({ message: 'Application updated' });
     } catch (error) {
         console.error('Failed to update osa application:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('process this action on the application', error);
     }
 };

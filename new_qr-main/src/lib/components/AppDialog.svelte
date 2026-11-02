@@ -1,5 +1,7 @@
 <script lang="ts">
   import { dialogState, closeDialog } from '$lib/utils/dialog';
+  import CharCount from '$lib/components/CharCount.svelte';
+  import { MAX_REASON_LENGTH } from '$lib/limits';
 
   let confirmBtn = $state<HTMLButtonElement | null>(null);
   let promptInput = $state<HTMLTextAreaElement | null>(null);
@@ -71,7 +73,9 @@
           placeholder={d.inputPlaceholder}
           bind:this={promptInput}
           bind:value={promptValue}
+          maxlength={MAX_REASON_LENGTH}
         ></textarea>
+        <CharCount value={promptValue} />
       {/if}
       <div class="dlg-actions">
         {#if d.kind !== 'alert'}

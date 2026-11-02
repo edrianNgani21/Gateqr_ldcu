@@ -147,6 +147,12 @@ export async function restoreFromRecycleBin(registrationId: number, mode: 'resto
     return { conflict: false, replaced: duplicates.map((d) => d.registration_id) };
 }
 
+async function deleteStoredFiles(files: unknown[]) {
+    for (const file of files) {
+        if (typeof file === 'string' && /^https?:\/\//.test(file)) await deleteFromStorage(file);
+    }
+}
+
 /** Remove a deleted registration for good. Gate history stays: name and plate are copied onto its gate_log rows. */
 export async function permanentlyDelete(registrationId: number) {
     const reg = await loadRegistration(registrationId);
@@ -161,9 +167,7 @@ export async function permanentlyDelete(registrationId: number) {
         })
         .eq('registration_id', registrationId);
 
-    const files = [reg.school_id_file, reg.doc_load, reg.doc_or, reg.doc_cr, reg.doc_license, reg.doc_letter, reg.payment_receipt_file, reg.qr_image]
-        .filter((f): f is string => typeof f === 'string' && /^https?:\/\//.test(f));
-    for (const file of files) await deleteFromStorage(file);
+    await deleteStoredFiles([reg.school_id_file, reg.enrollment_form_file, reg.drivers_license_file, reg.signed_agreement_form, reg.payment_receipt_file, reg.qr_image]);
 
     await supabase.from('incident_report').delete().eq('registration_id', registrationId);
     // Cascades: recycle_bin, blocklist, profile_update_request. gate_log rows keep their copied name/plate.
@@ -175,6 +179,10 @@ export async function permanentlyDelete(registrationId: number) {
             .from('sticker_application')
             .select('registration_id', { count: 'exact', head: true })
             .eq('vehicle_id', reg.vehicle_id);
-        if (!count) await supabase.from('vehicle').delete().eq('vehicle_id', reg.vehicle_id);
+        // Another application can share this vehicle, so its documents go only with its last application
+        if (!count) {
+            await deleteStoredFiles([reg.vehicle?.official_receipt_file, reg.vehicle?.certificate_of_registration_file, reg.vehicle?.authorization_letter_file]);
+            await supabase.from('vehicle').delete().eq('vehicle_id', reg.vehicle_id);
+        }
     }
 }

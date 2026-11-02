@@ -1,5 +1,7 @@
 <script lang="ts">
   import { VIOLATION_LEVEL_LABELS, type ViolationLevel } from '$lib/violations';
+  import CharCount from '$lib/components/CharCount.svelte';
+  import { MAX_REASON_LENGTH } from '$lib/limits';
 
   let {
     registrationId,
@@ -147,7 +149,8 @@
       {/if}
 
       <label class="vm-section-label" for="violation-reason">Reason / warning message</label>
-      <textarea id="violation-reason" class="vm-textarea" rows="3" bind:value={reason} placeholder="Describe the violation…" disabled={saving}></textarea>
+      <textarea id="violation-reason" class="vm-textarea" rows="3" bind:value={reason} placeholder="Describe the violation…" disabled={saving} maxlength={MAX_REASON_LENGTH}></textarea>
+      <CharCount value={reason} />
 
       <label class="vm-section-label" for="violation-evidence">Photo evidence (optional)</label>
       <input id="violation-evidence" class="vm-file" type="file" accept="image/*" onchange={onFileChange} disabled={saving} />

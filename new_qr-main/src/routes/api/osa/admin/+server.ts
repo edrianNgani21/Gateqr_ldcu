@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -294,7 +295,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (createError) {
             console.error('[Admin] Database error creating admin:', createError);
-            return json({ error: `Database error: ${createError.message}` }, { status: 500 });
+            return apiFailure('save the administrator account', createError);
         }
 
         // Create notification for all OSA admins and dispatch welcome email
@@ -322,7 +323,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         });
     } catch (error: any) {
         console.error('Error creating admin:', error);
-        return json({ error: error?.message || 'Failed to create admin' }, { status: 500 });
+        return apiFailure('create the administrator account', error);
     }
 };
 
@@ -354,14 +355,14 @@ export const GET: RequestHandler = async ({ locals }) => {
         });
     } catch (error) {
         console.error('Error fetching admins:', error);
-        return json({ error: 'Failed to fetch admins' }, { status: 500 });
+        return apiFailure('load the administrators', error);
     }
 };
 
 export const PATCH: RequestHandler = async ({ request, locals }) => {
     try {
         if (!locals.user || locals.user.role !== 'osa') {
-            return json({ error: 'Unauthorized' }, { status: 401 });
+            return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
         }
 
         const callerEmail = (locals.user.email || '').trim().toLowerCase();
@@ -374,7 +375,7 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
         const { user_id, is_active } = await request.json();
 
         if (!user_id || typeof is_active !== 'boolean') {
-            return json({ error: 'Missing required fields' }, { status: 400 });
+            return json({ error: 'Some required details are missing. Please fill in every required field and try again.' }, { status: 400 });
         }
 
         const { data: updatedUser, error } = await supabase
@@ -410,14 +411,14 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
         });
     } catch (error) {
         console.error('Error updating admin status:', error);
-        return json({ error: 'Failed to update admin status' }, { status: 500 });
+        return apiFailure('update the administrator status', error);
     }
 };
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
     try {
         if (!locals.user || locals.user.role !== 'osa') {
-            return json({ error: 'Unauthorized' }, { status: 401 });
+            return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
         }
 
         const callerEmail = (locals.user.email || '').trim().toLowerCase();
@@ -430,7 +431,7 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         const { user_id } = await request.json();
 
         if (!user_id) {
-            return json({ error: 'Missing required fields' }, { status: 400 });
+            return json({ error: 'Some required details are missing. Please fill in every required field and try again.' }, { status: 400 });
         }
 
         // Get user info before deletion for notification
@@ -464,6 +465,6 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Admin deleted successfully' });
     } catch (error) {
         console.error('Error deleting admin:', error);
-        return json({ error: 'Failed to delete admin' }, { status: 500 });
+        return apiFailure('delete the administrator account', error);
     }
 };

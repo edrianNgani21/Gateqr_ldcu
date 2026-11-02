@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -5,7 +6,7 @@ import { sendEmail } from '$lib/server/email';
 
 export const PATCH: RequestHandler = async ({ params, request, locals }) => {
     if (!locals.user || locals.user.role !== 'security') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -25,7 +26,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
             .single();
 
         if (queryError || !complaint) {
-            return json({ error: 'Complaint not found' }, { status: 404 });
+            return json({ error: 'This incident report could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
 
         // Update fields if provided
@@ -69,13 +70,13 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
         return json({ message: 'Complaint updated successfully' });
     } catch (error) {
         console.error('Error updating complaint:', error);
-        return json({ error: 'Failed to update complaint' }, { status: 500 });
+        return apiFailure('update the incident report', error);
     }
 };
 
 export const DELETE: RequestHandler = async ({ params, locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
@@ -93,13 +94,13 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
             .single();
 
         if (queryError || !complaint) {
-            return json({ error: 'Complaint not found' }, { status: 404 });
+            return json({ error: 'This incident report could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
 
         // Security can always delete. User can only delete their own complaints.
         if (locals.user.role !== 'security') {
             if (complaint.user?.email !== locals.user.email) {
-                return json({ error: 'Unauthorized' }, { status: 403 });
+                return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
             }
         }
 
@@ -113,6 +114,6 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
         return json({ message: 'Complaint deleted successfully' });
     } catch (error) {
         console.error('Error deleting complaint:', error);
-        return json({ error: 'Failed to delete complaint' }, { status: 500 });
+        return apiFailure('delete the incident report', error);
     }
 };

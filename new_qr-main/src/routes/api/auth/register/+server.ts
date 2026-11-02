@@ -30,7 +30,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
         if (queryError) {
             console.error('[Register] Database query error:', queryError);
-            return json({ error: 'Database error occurred. Please try again.' }, { status: 500 });
+            return json({ error: 'We could not check your account because the database did not respond. Please try again in a moment.' }, { status: 500 });
         }
 
         const existingUser = userList && userList.length > 0 ? userList[0] : null;
@@ -67,6 +67,6 @@ export const POST: RequestHandler = async ({ request }) => {
         });
     } catch (error) {
         console.error('[Register Error]:', error);
-        return json({ error: 'An unexpected error occurred during verification' }, { status: 500 });
+        return json({ error: 'Your verification code could not be sent because the server ran into a problem. Please try again in a moment.' }, { status: 500 });
     }
 };

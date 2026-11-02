@@ -27,7 +27,7 @@ export const load: PageServerLoad = async ({ locals }) => {
             recentlyDeletedResult
         ] = await Promise.all([
             supabase.from('sticker_application').select('*', { count: 'exact', head: true }).neq('status', 'deleted'),
-            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_val', 'dept_validated', 'osa_val', 'osa_validated']),
+            supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['pending', 'dept_validated', 'osa_validated']),
             supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['distributed', 'osa_validated', 'security_checked']).is('sticker_released_at', null),
             supabase.from('sticker_application').select('*', { count: 'exact', head: true }).in('status', ['approved', 'completed']),
             supabase.from('sticker_application').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('rejected_at', today).lt('rejected_at', tomorrow),

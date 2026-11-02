@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import AppShell from '$lib/components/AppShell.svelte';
   import { invalidateAll } from '$app/navigation';
   import { untrack } from 'svelte';
@@ -147,10 +148,10 @@
         if (res.ok) {
             invalidateAll();
         } else {
-            showAlert('Failed to remove event.');
+            showAlert(await readApiError(res, 'remove the event'));
         }
     } catch(e) {
-        showAlert('Network error');
+        showAlert(networkErrorMessage('remove the event'));
     } finally {
         loadingCampus = null;
     }
@@ -195,11 +196,10 @@
             editingCampus = null;
             showAlert('Capacity updated successfully');
         } else {
-            const json = await res.json();
-            showAlert(json.error || 'Failed to update capacity. Did you run the SQL migration?');
+            showAlert(await readApiError(res, 'update the parking capacity'));
         }
     } catch (e) {
-        showAlert('Network error');
+        showAlert(networkErrorMessage('update the parking capacity'));
     } finally {
         loadingCampus = null;
     }

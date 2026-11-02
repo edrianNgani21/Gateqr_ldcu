@@ -1,4 +1,6 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
+import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { generateStyledQRBuffer } from '$lib/server/qr';
@@ -15,18 +17,21 @@ function generateUniqueCode(length: number = 8): string {
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const { registration_ids, action, schedule, reason, school_year, expires_at } = await request.json();
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
+
 
         if (!registration_ids || !Array.isArray(registration_ids) || registration_ids.length === 0) {
-            return json({ error: 'Invalid registration IDs' }, { status: 400 });
+            return json({ error: 'No valid applications were selected. Please select them again and retry.' }, { status: 400 });
         }
 
         if (!action || !['accept', 'reject'].includes(action)) {
-            return json({ error: 'Invalid action' }, { status: 400 });
+            return json({ error: 'This action is not recognized. Please refresh the page and try again.' }, { status: 400 });
         }
 
         const results = {
@@ -161,6 +166,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
     } catch (error) {
         console.error('Bulk action error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('process the bulk action', error);
     }
 };

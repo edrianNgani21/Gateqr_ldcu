@@ -1,10 +1,13 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import ActionBar from '$lib/components/ActionBar.svelte';
     import ViolationModal from '$lib/components/ViolationModal.svelte';
+    import CharCount from '$lib/components/CharCount.svelte';
+    import { MAX_REASON_LENGTH } from '$lib/limits';
     import { printRegisteredVehicles } from '$lib/utils/printRecords';
     import { invalidateAll } from '$app/navigation';
     import { supabaseClient } from '$lib/supabaseClient';
@@ -173,11 +176,10 @@
                 bulkReason = '';
                 await invalidateAll();
             } else {
-                const data = await res.json();
-                showAlert(`Error: ${data.error || 'Failed to process bulk action'}`);
+                showAlert(await readApiError(res, 'process the bulk action'));
             }
         } catch (error) {
-            showAlert('Network error during bulk action');
+            showAlert(networkErrorMessage('process the bulk action'));
         } finally {
             bulkLoading = false;
         }
@@ -461,7 +463,7 @@
 
         reasonLoading = true;
         try {
-            await submitAction(reasonAction.id, reasonAction.action, reasonText.trim());
+            if (!await submitAction(reasonAction.id, reasonAction.action, reasonText.trim())) return;
             const act = reasonAction;
             reasonModalOpen = false;
             reasonAction = null;
@@ -469,7 +471,7 @@
             reasonError = '';
             act.resolve();
         } catch (e) {
-            reasonError = 'Action failed. Please try again.';
+            reasonError = networkErrorMessage(`${reasonAction?.action || 'process'} this application`);
         } finally {
             reasonLoading = false;
         }
@@ -532,13 +534,14 @@
                     selectedApplicationIds = new Set([...selectedApplicationIds].filter(x => x !== registration_id));
                 }
                 await invalidateAll();
+                return true;
             } else {
-                const err = await res.json();
-                showAlert(err.error || 'Action failed');
+                showAlert(await readApiError(res, 'process this action on the application'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('process this action on the application'));
         }
+        return false;
     }
 </script>
 
@@ -1120,7 +1123,8 @@
         {:else}
           <div class="form-group">
             <label class="form-label">Rejection Reason</label>
-            <textarea bind:value={bulkReason} class="reason-input" placeholder="Enter rejection reason..." disabled={bulkLoading}></textarea>
+            <textarea bind:value={bulkReason} class="reason-input" placeholder="Enter rejection reason..." disabled={bulkLoading} maxlength={MAX_REASON_LENGTH}></textarea>
+            <CharCount value={bulkReason} />
           </div>
         {/if}
 
@@ -1230,7 +1234,9 @@
             disabled={reasonLoading}
             rows="3"
             oninput={() => { if (reasonError) reasonError = ''; }}
+            maxlength={MAX_REASON_LENGTH}
           ></textarea>
+          <CharCount value={reasonText} />
         </div>
 
         {#if reasonError}

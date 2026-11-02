@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -9,7 +10,7 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
     const isOsa = locals.user && (locals.user.role === 'osa' || locals.user.role === 'security');
     
     if (!isGate && !isOsa) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     const dateParam  = url.searchParams.get('date') || '';
@@ -215,6 +216,6 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
         return json({ logs: sliced, total, page: safePage, totalPages, limit });
     } catch (error) {
         console.error('[Gate] Logs error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the gate logs', error);
     }
 };

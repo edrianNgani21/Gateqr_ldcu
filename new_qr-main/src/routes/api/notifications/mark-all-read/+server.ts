@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -5,7 +6,7 @@ import { supabase } from '$lib/server/supabase';
 export const POST: RequestHandler = async ({ locals }) => {
     try {
         if (!locals.user) {
-            return json({ error: 'Unauthorized' }, { status: 401 });
+            return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
         }
 
         const userId = locals.user.user_id;
@@ -25,12 +26,12 @@ export const POST: RequestHandler = async ({ locals }) => {
 
         if (error) {
             console.error('Error marking all notifications as read:', error);
-            return json({ error: 'Failed to mark notifications as read' }, { status: 500 });
+            return apiFailure('mark your notifications as read', error);
         }
 
         return json({ success: true, message: 'All notifications marked as read' });
     } catch (error) {
         console.error('Mark all read error:', error);
-        return json({ error: 'Internal server error' }, { status: 500 });
+        return apiFailure('mark your notifications as read', error);
     }
 };

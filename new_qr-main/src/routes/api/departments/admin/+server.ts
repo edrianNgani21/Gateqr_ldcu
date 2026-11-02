@@ -1,10 +1,11 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -22,7 +23,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (userError || !userData) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         // Update the user to OSA role and link department
@@ -36,6 +37,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Admin access granted successfully' });
     } catch (error) {
         console.error('Failed to set admin access:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('add the department administrator', error);
     }
 };

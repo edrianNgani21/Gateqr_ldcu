@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import jwt from 'jsonwebtoken';
@@ -8,7 +9,7 @@ import { EMAIL_CHANGE_PURPOSE, EMAIL_CHANGE_TTL_MINUTES } from '$lib/server/emai
 
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
@@ -19,7 +20,7 @@ export const GET: RequestHandler = async ({ locals }) => {
             .single();
 
         if (error || !user) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         return json({
@@ -32,7 +33,7 @@ export const GET: RequestHandler = async ({ locals }) => {
         });
     } catch (error) {
         console.error('[Settings GET error]:', error);
-        return json({ error: 'Failed to fetch settings' }, { status: 500 });
+        return apiFailure('load your account settings', error);
     }
 };
 
@@ -44,14 +45,14 @@ function escapeHtml(value: string): string {
 
 export const POST: RequestHandler = async ({ request, locals, url }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const body = await request.json();
 
         if (body.action !== 'request_email_change') {
-            return json({ error: 'Invalid action specified' }, { status: 400 });
+            return json({ error: 'This action is not recognized. Please refresh the page and try again.' }, { status: 400 });
         }
 
         const { data: user, error: fetchError } = await supabase
@@ -110,6 +111,6 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
         return json({ message: `Confirmation sent to ${user.email}. Open it within ${EMAIL_CHANGE_TTL_MINUTES} minutes to finish the change.` });
     } catch (error) {
         console.error('[Settings POST error]:', error);
-        return json({ error: 'Failed to process the request' }, { status: 500 });
+        return apiFailure('process your account settings request', error);
     }
 };

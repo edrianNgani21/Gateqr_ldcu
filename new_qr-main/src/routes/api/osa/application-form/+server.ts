@@ -1,10 +1,11 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getApplicationFormStatus, setApplicationFormOpen } from '$lib/server/applicationForm';
 
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
     const status = await getApplicationFormStatus();
     return json(status);
@@ -12,7 +13,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -28,6 +29,6 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         return json({ success: true, ...updatedStatus });
     } catch (error: any) {
         console.error('[ApplicationForm] PUT error:', error);
-        return json({ error: error?.message || 'Failed to update application form status.' }, { status: 500 });
+        return apiFailure('update the application form status', error);
     }
 };

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { showAlert } from '$lib/utils/dialog';
+  import CharCount from '$lib/components/CharCount.svelte';
+  import { MAX_REASON_LENGTH } from '$lib/limits';
   let {
     tab,
     status = '',
@@ -110,12 +112,14 @@
           placeholder="Enter reason for sending back to OSA…"
           bind:value={rejectReason}
           rows={2}
+          maxlength={MAX_REASON_LENGTH}
         ></textarea>
+        <CharCount value={rejectReason} />
         <div class="reject-input-actions">
           <button
             class="action-btn btn-reject"
             onclick={() => {
-              if (!rejectReason.trim()) { showAlert('Please provide a reason.'); return; }
+              if (!rejectReason.trim()) { showAlert('Please enter the reason for sending this application back to OSA.'); return; }
               act('security_reject', rejectReason.trim());
               showRejectInput = false;
               rejectReason = '';

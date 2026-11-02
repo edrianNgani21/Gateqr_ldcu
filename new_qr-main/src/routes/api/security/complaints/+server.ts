@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -6,7 +7,7 @@ import { env } from '$env/dynamic/private';
 
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
@@ -30,7 +31,7 @@ export const GET: RequestHandler = async ({ locals }) => {
                 .single();
 
             if (userError || !userData) {
-                return json({ error: 'User not found' }, { status: 404 });
+                return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
             }
 
             query = query.eq('user_id', userData.user_id);
@@ -49,20 +50,20 @@ export const GET: RequestHandler = async ({ locals }) => {
         return json({ complaints });
     } catch (error) {
         console.error('Error fetching complaints:', error);
-        return json({ error: 'Failed to fetch complaints' }, { status: 500 });
+        return apiFailure('load the incident reports', error);
     }
 };
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const { message } = await request.json();
 
         if (!message || message.trim() === '') {
-            return json({ error: 'Message is required' }, { status: 400 });
+            return json({ error: 'Please enter a message before submitting.' }, { status: 400 });
         }
 
         // Get user_id from email
@@ -73,7 +74,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (userError || !userData) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         const { data: newComplaint, error: insertError } = await supabase
@@ -154,6 +155,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Incident report submitted successfully' });
     } catch (error) {
         console.error('Error creating complaint:', error);
-        return json({ error: 'Failed to submit complaint' }, { status: 500 });
+        return apiFailure('submit the incident report', error);
     }
 };

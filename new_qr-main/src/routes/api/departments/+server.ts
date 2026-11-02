@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -5,7 +6,7 @@ import { supabase } from '$lib/server/supabase';
 export const GET: RequestHandler = async ({ locals, url }) => {
     // Only OSA can manage departments (or maybe Dean to view their own, but let's restrict to OSA for listing all)
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -48,7 +49,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
         return json({ departments });
     } catch (error) {
         console.error('Failed to fetch departments:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the departments', error);
     }
 };
 
@@ -123,7 +124,7 @@ async function notifyAllOsa(
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -189,7 +190,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (createError && !newDept) {
             console.error('Error creating department:', createError);
-            return json({ error: createError.message || 'Failed to create department' }, { status: 500 });
+            return apiFailure('create the department', createError);
         }
 
         // Notify all OSA admins
@@ -205,13 +206,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Department created successfully', department: newDept }, { status: 201 });
     } catch (error: any) {
         console.error('Failed to create department:', error);
-        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+        return apiFailure('create the department', error);
     }
 };
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -262,13 +263,13 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Department updated successfully' });
     } catch (error) {
         console.error('Failed to update department:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('update the department', error);
     }
 };
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -311,13 +312,13 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Department deactivated successfully' });
     } catch (error) {
         console.error('Failed to deactivate department:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('deactivate the department', error);
     }
 };
 
 export const PATCH: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -360,6 +361,6 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Department activated successfully' });
     } catch (error) {
         console.error('Failed to activate department:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('activate the department', error);
     }
 };

@@ -1,8 +1,10 @@
+import { apiFailure } from '$lib/server/apiError';
+import { acceptUploadedFile, UploadRejected } from '$lib/server/directUpload';
+import { PDF_TYPES, reasonLengthError } from '$lib/limits';
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/server/supabase';
 import { sendEmail, sendEmailAsync } from '$lib/server/email';
-import { uploadToStorage } from '$lib/server/storage';
 
 async function createNotification(
     userId: number,
@@ -36,7 +38,7 @@ async function createNotification(
 
 export async function POST({ request, locals }: RequestEvent) {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
@@ -65,19 +67,17 @@ export async function POST({ request, locals }: RequestEvent) {
             const regIdParam = formData.get('registration_id');
             if (regIdParam) registration_id = parseInt(regIdParam as string, 10);
 
-            const saveFile = async (key: string) => {
-                const file = formData.get(key) as File | null;
-                if (!file || file.size === 0) return null;
-                const buffer = Buffer.from(await file.arrayBuffer());
-                const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-                const filename = `change-requests/change-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${safeName}`;
-                return await uploadToStorage(filename, buffer, file.type || 'application/pdf');
+            // Documents were uploaded straight to storage by the browser; confirm each one before saving it
+            const saveFile = async (key: string, label: string) => {
+                const path = formData.get(key);
+                if (typeof path !== 'string' || !path) return null;
+                return await acceptUploadedFile(path, locals.user!.user_id as number, label, PDF_TYPES);
             };
 
-            doc_or = await saveFile('doc_or');
-            doc_cr = await saveFile('doc_cr');
-            doc_license = await saveFile('doc_license');
-            doc_letter = await saveFile('doc_letter');
+            doc_or = await saveFile('doc_or', 'Vehicle OR');
+            doc_cr = await saveFile('doc_cr', 'Vehicle CR');
+            doc_license = await saveFile('doc_license', "Driver's License");
+            doc_letter = await saveFile('doc_letter', 'Signed Letter');
         } else {
             const body = await request.json();
             reason = (body.reason || '').trim();
@@ -87,15 +87,13 @@ export async function POST({ request, locals }: RequestEvent) {
             vehicle_type = body.vehicle_type || '4-wheeler';
             is_owner = body.is_owner === true || body.is_owner === 'yes';
             registration_id = body.registration_id ? parseInt(body.registration_id, 10) : null;
-            doc_or = body.doc_or || null;
-            doc_cr = body.doc_cr || null;
-            doc_license = body.doc_license || null;
-            doc_letter = body.doc_letter || null;
         }
 
         if (!reason) {
             return json({ error: 'Please provide a reason for changing vehicle information.' }, { status: 400 });
         }
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
         if (!vehicle_make || !vehicle_plate) {
             return json({ error: 'New vehicle make/brand and plate number are required.' }, { status: 400 });
         }
@@ -108,7 +106,7 @@ export async function POST({ request, locals }: RequestEvent) {
             .single();
 
         if (userError || !userData) {
-            return json({ error: 'User record not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         // Get registration
@@ -214,6 +212,7 @@ export async function POST({ request, locals }: RequestEvent) {
         });
     } catch (error: any) {
         console.error('Change vehicle request error:', error);
-        return json({ error: error.message || 'Failed to submit change vehicle request' }, { status: 500 });
+        if (error instanceof UploadRejected) return json({ error: error.message }, { status: 400 });
+        return apiFailure('submit your vehicle change request', error);
     }
 }

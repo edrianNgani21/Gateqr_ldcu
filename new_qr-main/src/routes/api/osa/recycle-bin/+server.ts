@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -12,7 +13,7 @@ import {
 // Recently Deleted: every OSA admin can view; only the primary OSA administrator can restore or purge.
 export const GET: RequestHandler = async ({ locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     const { data, error } = await supabase
@@ -29,7 +30,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
     if (error) {
         console.error('[Recycle bin] Load failed:', error);
-        return json({ error: 'Could not load Recently Deleted.' }, { status: 500 });
+        return apiFailure('load Recently Deleted', error);
     }
 
     const items = await Promise.all(
@@ -88,9 +89,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ message: `Reg. No. ${id} was permanently deleted. Its gate history was kept.` });
         }
 
-        return json({ error: 'Invalid action.' }, { status: 400 });
+        return json({ error: 'This action is not recognized. Please refresh the page and try again.' }, { status: 400 });
     } catch (err: any) {
         console.error('[Recycle bin] Action failed:', err);
-        return json({ error: err?.message || 'The action failed. Please try again.' }, { status: 500 });
+        return apiFailure('complete the Recently Deleted action', err);
     }
 };

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
@@ -69,11 +70,10 @@
                 editingDeanId = null;
                 await invalidateAll();
             } else {
-                const data = await res.json();
-                showAlert('Failed to save dean: ' + (data.error || 'Unknown error'));
+                showAlert(await readApiError(res, 'save the dean'));
             }
         } catch(e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('save the dean'));
         } finally {
             loading = false;
         }
@@ -90,10 +90,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                showAlert('Failed to delete dean');
+                showAlert(await readApiError(res, 'delete the dean'));
             }
         } catch(e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('delete the dean'));
         }
     }
 </script>

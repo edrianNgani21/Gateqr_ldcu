@@ -37,7 +37,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
         if (queryError) {
             console.error('[Google Login] Database query error:', queryError);
-            return json({ error: 'Database error occurred. Please try again.' }, { status: 500 });
+            return json({ error: 'We could not check your account because the database did not respond. Please try again in a moment.' }, { status: 500 });
         }
 
         const user = userList && userList.length > 0 ? userList[0] : null;
@@ -139,6 +139,6 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         });
     } catch (error) {
         console.error('[Google Login Error]:', error);
-        return json({ error: 'An unexpected error occurred during Google sign-in' }, { status: 500 });
+        return json({ error: 'Google sign-in could not be completed because the server ran into a problem. Please try again in a moment.' }, { status: 500 });
     }
 };

@@ -1,4 +1,6 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
+import { reasonLengthError } from '$lib/limits';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/server/supabase';
 import { sendEmail } from '$lib/server/email';
@@ -35,11 +37,14 @@ async function createNotification(
 
 export async function POST({ request, locals }: RequestEvent) {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const { request_id, action, schedule, rejected_reason } = await request.json();
+        const reasonError = reasonLengthError(rejected_reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
+
 
         if (!request_id || !action) {
             return json({ error: 'Request ID and action are required' }, { status: 400 });
@@ -60,7 +65,7 @@ export async function POST({ request, locals }: RequestEvent) {
             .single();
 
         if (queryError || !changeRequest) {
-            return json({ error: 'Change vehicle request not found' }, { status: 404 });
+            return json({ error: 'This vehicle change request could not be found. It may already have been processed. Please refresh the page.' }, { status: 404 });
         }
 
         const registration = changeRequest.registration;
@@ -207,10 +212,10 @@ export async function POST({ request, locals }: RequestEvent) {
 
             return json({ success: true, message: 'Registration change request rejected successfully.' });
         } else {
-            return json({ error: 'Invalid action specified' }, { status: 400 });
+            return json({ error: 'This action is not recognized. Please refresh the page and try again.' }, { status: 400 });
         }
     } catch (error: any) {
         console.error('Change vehicle approval error:', error);
-        return json({ error: error.message || 'Failed to process change vehicle request' }, { status: 500 });
+        return apiFailure('process the vehicle change request', error);
     }
 }

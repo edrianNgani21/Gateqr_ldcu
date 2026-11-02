@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabase } from '$lib/server/supabase';
@@ -22,7 +23,7 @@ export async function GET({}: RequestEvent) {
         });
     } catch (error) {
         console.error('Get gate filter error:', error);
-        return json({ error: 'Failed to get gate filter' }, { status: 500 });
+        return apiFailure('load the gate filter', error);
     }
 };
 
@@ -53,6 +54,6 @@ export async function PUT({ request }: RequestEvent) {
         return json({ message: 'Gate access filter updated successfully' });
     } catch (error) {
         console.error('Update gate filter error:', error);
-        return json({ error: 'Failed to update gate filter' }, { status: 500 });
+        return apiFailure('update the gate filter', error);
     }
 };

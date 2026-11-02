@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -11,14 +12,14 @@ function checkAuth(request: Request): boolean {
 
 export const POST: RequestHandler = async ({ request }) => {
     if (!checkAuth(request)) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const { registration_id, pic_base64, presence_status, campus } = await request.json();
 
         if (!registration_id) {
-            return json({ error: 'Missing registration_id' }, { status: 400 });
+            return json({ error: 'No application was selected. Please refresh the page and try again.' }, { status: 400 });
         }
 
         // Get vehicle_id from registration
@@ -29,7 +30,7 @@ export const POST: RequestHandler = async ({ request }) => {
             .single();
 
         if (!regData) {
-            return json({ error: 'Registration not found' }, { status: 404 });
+            return json({ error: 'This registration could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
 
         // Deactivate QR if there is an approved change request pending sticker release
@@ -99,6 +100,6 @@ export const POST: RequestHandler = async ({ request }) => {
         return json({ success: true, message: 'Exit recorded' });
     } catch (error) {
         console.error('[Gate] Exit error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('record the vehicle exit', error);
     }
 };

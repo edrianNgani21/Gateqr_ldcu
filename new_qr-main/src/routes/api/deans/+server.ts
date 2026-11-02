@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -74,7 +75,7 @@ async function notifyAllOsa(
 export const GET: RequestHandler = async ({ locals }) => {
     // Only OSA can manage deans
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -94,13 +95,13 @@ export const GET: RequestHandler = async ({ locals }) => {
         return json({ deans });
     } catch (error) {
         console.error('Failed to fetch deans:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('load the deans', error);
     }
 };
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -165,13 +166,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Dean account created successfully' }, { status: 201 });
     } catch (error: any) {
         console.error('Failed to create dean:', error);
-        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+        return apiFailure('add the dean', error);
     }
 };
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -216,13 +217,13 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Dean updated successfully' });
     } catch (error: any) {
         console.error('Failed to update dean:', error);
-        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+        return apiFailure('update the dean', error);
     }
 };
 
 export const DELETE: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'osa') {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
@@ -260,6 +261,6 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Dean account deleted successfully' });
     } catch (error: any) {
         console.error('Failed to delete dean:', error);
-        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+        return apiFailure('delete the dean', error);
     }
 };

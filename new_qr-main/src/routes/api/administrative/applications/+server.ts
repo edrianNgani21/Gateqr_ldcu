@@ -1,4 +1,6 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
+import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { sendEmail, sendEmailAsync } from '$lib/server/email';
@@ -35,11 +37,14 @@ async function createNotification(
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || (locals.user.role !== 'dean' && locals.user.role !== 'administrative')) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     try {
         const { registration_id, action, reason } = await request.json();
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
+
 
         // Get the department_id to use for authorization
         let departmentIdForAuth = locals.user.department_id;
@@ -72,7 +77,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (!rows) {
-            return json({ error: 'Application not found or unauthorized' }, { status: 404 });
+            return json({ error: 'This application could not be found, or it does not belong to your department. Please refresh the page.' }, { status: 404 });
         }
 
         const reg = rows;
@@ -108,7 +113,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         } 
         else if (action === 'reject' && (reg.status === 'dept_val' || reg.status === 'pending' || reg.status === 'dept_validated')) {
-            if (!reason) return json({ error: 'Reason required' }, { status: 400 });
+            if (!reason) return json({ error: 'Please enter a reason before continuing.' }, { status: 400 });
             
             const { error: updateError } = await supabase
                 .from('sticker_application')
@@ -150,6 +155,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true });
     } catch (error: any) {
         console.error('Error handling administrative application action:', error);
-        return json({ error: error?.message || 'Failed to update application' }, { status: 500 });
+        return apiFailure('update the application', error);
     }
 };

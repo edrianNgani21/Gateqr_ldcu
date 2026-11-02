@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import { onMount } from 'svelte';
     import { supabaseClient } from '$lib/supabaseClient';
@@ -58,11 +59,10 @@
                 message = '';
                 await loadComplaints(); // Refresh the list
             } else {
-                const json = await res.json();
-                showAlert(json.error || 'Failed to submit incident report');
+                showAlert(await readApiError(res, 'submit your incident report'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('submit your incident report'));
         }
         submitLoading = false;
     }
@@ -78,11 +78,10 @@
             if (res.ok) {
                 complaints = complaints.filter(c => c.incident_report_id !== id);
             } else {
-                const json = await res.json();
-                showAlert(json.error || 'Failed to delete incident report');
+                showAlert(await readApiError(res, 'delete your incident report'));
             }
         } catch (e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('delete your incident report'));
         }
     }
 </script>

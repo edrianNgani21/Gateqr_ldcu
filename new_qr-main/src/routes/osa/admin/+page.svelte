@@ -1,5 +1,6 @@
 <script lang="ts">
   import { askConfirm } from '$lib/utils/dialog';
+  import { networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { supabaseClient } from '$lib/supabaseClient';
@@ -175,10 +176,10 @@
                 loadAdmins(); // Reload admin list
             } else {
                 const data = await res.json();
-                error = data.error || 'Failed to add admin';
+                error = data.error || 'Could not add the administrator. The server did not report a cause.';
             }
         } catch (err) {
-            error = 'An error occurred. Please try again.';
+            error = networkErrorMessage('add the administrator');
         } finally {
             loading = false;
         }
@@ -209,10 +210,10 @@
                 loadAdmins(); // Reload admin list
             } else {
                 const data = await res.json();
-                error = data.error || 'Failed to delete admin';
+                error = data.error || 'Could not delete the administrator. The server did not report a cause.';
             }
         } catch (err) {
-            error = 'An error occurred. Please try again.';
+            error = networkErrorMessage('delete the administrator');
         }
     }
 
@@ -234,10 +235,10 @@
                 loadAdmins(); // Reload admin list
             } else {
                 const data = await res.json();
-                error = data.error || `Failed to ${action} admin`;
+                error = data.error || `Could not ${action} the administrator. The server did not report a cause.`;
             }
         } catch (err) {
-            error = 'An error occurred. Please try again.';
+            error = networkErrorMessage(`${action} the administrator`);
         }
     }
 </script>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
     import { invalidateAll } from '$app/navigation';
@@ -68,11 +69,10 @@
                 editingDeptId = null;
                 await invalidateAll();
             } else {
-                const err = await res.json();
-                showAlert(err.error || 'Failed to save department');
+                showAlert(await readApiError(res, 'save the department'));
             }
         } catch(e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('save the department'));
         } finally {
             loading = false;
         }
@@ -89,10 +89,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                showAlert('Failed to deactivate department');
+                showAlert(await readApiError(res, 'deactivate the department'));
             }
         } catch(e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('deactivate the department'));
         }
     }
 
@@ -106,10 +106,10 @@
             if (res.ok) {
                 await invalidateAll();
             } else {
-                showAlert('Failed to activate department');
+                showAlert(await readApiError(res, 'activate the department'));
             }
         } catch(e) {
-            showAlert('Network error');
+            showAlert(networkErrorMessage('activate the department'));
         }
     }
 

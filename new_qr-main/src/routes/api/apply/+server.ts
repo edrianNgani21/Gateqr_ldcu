@@ -1,7 +1,9 @@
+import { apiFailure } from '$lib/server/apiError';
+import { acceptUploadedFile, UploadRejected } from '$lib/server/directUpload';
+import { PDF_TYPES } from '$lib/limits';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { uploadToStorage } from '$lib/server/storage';
 import { generateStyledQRBuffer } from '$lib/server/qr';
 import { sendEmail } from '$lib/server/email';
 import { isApplicationFormOpen } from '$lib/server/applicationForm';
@@ -9,7 +11,7 @@ import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     if (!(await isApplicationFormOpen())) {
@@ -33,17 +35,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const facebook = formData.get('facebook') as string;
         const campus = formData.get('campus') as string || 'Liceo Main';
         const year_level = formData.get('year_level') as string || null;
-
-        const docKeys = ['doc_or', 'doc_cr', 'doc_license', 'school_id_file', 'doc_load', 'doc_letter'];
-        for (const key of docKeys) {
-            const file = formData.get(key) as File | null;
-            if (file && file.size > 0) {
-                const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
-                if (!isPdf) {
-                    return json({ error: 'All submitted documents must be in PDF format. If you use CamScanner or any other scanning application, make sure to export or convert your scanned documents into a PDF file before uploading them to the system.' }, { status: 400 });
-                }
-            }
-        }
 
         // Validate required fields
         if (!first_name || !first_name.trim()) {
@@ -182,20 +173,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             }
         }
 
-        const saveFile = async (fileKey: string) => {
-            const file = formData.get(fileKey) as File | null;
-            if (!file || file.size === 0) return null;
-            const buffer = Buffer.from(await file.arrayBuffer());
-            const filename = `documents/${Date.now()}-${Math.random().toString(36).substring(2, 9)}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-            return await uploadToStorage(filename, buffer, file.type || 'application/pdf');
+        // Documents were uploaded straight to storage by the browser; confirm each one before saving it
+        const saveFile = async (fileKey: string, label: string) => {
+            const path = formData.get(fileKey);
+            if (typeof path !== 'string' || !path) return null;
+            return await acceptUploadedFile(path, locals.user!.user_id as number, label, PDF_TYPES);
         };
 
-        const doc_or = await saveFile('doc_or');
-        const doc_cr = await saveFile('doc_cr');
-        const doc_license = await saveFile('doc_license');
-        const school_id_file = await saveFile('school_id_file');
-        const doc_load = await saveFile('doc_load');
-        const doc_letter = await saveFile('doc_letter');
+        const doc_or = await saveFile('doc_or', 'Vehicle OR');
+        const doc_cr = await saveFile('doc_cr', 'Vehicle CR');
+        const doc_license = await saveFile('doc_license', "Driver's License");
+        const school_id_file = await saveFile('school_id_file', 'ID document');
+        const doc_load = await saveFile('doc_load', 'Enrollment Form or Teaching Load');
+        const doc_letter = await saveFile('doc_letter', 'Signed Letter');
         const doc_qr = null;
 
         const final_or = doc_or || (formData.get('existing_doc_or') as string) || existingRegForRenewal?.vehicle?.official_receipt_file || 'pending_or';
@@ -731,6 +721,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ message: 'Application submitted successfully', status: 'pending', registration_id: createdRegId });
     } catch (error: any) {
         console.error('Failed to submit application:', error);
-        return json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+        if (error instanceof UploadRejected) return json({ error: error.message }, { status: 400 });
+        return apiFailure('submit your application', error);
     }
 };

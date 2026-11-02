@@ -2,6 +2,9 @@
   import { showAlert } from '$lib/utils/dialog';
   import AppShell from '$lib/components/AppShell.svelte';
   import NavBar from '$lib/components/NavBar.svelte';
+  import CharCount from '$lib/components/CharCount.svelte';
+  import { networkErrorMessage } from '$lib/utils/apiErrors';
+  import { MAX_REASON_LENGTH } from '$lib/limits';
   import { invalidateAll } from '$app/navigation';
   import { supabaseClient } from '$lib/supabaseClient';
 
@@ -127,14 +130,14 @@
 
       const resData = await res.json();
       if (!res.ok) {
-        scheduleError = resData.error || 'Failed to accept and schedule request.';
+        scheduleError = resData.error || 'Could not accept and schedule this request. The server did not report a cause.';
       } else {
         showAlert('Registration details change request accepted! The application has now moved to the Hardcopy Compliance Schedules in Manage Applications.');
         closeScheduleModal();
         await invalidateAll();
       }
     } catch (e: any) {
-      scheduleError = e.message || 'Network error occurred.';
+      scheduleError = networkErrorMessage('accept and schedule this request');
     } finally {
       schedulingLoading = false;
     }
@@ -177,14 +180,14 @@
 
       const resData = await res.json();
       if (!res.ok) {
-        rejectError = resData.error || 'Failed to reject request.';
+        rejectError = resData.error || 'Could not reject this request. The server did not report a cause.';
       } else {
         showAlert('Registration details change request rejected.');
         closeRejectModal();
         await invalidateAll();
       }
     } catch (e: any) {
-      rejectError = e.message || 'Network error occurred.';
+      rejectError = networkErrorMessage('reject this request');
     } finally {
       rejectLoading = false;
     }
@@ -585,7 +588,9 @@
               placeholder="e.g. Incomplete vehicle documentation, invalid plate, or does not qualify..."
               bind:value={rejectReason}
               class="reject-textarea"
+              maxlength={MAX_REASON_LENGTH}
             ></textarea>
+            <CharCount value={rejectReason} />
           </div>
         </div>
 

@@ -1,4 +1,6 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
+import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { sendEmail, sendEmailAsync } from '$lib/server/email';
@@ -35,14 +37,17 @@ async function createNotification(
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user || (locals.user.role !== 'security' && locals.user.role !== 'osa')) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const { vehicle_id, action, reason, schedule } = await request.json();
+        const reasonError = reasonLengthError(reason);
+        if (reasonError) return json({ error: reasonError }, { status: 400 });
+
 
         if (!vehicle_id || !action) {
-            return json({ error: 'Missing parameters' }, { status: 400 });
+            return json({ error: 'The request is missing required details. Please refresh the page and try again.' }, { status: 400 });
         }
 
         // Fetch user id & user email from registration to send notification
@@ -53,7 +58,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (fetchError || !reg) {
-            return json({ error: 'Registration not found' }, { status: 404 });
+            return json({ error: 'This registration could not be found. It may have been deleted. Please refresh the page.' }, { status: 404 });
         }
 
         let updateData: any = {};
@@ -72,7 +77,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         } else if (action === 'security_reject') {
             const rejectReason = (reason || schedule || '').trim();
             if (!rejectReason) {
-                return json({ error: 'Rejection reason is required' }, { status: 400 });
+                return json({ error: 'Please enter the reason for rejecting this request.' }, { status: 400 });
             }
             updateData = {
                 status: 'rejected',
@@ -83,7 +88,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             notifMessage = `Your vehicle registration was rejected during Security Document Review. Reason: ${rejectReason}`;
             emailSubject = 'Application Rejected - Liceo GateQR';
         } else {
-            return json({ error: 'Invalid action' }, { status: 400 });
+            return json({ error: 'This action is not recognized. Please refresh the page and try again.' }, { status: 400 });
         }
 
         const { error: updateError } = await supabase
@@ -93,7 +98,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         if (updateError) {
             console.error('Update error:', updateError);
-            return json({ error: 'Database update failed' }, { status: 500 });
+            return apiFailure('update the application', updateError);
         }
 
         if (reg.user_id) {
@@ -133,6 +138,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true });
     } catch (error) {
         console.error('Error in monitor action:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('process the action', error);
     }
 };

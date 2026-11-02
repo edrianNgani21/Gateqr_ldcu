@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
 
@@ -49,11 +50,11 @@
             if (res.ok) {
                 vehicles = vehicles.map((v: any) => v.vehicle_id === vehicleId ? { ...v, status: 'revoked' } : v);
             } else {
-                showAlert('Failed to revoke QR code.');
+                showAlert(await readApiError(res, 'revoke the QR code'));
             }
         } catch (e) {
             console.error(e);
-            showAlert('Error revoking QR code.');
+            showAlert(networkErrorMessage('revoke the QR code'));
         }
     }
 
@@ -68,11 +69,11 @@
             if (res.ok) {
                 vehicles = vehicles.map((v: any) => v.vehicle_id === vehicleId ? { ...v, status: 'distributed' } : v);
             } else {
-                showAlert('Failed to restore QR code.');
+                showAlert(await readApiError(res, 'restore the QR code'));
             }
         } catch (e) {
             console.error(e);
-            showAlert('Error restoring QR code.');
+            showAlert(networkErrorMessage('restore the QR code'));
         }
     }
 </script>

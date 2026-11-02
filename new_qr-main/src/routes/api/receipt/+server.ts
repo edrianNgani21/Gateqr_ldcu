@@ -1,27 +1,21 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { uploadToStorage } from '$lib/server/storage';
-
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+import { acceptUploadedFile, UploadRejected } from '$lib/server/directUpload';
+import { IMAGE_TYPES } from '$lib/limits';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const formData = await request.formData();
-        const file = formData.get('receipt');
+        const path = formData.get('receipt');
 
-        if (!(file instanceof File) || file.size === 0) {
+        if (typeof path !== 'string' || !path) {
             return json({ error: 'Please select a receipt image to upload.' }, { status: 400 });
-        }
-        if (!file.type.startsWith('image/')) {
-            return json({ error: 'Only image files are allowed.' }, { status: 400 });
-        }
-        if (file.size > MAX_SIZE) {
-            return json({ error: 'Image must be 10MB or smaller.' }, { status: 400 });
         }
 
         const { data: user } = await supabase
@@ -31,7 +25,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (!user) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         const { data: reg } = await supabase
@@ -46,10 +40,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Your application is not yet ready for payment receipt upload.' }, { status: 400 });
         }
 
-        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-        const path = `receipts/receipt-${reg.registration_id}-${Date.now()}.${ext}`;
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const receiptUrl = await uploadToStorage(path, buffer, file.type);
+        const receiptUrl = await acceptUploadedFile(path, user.user_id, 'payment receipt', IMAGE_TYPES);
 
         const { error: updateError } = await supabase
             .from('sticker_application')
@@ -61,6 +52,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true, receipt: receiptUrl });
     } catch (error) {
         console.error('Failed to upload receipt:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        if (error instanceof UploadRejected) return json({ error: error.message }, { status: 400 });
+        return apiFailure('upload your payment receipt', error);
     }
 };

@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import { supabase } from '$lib/server/supabase';
@@ -19,7 +20,7 @@ export async function GET({}: RequestEvent) {
         return json({ registration_open: data?.registration_open ?? true });
     } catch (error) {
         console.error('Get registration status error:', error);
-        return json({ error: 'Failed to get registration status' }, { status: 500 });
+        return apiFailure('load the registration status', error);
     }
 };
 
@@ -42,6 +43,6 @@ export async function PUT({ request }: RequestEvent) {
         return json({ message: 'Registration status updated successfully', registration_open });
     } catch (error) {
         console.error('Update registration status error:', error);
-        return json({ error: 'Failed to update registration status' }, { status: 500 });
+        return apiFailure('update the registration status', error);
     }
 };

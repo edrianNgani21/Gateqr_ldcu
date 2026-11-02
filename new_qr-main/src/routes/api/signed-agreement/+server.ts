@@ -1,31 +1,24 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
-import { uploadToStorage } from '$lib/server/storage';
+import { acceptUploadedFile, UploadRejected } from '$lib/server/directUpload';
+import { SIGNED_AGREEMENT_TYPES } from '$lib/limits';
 import { isAgreementReminderRole } from '$lib/server/agreementReminder';
-
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 
 // Applicant uploads the Agreement Form to Park signed by their Department Head after the
 // pending-approval reminder; confirming it marks the application as department approved.
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     try {
         const formData = await request.formData();
-        const file = formData.get('signed_agreement');
+        const path = formData.get('signed_agreement');
 
-        if (!(file instanceof File) || file.size === 0) {
+        if (typeof path !== 'string' || !path) {
             return json({ error: 'Please select the signed Agreement Form to Park to upload.' }, { status: 400 });
-        }
-        if (!ALLOWED_TYPES.includes(file.type)) {
-            return json({ error: 'Only JPG, PNG, or PDF files are allowed.' }, { status: 400 });
-        }
-        if (file.size > MAX_SIZE) {
-            return json({ error: 'File must be 10MB or smaller.' }, { status: 400 });
         }
 
         const { data: user } = await supabase
@@ -35,7 +28,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             .single();
 
         if (!user) {
-            return json({ error: 'User not found' }, { status: 404 });
+            return json({ error: 'Your account record could not be found. Please sign out, sign in again, and retry.' }, { status: 404 });
         }
 
         const { data: reg } = await supabase
@@ -55,10 +48,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Your application is not awaiting a signed Agreement Form to Park.' }, { status: 400 });
         }
 
-        const ext = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/png' ? 'png' : 'jpg';
-        const path = `documents/signed-agreement-${reg.registration_id}-${Date.now()}.${ext}`;
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const fileUrl = await uploadToStorage(path, buffer, file.type);
+        const fileUrl = await acceptUploadedFile(path, user.user_id, 'signed Agreement Form to Park', SIGNED_AGREEMENT_TYPES);
 
         const { error: updateError } = await supabase
             .from('sticker_application')
@@ -75,6 +65,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         return json({ success: true, signed_agreement_form: fileUrl });
     } catch (error) {
         console.error('Failed to upload signed agreement form:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        if (error instanceof UploadRejected) return json({ error: error.message }, { status: 400 });
+        return apiFailure('upload your signed Agreement Form to Park', error);
     }
 };

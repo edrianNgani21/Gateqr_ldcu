@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert } from '$lib/utils/dialog';
+  import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import AppShell from "$lib/components/AppShell.svelte";
   import { invalidateAll } from "$app/navigation";
   import { startLiveSync } from "$lib/utils/liveSync";
@@ -101,12 +102,11 @@
         invalidateAll();
       } else {
         applicationsState = previous;
-        const err = await res.json();
-        showAlert(err.error || "Action failed");
+        showAlert(await readApiError(res, 'update the application'));
       }
     } catch (e) {
       applicationsState = previous;
-      showAlert("Network error");
+      showAlert(networkErrorMessage('update the application'));
     } finally {
       approvingId = null;
     }

@@ -7,7 +7,7 @@ import { sendAgreementReminders } from '$lib/server/agreementReminder';
 export const GET: RequestHandler = async ({ request }) => {
     const secret = env.CRON_SECRET;
     if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
-        return json({ error: 'Unauthorized' }, { status: 401 });
+        return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
     }
 
     const sent = await sendAgreementReminders();

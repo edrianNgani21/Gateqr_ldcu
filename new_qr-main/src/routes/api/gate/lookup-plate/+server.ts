@@ -1,3 +1,4 @@
+import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
@@ -9,7 +10,7 @@ function checkAuth(request: Request): boolean {
 
 export const GET: RequestHandler = async ({ request, url }) => {
     if (!checkAuth(request)) {
-        return json({ error: 'Unauthorized' }, { status: 403 });
+        return json({ error: 'Your account does not have permission to do this.' }, { status: 403 });
     }
 
     const plate = url.searchParams.get('plate');
@@ -79,6 +80,6 @@ export const GET: RequestHandler = async ({ request, url }) => {
         }
     } catch (error) {
         console.error('[Gate] Lookup error:', error);
-        return json({ error: 'Internal Server Error' }, { status: 500 });
+        return apiFailure('look up the plate number', error);
     }
 };
