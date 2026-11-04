@@ -295,13 +295,16 @@ export const load: PageServerLoad = async ({ locals }) => {
             revoked: 'Revoked QR',
             not_registered: 'Not Registered'
         };
+        // main.py saves scanned codes with no matching registration under this owner name
+        const alertName = (r: any) =>
+            r.owner_name_snapshot === 'Unrecognized QR Code' ? 'Unrecognized or Unregistered QR Code' : alertLabels[r.flagged_alert];
         const gateAlerts = flaggedRows
             .filter((r: any) => r.flagged_alert || r.presence_status === 'denied')
             .map((r: any) => ({
                 id: r.gate_log_id,
                 time: r.entered_at || r.created_at || new Date().toISOString(),
                 // gate_log.flagged_alert, shown as the alert name
-                alert: alertLabels[r.flagged_alert] || 'Denied',
+                alert: alertName(r) || 'Denied',
                 reason: r.note || (r.presence_status === 'denied' ? 'QR Code Not Recognized / Denied' : r.presence_status) || 'Flagged Alert',
                 plate: r.vehicle?.plate_number || r.plate_snapshot || 'No Plate',
                 name: `${r.registration?.first_name || ''} ${r.registration?.last_name || ''}`.trim() || r.owner_name_snapshot || 'Guest / Unregistered',
@@ -314,7 +317,7 @@ export const load: PageServerLoad = async ({ locals }) => {
                     if (low === 'main' || low.includes('main')) return 'Main Campus';
                     return raw.charAt(0).toUpperCase() + raw.slice(1);
                 })(),
-                status: alertLabels[r.flagged_alert] || (r.presence_status === 'denied' ? 'Denied' : 'Flagged')
+                status: alertName(r) || (r.presence_status === 'denied' ? 'Denied' : 'Flagged')
             }));
 
         // Gate events and recorded violations, newest first

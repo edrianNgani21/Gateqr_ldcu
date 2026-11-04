@@ -852,6 +852,74 @@ def show_status_denied(side, reg, kind, title, detail):
     print(f"[{side.type}] {title}: registration {reg.get('registration_id')} denied entry")
     side.state = GateState.STATUS_DENIED
 
+UNRECOGNIZED_QR_TEXT = "UNRECOGNIZED OR UNREGISTERED QR CODE"
+
+def log_unrecognized_qr(qr_text):
+    """Record a scanned QR code with no matching registration so it appears in Flagged Alerts."""
+    try:
+        gate_enum, campus_name = get_campus_gate_and_name()
+        now_iso = datetime.now().isoformat()
+        supabase.table('gate_log').insert({
+            "entered_at": now_iso,
+            "exited_at": now_iso,
+            "presence_status": "denied",
+            "sticker_status": "unregistered",
+            "campus_gate": gate_enum,
+            "flagged_alert": "not_registered",
+            # Required by vehicle_log_owner_chk when there is no registration link
+            "owner_name_snapshot": "Unrecognized QR Code",
+            "note": f"Unrecognized or unregistered QR code scanned: {str(qr_text)[:100]}"
+        }).execute()
+    except Exception as e:
+        print(f"DEBUG: Error logging unrecognized QR: {e}")
+
+def show_unrecognized_while_open(qr_text):
+    """A code scanned while the exit barrier is already open: flag it and show it in the details card."""
+    global latest_scanned_details
+    log_unrecognized_qr(qr_text)
+    latest_scanned_details = {
+        "gate": "EXIT",
+        "name": "N/A",
+        "role": "N/A",
+        "plate": "N/A",
+        "brand": "N/A",
+        "type": "N/A",
+        "status": UNRECOGNIZED_QR_TEXT,
+        "time": datetime.now().strftime("%I:%M:%S %p")
+    }
+
+def log_wrong_campus_exit(registration_id, vehicle_id):
+    """Exit scanned while the barrier is already open: record a wrong campus exit if this vehicle
+    is checked in at another campus. Returns True when flagged."""
+    try:
+        gate_enum, campus_name = get_campus_gate_and_name()
+        current_campus = normalize_campus_name(campus_name)
+        res = supabase.table('gate_log').select('campus_gate')\
+            .eq('registration_id', registration_id)\
+            .is_('exited_at', 'null')\
+            .order('created_at', desc=True).limit(1).execute()
+        if not res.data:
+            return False
+        checked_in_at = normalize_campus_name(res.data[0].get('campus_gate'))
+        if checked_in_at == current_campus:
+            return False
+        now_iso = datetime.now().isoformat()
+        supabase.table('gate_log').insert({
+            "vehicle_id": vehicle_id,
+            "registration_id": registration_id,
+            "entered_at": now_iso,
+            "exited_at": now_iso,
+            "presence_status": "denied",
+            "sticker_status": "registered",
+            "campus_gate": gate_enum,
+            "flagged_alert": "wrong_campus_exit",
+            "note": f"Exited the wrong campus: Checked in at {checked_in_at}, exited at {current_campus} while the barrier was open"
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"DEBUG: Error checking wrong campus exit: {e}")
+        return False
+
 def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     """Decide what the gate shows for a registered vehicle: BLOCKED, duplicate-entry / wrong-campus
     warnings, auto exit, or DETECTED (LET IN / DENY). Manual access passes auto_exit=False so the
@@ -940,6 +1008,7 @@ def evaluate_registered_vehicle(side, reg, vehicle_data=None, auto_exit=True):
     try:
         all_logs_res = supabase.table('gate_log').select('*')\
             .eq('registration_id', reg['registration_id'])\
+            .is_('exited_at', 'null')\
             .order('created_at', desc=True).limit(5).execute()
         if all_logs_res.data:
             for l_row in all_logs_res.data:
@@ -1099,6 +1168,7 @@ def process_qr(side, qr_text, frame):
                 response = net_retry(lambda: supabase.table('sticker_application').select('*').eq('qr_code', qr_text).execute())
             
             if not response.data:
+                log_unrecognized_qr(qr_text)
                 side.state = GateState.INVALID_QR
                 side.data = qr_text
                 return
@@ -1780,8 +1850,9 @@ def get_card_status(side):
         return f"REGISTERED - VERIFY, THEN {verb} OR DENY", (20, 140, 30), ["Check that the vehicle matches the details below."]
     if st == GateState.INVALID_QR:
         content = str(side.data or '')
-        first = content if content.startswith("NOT FOUND") else f"QR content: {content[:45]}"
-        return "INVALID QR CODE", (0, 0, 200), [first, "Not a recognized registration. Use OPEN MANUALLY or DISMISS."]
+        if content.startswith("NOT FOUND"):
+            return "PLATE OR REG. NO. NOT FOUND", (0, 0, 200), [content, "Use OPEN MANUALLY or DISMISS."]
+        return UNRECOGNIZED_QR_TEXT, (0, 0, 200), [f"QR content: {content[:45]}", "No matching record in the database. Use OPEN MANUALLY or DISMISS."]
     if st == GateState.API_ERROR:
         if side.api_error == NO_INTERNET_TEXT:
             return "NO INTERNET CONNECTION", (0, 0, 200), ["The gate could not reach the database (Pi network / Wi-Fi is down).",
@@ -1930,7 +2001,9 @@ def render_bottom_panel(display):
     y += 18
     if latest_scanned_details:
         d = latest_scanned_details
-        draw_text(display, f"Name: {d.get('name', 'N/A')}   |   Role: {d.get('role', 'N/A')}", (box_x + 20, y), 0.68, (20, 25, 35), 2)
+        # Registered vehicles show no personal name here; guest and VIP lines are unchanged
+        who = f"Name: {d.get('name', 'N/A')}   |   Role: {d.get('role', 'N/A')}" if d.get('role') in ('Guest', 'VIP') else f"Role: {d.get('role', 'N/A')}"
+        draw_text(display, who, (box_x + 20, y), 0.68, (20, 25, 35), 2)
         draw_text(display, f"Plate: {d.get('plate', 'N/A')}   |   Type: {d.get('type', 'N/A')}", (box_x + 20, y + 30), 0.68, (170, 60, 20), 2)
         draw_text(display, f"Vehicle: {d.get('brand', 'N/A')}", (box_x + 20, y + 58), 0.62, (40, 45, 55), 1)
         draw_text(display, f"[{d.get('gate', 'GATE')}] {d.get('time', '')}   Status: {d.get('status', '')}", (box_x + 20, y + 84), 0.56, (90, 95, 105), 1)
@@ -2421,6 +2494,8 @@ while True:
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
+                                wrong_campus = log_wrong_campus_exit(reg_id, v_info_id)
+
                                 # Close open gate_log row (revoked / unregistered / blocked exits are flagged)
                                 exit_flag = exit_flag_for(reg, v_info_id)
                                 flag_fields = {"flagged_alert": exit_flag[0], "note": exit_flag[1]} if exit_flag else {}
@@ -2469,7 +2544,7 @@ while True:
                                     "plate": d_plate,
                                     "brand": d_brand,
                                     "type": d_type,
-                                    "status": "EXIT APPROVED",
+                                    "status": "FLAGGED (WRONG CAMPUS EXIT)" if wrong_campus else "EXIT APPROVED",
                                     "time": datetime.now().strftime("%I:%M:%S %p")
                                 }
                                 global_logs.insert(0, {
@@ -2481,6 +2556,8 @@ while True:
                                 sync_parking_availability()
                                 refresh_parking_data()
                                 print(f"[{side.type}] Exit logged and capacity synced for {data}")
+                            else:
+                                show_unrecognized_while_open(qr_text)
                         except Exception as e:
                             print(f"Error logging exit during countdown: {e}")
                     threading.Thread(target=_log_exit, daemon=True).start()
@@ -2525,6 +2602,8 @@ while True:
                                         if vres.data: vehicle_data = vres.data[0]
                                     except: pass
                                 
+                                wrong_campus = log_wrong_campus_exit(reg_id, v_info_id)
+
                                 # Close open gate_log row (revoked / unregistered / blocked exits are flagged)
                                 exit_flag = exit_flag_for(reg, v_info_id)
                                 flag_fields = {"flagged_alert": exit_flag[0], "note": exit_flag[1]} if exit_flag else {}
@@ -2572,7 +2651,7 @@ while True:
                                     "brand": d_brand,
                                     "type": d_type,
                                     "time": datetime.now().strftime("%I:%M:%S %p"),
-                                    "status": "EXITED"
+                                    "status": "FLAGGED (WRONG CAMPUS EXIT)" if wrong_campus else "EXITED"
                                 }
 
                                 global latest_scanned_details, global_logs
@@ -2583,7 +2662,7 @@ while True:
                                     "plate": d_plate,
                                     "brand": d_brand,
                                     "type": d_type,
-                                    "status": "EXITED",
+                                    "status": "FLAGGED (WRONG CAMPUS EXIT)" if wrong_campus else "EXITED",
                                     "time": datetime.now().strftime("%I:%M:%S %p")
                                 }
                                 global_logs.insert(0, {
@@ -2595,6 +2674,15 @@ while True:
                                 sync_parking_availability()
                                 refresh_parking_data()
                                 print(f"[{side.type}] PROLONG exit logged for {d_plate} ({d_name})")
+                            else:
+                                show_unrecognized_while_open(qr_text)
+                                side.last_prolong_exit = {
+                                    "plate": "N/A",
+                                    "name": "N/A",
+                                    "role": "N/A",
+                                    "time": datetime.now().strftime("%I:%M:%S %p"),
+                                    "status": UNRECOGNIZED_QR_TEXT
+                                }
                         except Exception as e:
                             print(f"Error in prolong exit: {e}")
                     threading.Thread(target=_log_prolong_exit, daemon=True).start()
