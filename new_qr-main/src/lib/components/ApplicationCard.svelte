@@ -80,7 +80,7 @@
   let pill = $derived(statusColors[statusVariant] ?? statusColors.default);
 
   // Workflow-specific labels per dashboard tab (e.g. PENDING DPT APRVL, OSA CHECKED, PAID)
-  let workflowPills = $derived(getWorkflowStatusPills(tab, appStatus, data.role));
+  let workflowPills = $derived(getWorkflowStatusPills(tab, appStatus, data.role, !!data.documents?.agreement));
 
   // Colored left edge follows the status shown on the card
   let accentTone = $derived(

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
-  import { showAlert } from '$lib/utils/dialog';
+  import { askReason, showAlert } from '$lib/utils/dialog';
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import AppShell from "$lib/components/AppShell.svelte";
   import { invalidateAll } from "$app/navigation";
@@ -15,6 +15,7 @@
 
   let searchQuery = $state("");
   let approvingId = $state<number | null>(null);
+  let rejectingId = $state<number | null>(null);
   let showDocPopup = $state<string | null>(null);
 
   function isValidDoc(url: string | null | undefined): boolean {
@@ -119,6 +120,42 @@
       showAlert(networkErrorMessage('update the application'));
     } finally {
       approvingId = null;
+    }
+  }
+
+  async function rejectApp(registration_id: number) {
+    if (rejectingId !== null || approvingId !== null) return;
+    const reason = await askReason('The applicant will see this reason and will need to submit a new application.', {
+      title: 'Reject application',
+      confirmLabel: 'Reject application',
+      placeholder: 'Type the reason for rejecting...'
+    });
+    if (!reason) return;
+    rejectingId = registration_id;
+    try {
+      let res = await fetch("/api/administrative/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ registration_id, action: "reject", reason }),
+      });
+
+      if (!res.ok) {
+        res = await fetch("/api/dean/applications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ registration_id, action: "reject", reason }),
+        });
+      }
+
+      if (res.ok) {
+        invalidateAll();
+      } else {
+        showAlert(await readApiError(res, 'reject the application'));
+      }
+    } catch (e) {
+      showAlert(networkErrorMessage('reject the application'));
+    } finally {
+      rejectingId = null;
     }
   }
 </script>
@@ -273,10 +310,19 @@
 
         <div class="card-action-section">
           {#if isPending}
+            <div class="card-action-buttons">
+              <button
+                type="button"
+                class="btn-dean-reject"
+                disabled={rejectingId !== null || approvingId !== null}
+                onclick={() => rejectApp(appId)}
+              >
+                {rejectingId === appId ? 'Rejecting…' : 'Reject'}
+              </button>
             <button
               type="button"
               class="btn-dean-approve"
-              disabled={isApproving || approvingId !== null}
+              disabled={isApproving || approvingId !== null || rejectingId !== null}
               onclick={() => approveApp(appId)}
             >
               {#if isApproving}
@@ -291,6 +337,7 @@
                 <span>Approve</span>
               {/if}
             </button>
+            </div>
           {:else}
             <span class="badge-status-approved">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -658,6 +705,36 @@
     transform: none;
   }
 
+  .card-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .btn-dean-reject {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.65rem 1.35rem;
+    background: #ffffff;
+    color: #b91c1c;
+    font-size: 0.875rem;
+    font-weight: 700;
+    font-family: inherit;
+    border: 1px solid #fca5a5;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .btn-dean-reject:hover:not(:disabled) {
+    background: #fef2f2;
+  }
+
+  .btn-dean-reject:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
   .btn-spinner {
     width: 16px;
     height: 16px;
@@ -929,6 +1006,12 @@
       align-items: flex-start;
     }
 
+    .card-action-buttons {
+      flex-direction: column;
+    }
+    .btn-dean-reject {
+      justify-content: center;
+    }
     .btn-dean-approve {
       width: 100%;
       justify-content: center;

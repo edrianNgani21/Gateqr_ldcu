@@ -3,7 +3,7 @@
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import { uploadDirect } from '$lib/utils/directUpload';
   import { fileSizeError } from '$lib/limits';
-  import { idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
+  import { AGREEMENT_FORM_URL, idDocumentLabel, loadDocumentLabel, needsLoadDocument } from '$lib/documents';
     import AppShell from '$lib/components/AppShell.svelte';
     import { goto } from '$app/navigation';
 
@@ -697,7 +697,7 @@
             <div class="doc-link-action-box">
               <p>Please download, print, and fill up the physical copy of the Agreement to Park and Parking Regulations:</p>
               <a 
-                href="https://docs.google.com/document/d/1y8OGxeORcqTE9JZ8m-82jM_6oQSrdtSyqrAEf2kaLAM/edit?tab=t.0" 
+                href={AGREEMENT_FORM_URL} 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 class="btn-agreement-download"

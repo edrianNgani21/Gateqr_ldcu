@@ -1,27 +1,35 @@
+import { env } from '$env/dynamic/private';
+import { AGREEMENT_FORM_URL } from '$lib/documents';
+import { requiresDepartmentApproval } from '$lib/utils/statusLabels';
 import { supabase } from './supabase';
 import { sendEmail } from './email';
-
-// Roles that go through Department Head approval of the Agreement Form to Park.
-// Administrator and VPS (and visitors) are excluded. 'employee' is stored as 'staff';
-// concessionaire is stored as 'concessionnaire' in registration_role_enum.
-export const AGREEMENT_REMINDER_ROLES = ['student', 'faculty', 'staff', 'supplier', 'concessionnaire', 'concessionaire', 'employee'];
 
 const PENDING_LIMIT_MS = 24 * 60 * 60 * 1000;
 // The sweep runs on page visits; skip it if one ran recently on this server instance
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 const SUBJECT = 'Agreement Form to Park Pending Department Head Approval - Liceo GateQR';
-const TEXT =
-    'Your Agreement Form to Park is still pending approval from your Department Head. ' +
-    'We recommend that you print a hard copy of the Agreement Form to Park, have it signed by your Department Head, ' +
-    'and upload the signed copy on your application status page.';
-const HTML =
-    '<p>Your <strong>Agreement Form to Park</strong> is still pending approval from your Department Head.</p>' +
-    '<p>We recommend that you print a hard copy of the Agreement Form to Park, have it signed by your Department Head, ' +
-    'and upload the signed copy on your <strong>application status page</strong>.</p>';
+
+function reminderMessage(): { text: string; html: string } {
+    const base = (env.PUBLIC_APP_URL || env.ORIGIN || '').replace(/\/+$/, '');
+    const statusUrl = base ? `${base}/status` : '';
+    const intro = 'It has been 24 hours and your application is still pending Department Head approval.';
+    const followUp = 'You can follow up with your Department Head about your Agreement Form to Park.';
+
+    const text =
+        `${intro} ${followUp} You can also print the form (${AGREEMENT_FORM_URL}), have your Department Head sign it, ` +
+        `and upload it as a PDF on your application status page${statusUrl ? ` (${statusUrl})` : ''}.`;
+    const statusPage = statusUrl
+        ? `<a href="${statusUrl}">application status page</a>`
+        : '<strong>application status page</strong>';
+    const html =
+        `<p>${intro}</p><p>${followUp} You can also <a href="${AGREEMENT_FORM_URL}">print the form</a>, ` +
+        `have your Department Head sign it, and upload it as a PDF on your ${statusPage}.</p>`;
+    return { text, html };
+}
 
 export function isAgreementReminderRole(role: string | null | undefined): boolean {
-    return AGREEMENT_REMINDER_ROLES.includes((role || '').toLowerCase().trim());
+    return requiresDepartmentApproval(role);
 }
 
 let lastSweepAt = 0;
@@ -58,6 +66,7 @@ export async function sendAgreementReminders(): Promise<number> {
 
         if (error) throw error;
 
+        const { text, html } = reminderMessage();
         let sent = 0;
         for (const row of rows || []) {
             if (!isAgreementReminderRole(row.role)) continue;
@@ -74,7 +83,7 @@ export async function sendAgreementReminders(): Promise<number> {
 
             if (claimError || !claimed || claimed.length === 0) continue;
 
-            await sendEmail(email, SUBJECT, TEXT, HTML);
+            await sendEmail(email, SUBJECT, text, html);
             sent++;
         }
 

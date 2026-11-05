@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { showAlert, showError } from '$lib/utils/dialog';
+  import { askConfirm, showAlert, showError } from '$lib/utils/dialog';
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
   import { uploadDirect } from '$lib/utils/directUpload';
-  import { fileSizeError } from '$lib/limits';
-  import { skipsSecurityReview } from '$lib/utils/statusLabels';
+  import { fileSizeError, SIGNED_AGREEMENT_TYPES } from '$lib/limits';
+  import { AGREEMENT_FORM_URL } from '$lib/documents';
+  import { requiresDepartmentApproval, skipsSecurityReview } from '$lib/utils/statusLabels';
     import AppShell from '$lib/components/AppShell.svelte';
     import ApplicationCard from '$lib/components/ApplicationCard.svelte';
     import CharCount from '$lib/components/CharCount.svelte';
@@ -95,12 +96,13 @@
         }
     }
 
-    // Signed Agreement Form to Park upload (shown after the 24-hour pending Department Head reminder email)
+    // Signed Agreement Form to Park upload (shown after the 24-hour pending Department Head reminder email, until one form is submitted)
     let showSignedAgreementUpload = $derived(
         !!app &&
         (app.status || '').toLowerCase() === 'pending' &&
         !!app.agreement_reminder_sent_at &&
-        ['student', 'faculty', 'staff', 'supplier', 'concessionnaire', 'concessionaire', 'employee'].includes((app.role || '').toLowerCase().trim())
+        !app.signed_agreement_form &&
+        requiresDepartmentApproval(app.role)
     );
     let agreementFile = $state<File | null>(null);
     let agreementPreview = $state<string | null>(null);
@@ -114,8 +116,8 @@
         agreementPreview = null;
         if (input.files && input.files[0]) {
             const f = input.files[0];
-            if (!['image/jpeg', 'image/png', 'application/pdf'].includes(f.type)) {
-                showAlert('Your signed Agreement Form to Park must be a JPG, PNG, or PDF file.');
+            if (!SIGNED_AGREEMENT_TYPES.includes(f.type)) {
+                showAlert('Your signed Agreement Form to Park must be a PDF file.');
                 input.value = '';
                 agreementFile = null;
                 return;
@@ -128,7 +130,7 @@
                 return;
             }
             agreementFile = f;
-            if (f.type.startsWith('image/')) agreementPreview = URL.createObjectURL(f);
+            agreementPreview = URL.createObjectURL(f);
         } else {
             agreementFile = null;
         }
@@ -139,6 +141,11 @@
             agreementError = 'Please select the signed Agreement Form to Park first.';
             return;
         }
+        const confirmed = await askConfirm(
+            `Please review "${agreementFile.name}" before you confirm. You cannot replace the file after this. If OSA finds a problem with it, your application can be rejected and you will need to submit a new one.`,
+            { title: 'Review your file', confirmLabel: 'Confirm upload', cancelLabel: 'Go back', danger: false }
+        );
+        if (!confirmed) return;
         agreementLoading = true;
         agreementError = '';
         try {
@@ -375,18 +382,21 @@
             <span class="ps-desc">Wait for your Department Head or Dean to approve your Parking Agreement Form.</span>
             {#if showSignedAgreementUpload}
               <div class="receipt-upload">
-                <p style="font-size: 0.85rem; color: #92400E; margin: 0.5rem 0;">Your Agreement Form to Park is still pending approval from your Department Head. We recommend that you print a hard copy of the Agreement Form to Park, have it signed by your Department Head, and upload the signed copy below (JPG, PNG, or PDF).</p>
+                <p style="font-size: 0.85rem; color: #92400E; margin: 0.5rem 0;">It has been 24 hours and your application is still pending Department Head approval. You can follow up with your Department Head about your Agreement Form to Park. You can also <a href={AGREEMENT_FORM_URL} target="_blank" rel="noopener noreferrer">print the form</a>, have your Department Head sign it, and upload it below as a PDF.</p>
                 <input
                   id="signed-agreement-input"
                   type="file"
-                  accept="image/jpeg,image/png,application/pdf"
+                  accept="application/pdf"
                   onchange={handleAgreementChange}
                   disabled={agreementLoading}
                 />
-                {#if agreementPreview}
-                  <img src={agreementPreview} alt="Signed Agreement Form to Park preview" style="max-width: 220px; max-height: 220px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 0.5rem; display: block;" />
-                {:else if agreementFile}
-                  <p style="font-size: 0.8rem; margin: 0.5rem 0 0 0;">Selected: {agreementFile.name}</p>
+                {#if agreementFile}
+                  <p style="font-size: 0.8rem; margin: 0.5rem 0 0 0;">
+                    Selected: {agreementFile.name}
+                    {#if agreementPreview}
+                      (<a href={agreementPreview} target="_blank" rel="noopener noreferrer">view file</a>)
+                    {/if}
+                  </p>
                 {/if}
                 {#if agreementError}
                   <p style="color: #dc2626; font-size: 0.8rem; margin: 0.5rem 0 0 0;">{agreementError}</p>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { showAlert, askConfirm } from '$lib/utils/dialog';
+  import { isOsaAcceptBlocked, OSA_ACCEPT_BLOCKED_MESSAGE } from '$lib/utils/statusLabels';
   import { readApiError, networkErrorMessage } from '$lib/utils/apiErrors';
     import AppShell from '$lib/components/AppShell.svelte';
     import NavBar from '$lib/components/NavBar.svelte';
@@ -169,7 +170,12 @@
             });
 
             if (res.ok) {
-                showAlert(`Successfully ${bulkActionType === 'accept' ? 'accepted' : 'rejected'} ${ids.length} application(s)`);
+                const { results } = await res.json();
+                if (results?.failed > 0) {
+                    showAlert(`${results.success} of ${ids.length} application(s) were processed. ${results.errors.join(' ')}`, { title: 'Some applications were not processed', tone: 'info' });
+                } else {
+                    showAlert(`Successfully ${bulkActionType === 'accept' ? 'accepted' : 'rejected'} ${ids.length} application(s)`);
+                }
                 selectedApplicationIds = new Set();
                 bulkActionModalOpen = false;
                 bulkSchedule = '';
@@ -422,6 +428,14 @@
                 plate: app?.vehicle_plate && app.vehicle_plate !== '-' ? app.vehicle_plate : ''
             };
             return;
+        }
+
+        if (action === 'accept') {
+            const app = apps.find(a => (a.registration_id || a.id) === registration_id);
+            if (app && isOsaAcceptBlocked(app)) {
+                showAlert(OSA_ACCEPT_BLOCKED_MESSAGE, { title: 'Cannot accept yet', tone: 'info' });
+                return;
+            }
         }
 
         if (action === 'accept' || action === 'reschedule') {

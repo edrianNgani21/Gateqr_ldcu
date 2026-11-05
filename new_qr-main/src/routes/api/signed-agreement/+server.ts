@@ -7,7 +7,8 @@ import { SIGNED_AGREEMENT_TYPES } from '$lib/limits';
 import { isAgreementReminderRole } from '$lib/server/agreementReminder';
 
 // Applicant uploads the Agreement Form to Park signed by their Department Head after the
-// pending-approval reminder; confirming it marks the application as department approved.
+// pending-approval reminder. The application stays pending: OSA or the Department Head reviews
+// the form and decides. One upload per application; a bad file means the application is rejected.
 export const POST: RequestHandler = async ({ request, locals }) => {
     if (!locals.user) {
         return json({ error: 'Your session has expired or you are not signed in. Please sign in and try again.' }, { status: 401 });
@@ -33,7 +34,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
         const { data: reg } = await supabase
             .from('sticker_application')
-            .select('registration_id, status, role, agreement_reminder_sent_at').neq('status', 'deleted')
+            .select('registration_id, status, role, agreement_reminder_sent_at, signed_agreement_form').neq('status', 'deleted')
             .eq('user_id', user.user_id)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -48,19 +49,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
             return json({ error: 'Your application is not awaiting a signed Agreement Form to Park.' }, { status: 400 });
         }
 
+        if (reg.signed_agreement_form) {
+            return json({ error: 'You have already submitted your signed Agreement Form to Park. It cannot be replaced.' }, { status: 400 });
+        }
+
         const fileUrl = await acceptUploadedFile(path, user.user_id, 'signed Agreement Form to Park', SIGNED_AGREEMENT_TYPES);
 
-        const { error: updateError } = await supabase
+        const { data: saved, error: updateError } = await supabase
             .from('sticker_application')
-            .update({
-                signed_agreement_form: fileUrl,
-                status: 'dept_validated',
-                dept_approved_at: new Date().toISOString()
-            })
+            .update({ signed_agreement_form: fileUrl })
             .eq('registration_id', reg.registration_id)
-            .eq('status', 'pending');
+            .eq('status', 'pending')
+            .is('signed_agreement_form', null)
+            .select('registration_id');
 
         if (updateError) throw updateError;
+        if (!saved || saved.length === 0) {
+            return json({ error: 'Your application is not awaiting a signed Agreement Form to Park.' }, { status: 400 });
+        }
 
         return json({ success: true, signed_agreement_form: fileUrl });
     } catch (error) {

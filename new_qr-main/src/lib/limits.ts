@@ -6,7 +6,7 @@ export const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
 
 export const PDF_TYPES = ['application/pdf'];
 export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-export const SIGNED_AGREEMENT_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+export const SIGNED_AGREEMENT_TYPES = PDF_TYPES;
 
 export function formatFileSize(bytes: number): string {
     return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;

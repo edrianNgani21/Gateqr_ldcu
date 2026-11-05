@@ -1,6 +1,7 @@
 import { apiFailure } from '$lib/server/apiError';
 import { json } from '@sveltejs/kit';
 import { reasonLengthError } from '$lib/limits';
+import { isOsaAcceptBlocked, OSA_ACCEPT_BLOCKED_MESSAGE } from '$lib/utils/statusLabels';
 import type { RequestHandler } from './$types';
 import { supabase } from '$lib/server/supabase';
 import { generateStyledQRBuffer } from '$lib/server/qr';
@@ -45,11 +46,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
                 // Fetch registration details for QR and notification
                 const { data: reg } = await supabase
                     .from('sticker_application')
-                    .select('user_id, role, created_at, qr_image, qr_code').neq('status', 'deleted')
+                    .select('user_id, role, status, dept_approved_at, signed_agreement_form, created_at, qr_image, qr_code').neq('status', 'deleted')
                     .eq('registration_id', registration_id)
                     .single();
 
                 if (action === 'accept') {
+                    if (reg && isOsaAcceptBlocked(reg)) throw new Error(OSA_ACCEPT_BLOCKED_MESSAGE);
+
                     // Bulk accept with schedule
                     const updateData: any = {
                         status: 'osa_validated',

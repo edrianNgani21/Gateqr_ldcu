@@ -1,5 +1,5 @@
 import { apiFailure } from '$lib/server/apiError';
-import { skipsSecurityReview } from '$lib/utils/statusLabels';
+import { isOsaAcceptBlocked, OSA_ACCEPT_BLOCKED_MESSAGE, skipsSecurityReview } from '$lib/utils/statusLabels';
 import { json } from '@sveltejs/kit';
 import { reasonLengthError } from '$lib/limits';
 import type { RequestHandler } from './$types';
@@ -114,6 +114,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         const reg = rows;
 
         if (action === 'accept' && ['pending', 'dept_val', 'dept_validated', 'osa_val'].includes((reg.status || '').toLowerCase())) {
+            if (isOsaAcceptBlocked(reg)) {
+                return json({ error: OSA_ACCEPT_BLOCKED_MESSAGE }, { status: 400 });
+            }
             if (!schedule) {
                 return json({ error: 'Schedule is required to accept application' }, { status: 400 });
             }
