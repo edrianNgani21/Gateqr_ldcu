@@ -1,23 +1,25 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
+
+  // How long the "Verified" state stays on screen before moving on
+  const SUCCESS_HOLD_MS = 1500;
 
   let email = $state("");
   let digits = $state(["", "", "", "", "", ""]);
   let otp = $derived(digits.join(""));
-  
+
   let loading = $state(false);
-  let isShuffling = $state(false);
   let isSuccess = $state(false);
-  let shuffleDisplay = $state(["1", "2", "3", "4", "5", "6"]);
-  let shuffleTimer: any = null;
+  let shaking = $state(false);
 
   let resending = $state(false);
   let error = $state("");
-  let successMsg = $state("");
+  let notice = $state("");
   let resendCooldown = $state(0);
-  let cooldownTimer: any = null;
+  let cooldownTimer: ReturnType<typeof setInterval> | null = null;
+  let redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
   let inputRefs: HTMLInputElement[] = [];
 
@@ -26,16 +28,13 @@
     if (!email) {
       goto("/login");
     } else {
-      // Focus first input box automatically
-      setTimeout(() => {
-        if (inputRefs[0]) inputRefs[0].focus();
-      }, 100);
+      setTimeout(() => inputRefs[0]?.focus(), 100);
     }
   });
 
   onDestroy(() => {
     if (cooldownTimer) clearInterval(cooldownTimer);
-    if (shuffleTimer) clearInterval(shuffleTimer);
+    if (redirectTimer) clearTimeout(redirectTimer);
   });
 
   function startCooldown(seconds = 60) {
@@ -43,39 +42,34 @@
     if (cooldownTimer) clearInterval(cooldownTimer);
     cooldownTimer = setInterval(() => {
       resendCooldown -= 1;
-      if (resendCooldown <= 0) {
-        clearInterval(cooldownTimer);
-      }
+      if (resendCooldown <= 0 && cooldownTimer) clearInterval(cooldownTimer);
     }, 1000);
   }
 
-  function startShuffleAnimation() {
-    isShuffling = true;
-    shuffleDisplay = digits.map(d => d || String(Math.floor(Math.random() * 10)));
-    if (shuffleTimer) clearInterval(shuffleTimer);
-    shuffleTimer = setInterval(() => {
-      shuffleDisplay = shuffleDisplay.map(() => String(Math.floor(Math.random() * 10)));
-    }, 60);
+  async function shake() {
+    shaking = false;
+    await tick();
+    shaking = true;
+    setTimeout(() => (shaking = false), 450);
   }
 
-  function stopShuffleAnimation() {
-    if (shuffleTimer) {
-      clearInterval(shuffleTimer);
-      shuffleTimer = null;
-    }
-    isShuffling = false;
+  async function showError(message: string) {
+    error = message;
+    loading = false;
+    shake();
+    // Keep the digits so one wrong digit can be fixed; select the last box
+    await tick();
+    inputRefs[5]?.focus();
+    inputRefs[5]?.select();
   }
 
-  async function handleVerify(e: any = null) {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (!email || otp.length < 6 || loading) return;
+  async function handleVerify(e: Event | null = null) {
+    e?.preventDefault();
+    if (!email || otp.length < 6 || loading || isSuccess) return;
 
     loading = true;
     error = "";
-    successMsg = "";
-    startShuffleAnimation();
-
-    const startTime = Date.now();
+    notice = "";
 
     try {
       const res = await fetch("/api/auth/verify", {
@@ -83,43 +77,19 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, otp: otp.trim() }),
       });
-
-      const data = await res.json();
-      
-      // Ensure the circular shuffle plays briefly so the animation is visible, but snappy (~550ms min)
-      const elapsed = Date.now() - startTime;
-      const minAnimationDuration = 550;
-      if (elapsed < minAnimationDuration) {
-        await new Promise(resolve => setTimeout(resolve, minAnimationDuration - elapsed));
-      }
-
-      stopShuffleAnimation();
+      const data = await res.json().catch(() => ({}));
 
       if (res.ok) {
         isSuccess = true;
-        successMsg = "Verified! Proceeding to application form...";
-        setTimeout(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+        redirectTimer = setTimeout(() => {
           goto(data.redirectUrl || "/status");
-        }, 650);
+        }, SUCCESS_HOLD_MS);
       } else {
-        isSuccess = false;
-        error = data.error || "Invalid verification code. Please check and try again.";
-        // Reset focus to first box and select
-        setTimeout(() => {
-          if (inputRefs[0]) {
-            inputRefs[0].focus();
-            inputRefs[0].select();
-          }
-        }, 150);
+        showError(data.error || "Invalid code. Please check and try again.");
       }
-    } catch (err) {
-      stopShuffleAnimation();
-      isSuccess = false;
-      error = "A network error occurred. Please check your connection.";
-    } finally {
-      if (!isSuccess) {
-        loading = false;
-      }
+    } catch {
+      showError("Network error. Please check your connection.");
     }
   }
 
@@ -132,6 +102,8 @@
       input.value = "";
       return;
     }
+
+    error = "";
 
     // Typing over a filled box: keep only the newly typed digit
     if (val.length === 2 && digits[index]) {
@@ -146,36 +118,31 @@
       }
       input.value = digits[index];
       const nextIdx = Math.min(5, index + chars.length);
-      if (inputRefs[nextIdx]) inputRefs[nextIdx].focus();
-      if (digits.every(d => d !== "")) {
-        handleVerify();
-      }
+      inputRefs[nextIdx]?.focus();
+      if (digits.every((d) => d !== "")) handleVerify();
       return;
     }
 
-    // Single digit input
+    // Submit once the row becomes complete, or when the last box is typed.
+    // Fixing one digit in an already full row waits for the Verify button.
+    const rowWasIncomplete = digits.some((d) => d === "");
     digits[index] = val;
     input.value = val;
-    error = "";
 
-    // Automatically shift to next box
-    if (index < 5) {
-      if (inputRefs[index + 1]) {
-        inputRefs[index + 1].focus();
-        inputRefs[index + 1].select();
-      }
-    } else if (index === 5 && digits.every(d => d !== "")) {
-      // All 6 digits entered
+    if (digits.every((d) => d !== "") && (rowWasIncomplete || index === 5)) {
       handleVerify();
+    } else if (index < 5) {
+      inputRefs[index + 1]?.focus();
+      inputRefs[index + 1]?.select();
     }
   }
 
   function handleKeyDown(index: number, e: KeyboardEvent) {
     if (e.key === "Backspace") {
+      error = "";
       if (!digits[index] && index > 0) {
-        // Move to previous box if current is empty
         digits[index - 1] = "";
-        if (inputRefs[index - 1]) inputRefs[index - 1].focus();
+        inputRefs[index - 1]?.focus();
         e.preventDefault();
       } else {
         digits[index] = "";
@@ -191,31 +158,24 @@
 
   function handlePaste(e: ClipboardEvent) {
     e.preventDefault();
-    const pastedText = e.clipboardData?.getData("text") || "";
-    const cleanNumbers = pastedText.replace(/\D/g, "").slice(0, 6);
+    if (loading || isSuccess) return;
+    const cleanNumbers = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
     if (!cleanNumbers) return;
 
+    error = "";
     const chars = cleanNumbers.split("");
-    for (let i = 0; i < 6; i++) {
-      digits[i] = chars[i] || "";
-    }
+    for (let i = 0; i < 6; i++) digits[i] = chars[i] || "";
 
-    const focusTarget = Math.min(chars.length, 5);
-    if (inputRefs[focusTarget]) {
-      inputRefs[focusTarget].focus();
-    }
-
-    if (cleanNumbers.length === 6) {
-      handleVerify();
-    }
+    inputRefs[Math.min(chars.length, 5)]?.focus();
+    if (cleanNumbers.length === 6) handleVerify();
   }
 
   async function handleResend() {
-    if (resendCooldown > 0 || resending || !email) return;
+    if (resendCooldown > 0 || resending || loading || !email) return;
 
     resending = true;
     error = "";
-    successMsg = "";
+    notice = "";
 
     try {
       const res = await fetch("/api/auth/register", {
@@ -223,18 +183,17 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        successMsg = "A new 6-digit verification code has been sent to your email!";
+        notice = "A new code has been sent.";
         digits = ["", "", "", "", "", ""];
-        if (inputRefs[0]) inputRefs[0].focus();
+        inputRefs[0]?.focus();
         startCooldown(60);
       } else {
-        error = data.error || "Failed to resend code. Please try again.";
+        error = data.error || "Could not resend the code. Please try again.";
       }
-    } catch (err) {
-      error = "A network error occurred while resending. Please try again.";
+    } catch {
+      error = "Network error. Please try again.";
     } finally {
       resending = false;
     }
@@ -255,178 +214,103 @@
   <div class="bg-overlay"></div>
 
   <div class="otp-card">
-    <div class="envelope-icon" class:pulse-icon={isShuffling}>
-      {#if isSuccess}
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
-        </svg>
-      {:else if isShuffling}
-        <svg class="shuffle-spin-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10" stroke-dasharray="16 8" />
-          <path d="M12 6v6l4 2" />
-        </svg>
-      {:else}
-        <svg
-          width="36"
-          height="36"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
-        </svg>
-      {/if}
+    <div class="seal-icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+      </svg>
     </div>
 
-    <div class="header-text">
-      <span class="sub-badge">APPLICANT VERIFICATION</span>
-      <h1 class="otp-title">Verify Your Email</h1>
-      <p class="otp-main">
-        We sent a 6-digit verification code to
-        <span class="user-email">{email}</span>
-        to confirm your email is active.
-      </p>
-    </div>
+    <h1 class="otp-title">Verify your email</h1>
+    <p class="otp-sub">Code sent to <span class="user-email">{email}</span></p>
 
     <form class="otp-form" onsubmit={handleVerify}>
-      {#if error}
-        <div class="alert alert-error">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <span>{error}</span>
+      <div class="code-stage" class:is-success={isSuccess}>
+        <div
+          class="otp-boxes-grid"
+          class:is-checking={loading && !isSuccess}
+          class:shake={shaking}
+          onpaste={handlePaste}
+          role="group"
+          aria-label="6-digit verification code"
+          aria-hidden={isSuccess}
+        >
+          {#each digits as digit, idx}
+            <input
+              id="digit-{idx}"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              maxlength="6"
+              value={digit}
+              oninput={(e) => handleDigitInput(idx, e)}
+              onkeydown={(e) => handleKeyDown(idx, e)}
+              onfocus={(e) => (e.currentTarget as HTMLInputElement).select()}
+              class="otp-box"
+              class:has-val={digit !== ""}
+              class:is-error={error !== ""}
+              style="--i: {idx}"
+              disabled={loading || isSuccess}
+              autocomplete={idx === 0 ? "one-time-code" : "off"}
+              bind:this={inputRefs[idx]}
+              aria-label="Digit {idx + 1}"
+            />
+          {/each}
+          <span class="sweep" aria-hidden="true"></span>
         </div>
-      {/if}
 
-      {#if successMsg}
-        <div class="alert alert-success">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-          <span>{successMsg}</span>
-        </div>
-      {/if}
-
-      <div class="field-group">
-        <label for="digit-0" class="input-label">Enter 6-Digit Code</label>
-
-        <!-- CIRCULAR SHUFFLE ANIMATION DISPLAY (Active when verifying) -->
-        {#if isShuffling || isSuccess}
-          <div class="circle-shuffle-stage" class:success-state={isSuccess}>
-            <div class="orbit-glow-ring"></div>
-            <div class="orbit-center-core">
-              {#if isSuccess}
-                <div class="core-check-icon">
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </div>
-              {:else}
-                <div class="core-shuffling-text">VERIFYING</div>
-              {/if}
+        {#if isSuccess}
+          <div class="verified-panel" role="status" aria-live="polite">
+            <svg class="verified-mark" width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
+              <circle class="mark-ring" cx="26" cy="26" r="23" fill="none" />
+              <path class="mark-check" fill="none" d="M15 27 l7.5 7.5 L37 19" />
+            </svg>
+            <div class="verified-text">
+              <span class="verified-title">Verified</span>
+              <span class="verified-sub">Proceeding to your application…</span>
             </div>
-
-            <!-- 6 Orbiting Digit Nodes Shuffling in Circles -->
-            <div class="orbit-carousel" class:orbit-converge={isSuccess}>
-              {#each shuffleDisplay as char, idx}
-                <div
-                  class="orbit-node node-{idx}"
-                  style="--node-deg: {idx * 60}deg; --node-delay: {idx * 0.08}s;"
-                >
-                  <span class="orbit-digit">{char}</span>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {:else}
-          <!-- 6 INDIVIDUAL OTP INPUT BOXES (Standard Input Mode) -->
-          <div class="otp-boxes-grid" onpaste={handlePaste} role="group" aria-label="6-digit verification code">
-            {#each digits as digit, idx}
-              <input
-                id="digit-{idx}"
-                type="text"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                maxlength="6"
-                value={digit}
-                oninput={(e) => handleDigitInput(idx, e)}
-                onkeydown={(e) => handleKeyDown(idx, e)}
-                class="otp-box"
-                class:has-val={digit !== ""}
-                class:is-error={error !== ""}
-                disabled={loading}
-                autocomplete={idx === 0 ? "one-time-code" : "off"}
-                bind:this={inputRefs[idx]}
-                aria-label="Digit {idx + 1}"
-              />
-            {/each}
           </div>
         {/if}
-
-        <span class="helper-text">
-          {#if isShuffling}
-            <span class="verifying-hint">Verifying your 6-digit security code...</span>
-          {:else}
-            Code expires in 5 minutes
-          {/if}
-        </span>
       </div>
+
+      <p class="status-line" class:is-error={error !== ""} aria-live="polite">
+        {#if error}
+          {error}
+        {:else if notice}
+          {notice}
+        {/if}
+      </p>
 
       <button
         type="submit"
         class="verify-btn"
-        class:btn-shuffling={isShuffling}
-        class:btn-success={isSuccess}
-        disabled={loading || otp.length < 6}
+        class:is-hidden={isSuccess}
+        disabled={loading || isSuccess || otp.length < 6}
       >
-        {#if isSuccess}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          <span>Verified! Opening Form...</span>
-        {:else if isShuffling}
-          <div class="shuffle-orb-loader"></div>
-          <span>Validating Code...</span>
+        {#if loading && !isSuccess}
+          <span class="btn-loader" aria-hidden="true"></span>
+          <span>Checking…</span>
         {:else}
-          <span>Confirm & Verify</span>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M5 12h14M12 5l7 7-7 7" />
-          </svg>
+          <span>Verify</span>
         {/if}
       </button>
     </form>
 
-    <div class="resend-section">
-      <p class="resend-text">Didn't receive the verification email?</p>
+    <div class="links-row" class:is-hidden={isSuccess}>
       {#if resendCooldown > 0}
-        <span class="cooldown-badge">Resend available in {resendCooldown}s</span>
+        <span class="muted">Resend in {resendCooldown}s</span>
       {:else}
         <button
           type="button"
-          class="resend-btn"
+          class="link-btn"
           onclick={handleResend}
           disabled={resending || loading}
         >
-          {resending ? "Sending new code..." : "Resend Verification Code"}
+          {resending ? "Sending…" : "Resend code"}
         </button>
       {/if}
-    </div>
-
-    <div class="card-footer">
-      <a href="/login" class="back-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M19 12H5M12 19l-7-7 7-7" />
-        </svg>
-        <span>Change Email / Back to Sign In</span>
-      </a>
+      <span class="dot" aria-hidden="true">·</span>
+      <a href="/login" class="link-btn">Change email</a>
     </div>
   </div>
 </div>
@@ -458,10 +342,7 @@
 
   .bg-image {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     background-image: url("/rodelsa-image.png");
     background-size: cover;
     background-position: center;
@@ -471,15 +352,8 @@
 
   .bg-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(
-      180deg,
-      rgba(74, 18, 30, 0.88) 0%,
-      rgba(30, 8, 14, 0.94) 100%
-    );
+    inset: 0;
+    background: linear-gradient(180deg, rgba(74, 18, 30, 0.88) 0%, rgba(30, 8, 14, 0.94) 100%);
     z-index: 1;
   }
 
@@ -491,9 +365,9 @@
   .otp-card {
     background: rgba(255, 255, 255, 0.98);
     border-radius: var(--radius-2xl, 22px);
-    padding: 2.25rem;
+    padding: 2.25rem 2rem 1.75rem;
     width: 100%;
-    max-width: 460px;
+    max-width: 420px;
     text-align: center;
     display: flex;
     flex-direction: column;
@@ -501,13 +375,11 @@
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(212, 175, 55, 0.35);
     position: relative;
     z-index: 10;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
   }
 
-  .envelope-icon {
-    width: 68px;
-    height: 68px;
+  .seal-icon {
+    width: 64px;
+    height: 64px;
     background: linear-gradient(135deg, #6B1D2F 0%, #4A121E 100%);
     border: 3px solid #D4AF37;
     border-radius: 50%;
@@ -515,142 +387,64 @@
     align-items: center;
     justify-content: center;
     color: #FDFBF7;
-    margin-bottom: 0.85rem;
+    margin-bottom: 1rem;
     box-shadow: 0 8px 18px rgba(107, 29, 47, 0.35);
-    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  .pulse-icon {
-    transform: scale(1.08);
-    border-color: #F59E0B;
-    box-shadow: 0 0 24px rgba(212, 175, 55, 0.6);
-  }
-
-  .shuffle-spin-svg {
-    animation: rotateSvg 2s linear infinite;
-  }
-
-  @keyframes rotateSvg {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  .header-text {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.35rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .sub-badge {
-    font-size: 0.7rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    color: #92400E;
-    background: #FEF3C7;
-    padding: 0.2rem 0.65rem;
-    border-radius: 9999px;
-    border: 1px solid rgba(212, 175, 55, 0.4);
   }
 
   .otp-title {
-    font-size: 1.55rem;
+    font-size: 1.5rem;
     font-weight: 800;
     color: #6B1D2F;
     letter-spacing: -0.02em;
-    margin: 0;
+    margin: 0 0 0.3rem;
   }
 
-  .otp-main {
+  .otp-sub {
     font-size: 0.88rem;
     color: #64748B;
-    line-height: 1.5;
-    margin: 0;
-    padding: 0 0.5rem;
+    margin: 0 0 1.5rem;
+    word-break: break-all;
   }
 
   .user-email {
-    display: block;
     color: #6B1D2F;
     font-weight: 700;
-    word-break: break-all;
-    margin-top: 0.2rem;
   }
 
   .otp-form {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
     width: 100%;
   }
 
-  .alert {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-align: left;
-    animation: fadeIn 0.3s ease;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .alert-error {
-    color: #991B1B;
-    background: #FEF2F2;
-    border: 1px solid #FCA5A5;
-  }
-
-  .alert-success {
-    color: #166534;
-    background: #F0FDF4;
-    border: 1px solid #86EFAC;
-  }
-
-  .field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    text-align: left;
+  /* CODE AREA: boxes and the verified panel share the same space */
+  .code-stage {
+    position: relative;
     width: 100%;
+    height: 64px;
+    overflow: hidden;
   }
 
-  .input-label {
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #475569;
-    text-align: center;
-  }
-
-  /* 6 INDIVIDUAL OTP INPUT BOXES */
   .otp-boxes-grid {
+    position: relative;
     display: grid;
     grid-template-columns: repeat(6, 1fr);
     gap: 0.5rem;
     width: 100%;
-    margin: 0.25rem 0;
+    height: 60px;
   }
 
   .otp-box {
     width: 100%;
     min-width: 0;
-    height: 60px;
+    height: 56px;
     /* The global input[type="text"] rule adds side padding that clipped the digit in narrow boxes */
     padding: 0;
     line-height: normal;
     -webkit-text-fill-color: currentColor;
     caret-color: #6B1D2F;
     text-align: center;
-    font-size: 1.75rem;
+    font-size: 1.65rem;
     font-weight: 800;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color: #6B1D2F;
@@ -658,7 +452,7 @@
     border: 2px solid #E2E8F0;
     border-radius: 12px;
     outline: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
   }
 
@@ -669,8 +463,7 @@
   .otp-box:focus {
     border-color: #6B1D2F;
     background: #FFFAF7;
-    box-shadow: 0 0 0 3px rgba(107, 29, 47, 0.15), 0 4px 10px rgba(107, 29, 47, 0.1);
-    transform: translateY(-2px);
+    box-shadow: 0 0 0 3px rgba(107, 29, 47, 0.15);
   }
 
   .otp-box.has-val {
@@ -679,150 +472,144 @@
     color: #4A121E;
   }
 
+  .otp-box:disabled {
+    opacity: 1;
+    cursor: default;
+  }
+
   .otp-box.is-error {
     border-color: #EF4444;
-    animation: shakeBox 0.35s ease-in-out;
+    background: #FEF2F2;
+    color: #991B1B;
   }
 
-  @keyframes shakeBox {
+  .shake {
+    animation: shakeRow 0.4s ease-in-out;
+  }
+
+  @keyframes shakeRow {
     0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    50% { transform: translateX(4px); }
-    75% { transform: translateX(-2px); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(3px); }
   }
 
-  /* CIRCULAR SHUFFLE STAGE ANIMATION */
-  .circle-shuffle-stage {
-    position: relative;
-    width: 100%;
-    height: 140px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0.25rem 0;
-  }
-
-  .orbit-glow-ring {
+  /* While the server checks: boxes lock and a thin gold line sweeps underneath */
+  .sweep {
     position: absolute;
-    width: 125px;
-    height: 125px;
-    border-radius: 50%;
-    border: 2px dashed rgba(212, 175, 55, 0.45);
-    animation: spinRing 4s linear infinite;
-    box-shadow: inset 0 0 20px rgba(212, 175, 55, 0.12), 0 0 25px rgba(212, 175, 55, 0.2);
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 30%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, #D4AF37, transparent);
+    opacity: 0;
+    pointer-events: none;
   }
 
-  @keyframes spinRing {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  .is-checking .sweep {
+    opacity: 1;
+    animation: sweep 1s ease-in-out infinite;
   }
 
-  .orbit-center-core {
-    position: absolute;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #6B1D2F 0%, #4A121E 100%);
-    border: 2px solid #D4AF37;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 5;
-    box-shadow: 0 4px 14px rgba(107, 29, 47, 0.4);
-    animation: pulseCore 1s ease-in-out infinite alternate;
-  }
-
-  @keyframes pulseCore {
-    0% { transform: scale(0.96); box-shadow: 0 0 10px rgba(212, 175, 55, 0.3); }
-    100% { transform: scale(1.04); box-shadow: 0 0 20px rgba(212, 175, 55, 0.7); }
-  }
-
-  .core-shuffling-text {
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    color: #FDFBF7;
-  }
-
-  .core-check-icon {
-    animation: popCheck 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  }
-
-  @keyframes popCheck {
-    0% { transform: scale(0) rotate(-45deg); opacity: 0; }
-    100% { transform: scale(1) rotate(0deg); opacity: 1; }
-  }
-
-  /* The 6 nodes rotating in circles */
-  .orbit-carousel {
-    position: absolute;
-    width: 130px;
-    height: 130px;
-    border-radius: 50%;
-    animation: shuffleOrbit 0.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  }
-
-  @keyframes shuffleOrbit {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-
-  .orbit-converge {
-    animation: convergeNodes 0.4s ease-out forwards !important;
-  }
-
-  @keyframes convergeNodes {
-    0% { transform: scale(1) rotate(0deg); opacity: 1; }
-    100% { transform: scale(0.2) rotate(180deg); opacity: 0; }
-  }
-
-  .orbit-node {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 34px;
-    height: 34px;
-    margin: -17px 0 0 -17px;
-    background: #FFFFFF;
-    border: 2px solid #D4AF37;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-    /* Circular trigonometry placement: radius is 58px */
-    transform: rotate(var(--node-deg)) translate(58px) rotate(calc(-1 * var(--node-deg)));
-    animation: counterSpin 0.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  }
-
-  @keyframes counterSpin {
-    0% { transform: rotate(var(--node-deg)) translate(58px) rotate(calc(-1 * var(--node-deg) - 0deg)); }
-    100% { transform: rotate(var(--node-deg)) translate(58px) rotate(calc(-1 * var(--node-deg) - 360deg)); }
-  }
-
-  .orbit-digit {
-    font-size: 1.05rem;
-    font-weight: 800;
+  .is-checking .otp-box {
+    border-color: #E9D9A6;
     color: #6B1D2F;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 
-  .verifying-hint {
-    color: #D4AF37;
-    font-weight: 700;
-    animation: blinkText 1s ease-in-out infinite;
+  @keyframes sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(340%); }
   }
 
-  @keyframes blinkText {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 1; }
+  /* SUCCESS: digits slide out to the right one after another */
+  .is-success .otp-box {
+    animation: slideOut 0.42s cubic-bezier(0.55, 0, 0.75, 0.2) forwards;
+    animation-delay: calc((5 - var(--i)) * 55ms);
+    border-color: #D4AF37;
   }
 
-  .helper-text {
-    font-size: 0.75rem;
-    color: #94A3B8;
-    text-align: center;
-    margin-top: 0.2rem;
+  @keyframes slideOut {
+    0% { transform: translateX(0); opacity: 1; }
+    100% { transform: translateX(260%); opacity: 0; }
+  }
+
+  .verified-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+    opacity: 0;
+    animation: panelIn 0.35s ease-out 0.55s forwards;
+  }
+
+  @keyframes panelIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .verified-mark {
+    flex-shrink: 0;
+  }
+
+  .mark-ring {
+    stroke: #15803D;
+    stroke-width: 2.5;
+    stroke-dasharray: 145;
+    stroke-dashoffset: 145;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    animation: draw 0.5s ease-out 0.6s forwards;
+  }
+
+  .mark-check {
+    stroke: #15803D;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 34;
+    stroke-dashoffset: 34;
+    animation: draw 0.3s ease-out 1s forwards;
+  }
+
+  @keyframes draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  .verified-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .verified-title {
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: #14532D;
+    line-height: 1.2;
+  }
+
+  .verified-sub {
+    font-size: 0.8rem;
+    color: #64748B;
+    font-weight: 600;
+  }
+
+  .status-line {
+    min-height: 1.2rem;
+    margin: 0.6rem 0 0.9rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #15803D;
+  }
+
+  .status-line.is-error {
+    color: #B91C1C;
   }
 
   .verify-btn {
@@ -830,25 +617,24 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.85rem 1.5rem;
+    height: 50px;
+    padding: 0 1.5rem;
     background: linear-gradient(135deg, #6B1D2F 0%, #4A121E 100%);
     color: #FFFFFF;
     font-size: 0.95rem;
     font-weight: 700;
+    letter-spacing: 0.02em;
     border-radius: 12px;
     border: 1px solid #D4AF37;
     cursor: pointer;
-    transition: all 0.25s ease;
-    height: 52px;
+    transition: background 0.25s ease, color 0.25s ease, opacity 0.3s ease, transform 0.25s ease;
     box-shadow: 0 4px 14px rgba(107, 29, 47, 0.25);
   }
 
   .verify-btn:hover:not(:disabled) {
     background: linear-gradient(135deg, #D4AF37 0%, #AA820A 100%);
     color: #1E293B;
-    border-color: #AA820A;
     transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(212, 175, 55, 0.38);
   }
 
   .verify-btn:disabled {
@@ -856,22 +642,10 @@
     cursor: not-allowed;
   }
 
-  .btn-shuffling {
-    background: linear-gradient(135deg, #4A121E 0%, #2A0910 100%) !important;
-    border-color: #D4AF37 !important;
-    color: #FDFBF7 !important;
-  }
-
-  .btn-success {
-    background: linear-gradient(135deg, #16A34A 0%, #15803D 100%) !important;
-    border-color: #86EFAC !important;
-    color: #FFFFFF !important;
-  }
-
-  .shuffle-orb-loader {
-    width: 18px;
-    height: 18px;
-    border: 2.5px solid rgba(212, 175, 55, 0.3);
+  .btn-loader {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(212, 175, 55, 0.3);
     border-top-color: #D4AF37;
     border-radius: 50%;
     animation: spin 0.65s linear infinite;
@@ -881,63 +655,54 @@
     to { transform: rotate(360deg); }
   }
 
-  .resend-section {
+  .is-hidden {
+    opacity: 0 !important;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+  }
+
+  .links-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
     margin-top: 1.25rem;
-    padding-top: 1.1rem;
+    padding-top: 1rem;
     border-top: 1px solid #F1F5F9;
     width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.35rem;
+    font-size: 0.83rem;
   }
 
-  .resend-text {
-    font-size: 0.82rem;
-    color: #64748B;
-    margin: 0;
-  }
-
-  .resend-btn {
+  .link-btn {
     background: none;
     border: none;
+    padding: 0.2rem 0.25rem;
     color: #6B1D2F;
-    font-size: 0.85rem;
+    font-size: inherit;
     font-weight: 700;
     cursor: pointer;
-    padding: 0.25rem 0.5rem;
-    text-decoration: underline;
-    text-underline-offset: 3px;
+    text-decoration: none;
     transition: color 0.2s ease;
   }
 
-  .resend-btn:hover:not(:disabled) {
-    color: #D4AF37;
+  .link-btn:hover:not(:disabled) {
+    color: #AA820A;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
-  .cooldown-badge {
-    font-size: 0.8rem;
+  .link-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .muted {
     color: #94A3B8;
     font-weight: 600;
   }
 
-  .card-footer {
-    margin-top: 1.1rem;
-  }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.82rem;
-    color: #64748B;
-    text-decoration: none;
-    font-weight: 600;
-    transition: color 0.2s ease;
-  }
-
-  .back-link:hover {
-    color: #6B1D2F;
+  .dot {
+    color: #CBD5E1;
   }
 
   @media (max-width: 480px) {
@@ -946,7 +711,7 @@
     }
 
     .otp-card {
-      padding: 1.75rem 1rem;
+      padding: 1.75rem 1rem 1.5rem;
     }
 
     .otp-boxes-grid {
@@ -969,21 +734,48 @@
       height: 46px;
       font-size: 1.25rem;
     }
+  }
 
-    .circle-shuffle-stage {
-      height: 125px;
+  /* Reduced motion: digits fade instead of sliding, check appears without drawing, no shake */
+  @media (prefers-reduced-motion: reduce) {
+    .bg-glow,
+    .shake,
+    .is-checking .sweep {
+      animation: none;
     }
 
-    .orbit-carousel {
-      width: 115px;
-      height: 115px;
+    .is-checking .sweep {
+      width: 100%;
+      transform: none;
+      background: #D4AF37;
+      opacity: 0.6;
     }
 
-    .orbit-node {
-      width: 30px;
-      height: 30px;
-      margin: -15px 0 0 -15px;
-      transform: rotate(var(--node-deg)) translate(50px) rotate(calc(-1 * var(--node-deg)));
+    .is-success .otp-box {
+      animation: fadeOut 0.25s linear forwards;
+      animation-delay: 0s;
+    }
+
+    @keyframes fadeOut {
+      to { opacity: 0; }
+    }
+
+    .verified-panel {
+      animation: fadeIn 0.25s linear 0.25s forwards;
+    }
+
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    .mark-ring,
+    .mark-check {
+      animation: none;
+      stroke-dashoffset: 0;
+    }
+
+    .verify-btn:hover:not(:disabled) {
+      transform: none;
     }
   }
 </style>
