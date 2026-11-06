@@ -382,7 +382,7 @@
             <span class="ps-desc">Wait for your Department Head or Dean to approve your Parking Agreement Form.</span>
             {#if showSignedAgreementUpload}
               <div class="receipt-upload">
-                <p style="font-size: 0.85rem; color: #92400E; margin: 0.5rem 0;">It has been 24 hours and your application is still pending Department Head approval. You can follow up with your Department Head about your Agreement Form to Park. You can also <a href={AGREEMENT_FORM_URL} target="_blank" rel="noopener noreferrer">print the form</a>, have your Department Head sign it, and upload it below as a PDF.</p>
+                <p style="font-size: 0.85rem; color: #92400E; margin: 0.5rem 0;">It has been 24 hours and your application is still pending Department Head approval. You can follow up with your Department Head about your Agreement Form to Park. You can also print the form, have your Department Head sign it, and upload it below as a PDF.</p>
                 <input
                   id="signed-agreement-input"
                   type="file"
@@ -401,16 +401,29 @@
                 {#if agreementError}
                   <p style="color: #dc2626; font-size: 0.8rem; margin: 0.5rem 0 0 0;">{agreementError}</p>
                 {/if}
-                <button
-                  id="confirm-signed-agreement-btn"
-                  type="button"
-                  class="btn-reapply"
-                  style="margin-top: 0.75rem; cursor: pointer; border: none;"
-                  onclick={confirmSignedAgreement}
-                  disabled={agreementLoading || !agreementFile}
-                >
-                  {agreementLoading ? 'Uploading…' : 'Confirm'}
-                </button>
+                <div class="agreement-actions">
+                  <a
+                    id="print-agreement-form-btn"
+                    href={AGREEMENT_FORM_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="btn-reapply btn-agreement-print"
+                  >
+                    Print Agreement Form
+                  </a>
+                  {#if agreementFile}
+                    <button
+                      id="confirm-signed-agreement-btn"
+                      type="button"
+                      class="btn-reapply"
+                      style="cursor: pointer; border: none;"
+                      onclick={confirmSignedAgreement}
+                      disabled={agreementLoading}
+                    >
+                      {agreementLoading ? 'Uploading…' : 'Confirm'}
+                    </button>
+                  {/if}
+                </div>
               </div>
             {:else if app.signed_agreement_form}
               <div class="sched-pill sched-done">Signed Agreement Form to Park submitted</div>
@@ -996,6 +1009,24 @@
   .btn-reapply:hover {
     background: var(--maroon-light);
     transform: translateY(-1px);
+  }
+
+  .agreement-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .btn-agreement-print {
+    background: #ffffff;
+    color: var(--maroon);
+    border: 1px solid var(--maroon);
+    box-shadow: none;
+  }
+
+  .btn-agreement-print:hover {
+    background: #fdf2f4;
   }
 
   .alert-title {
