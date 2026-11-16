@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page, navigating } from '$app/stores';
   import '$lib/styles/theme-gold.css';
   import { supabaseClient } from '$lib/supabaseClient';
 
@@ -20,8 +20,13 @@
   let currentPath = $derived($page.url.pathname);
   let currentSearchTab = $derived($page.url.searchParams.get('tab'));
 
-  let isManageRoute = $derived(currentPath === '/osa' || currentPath.startsWith('/osa/change-requests'));
-  let isAccountsRoute = $derived(currentPath.startsWith('/osa/admin') || currentPath.startsWith('/osa/deans'));
+  // While a link is loading, highlight the tab being opened right away instead of waiting for the server
+  let targetUrl = $derived($navigating?.to?.url ?? $page.url);
+  let activePath = $derived(targetUrl.pathname);
+  let activeSearchTab = $derived(targetUrl.searchParams.get('tab'));
+
+  let isManageRoute = $derived(activePath === '/osa' || activePath.startsWith('/osa/change-requests'));
+  let isAccountsRoute = $derived(activePath.startsWith('/osa/admin') || activePath.startsWith('/osa/deans'));
 
   // User manual close overrides
   let userClosedManage = $state(false);
@@ -418,10 +423,10 @@
 
   function isAppTabActive(item: typeof manageAppSubLinks[number]): boolean {
     if (item.path) {
-      return currentPath === item.path;
+      return activePath === item.path;
     }
-    if (currentPath === '/osa') {
-      const activeTab = currentSearchTab || 'validation';
+    if (activePath === '/osa') {
+      const activeTab = activeSearchTab || 'validation';
       if (item.tab === 'rejected' && (activeTab === 'rejected' || activeTab === 'revoked')) {
         return true;
       }
@@ -435,6 +440,10 @@
 </script>
 
 <!-- Page shell -->
+{#if $navigating}
+  <div class="nav-progress" role="progressbar" aria-label="Loading page"></div>
+{/if}
+
 <main class="app-shell theme-osa" class:has-sidebar={showSidebar} class:no-sidebar={!showSidebar}>
   {#if showSidebar}
     <aside class="sidebar" class:mobile-open={mobileNavOpen}>
@@ -477,7 +486,7 @@
         <nav class="sidebar-nav-tree">
           {#if userRole === 'osa'}
             <!-- Dashboard Link -->
-            <a href="/osa/dashboard" class="menu-item-btn" class:active={currentPath === '/osa/dashboard'}>
+            <a href="/osa/dashboard" class="menu-item-btn" class:active={activePath === '/osa/dashboard'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>
@@ -491,7 +500,7 @@
               <button
                 type="button"
                 class="menu-item-btn dropdown-toggle"
-                class:active-parent={currentPath === '/osa' || currentPath.startsWith('/osa/change-requests')}
+                class:active-parent={activePath === '/osa' || activePath.startsWith('/osa/change-requests')}
                 onclick={toggleManageApps}
               >
                 <div class="menu-item-icon">
@@ -542,7 +551,7 @@
             <a
               href="/osa/admin"
               class="menu-item-btn"
-              class:active={currentPath === '/osa/admin' || currentPath.startsWith('/osa/deans')}
+              class:active={activePath === '/osa/admin' || activePath.startsWith('/osa/deans')}
             >
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -553,7 +562,7 @@
             </a>
 
             <!-- Recently Deleted Link -->
-            <a href="/osa/recently-deleted" class="menu-item-btn" class:active={currentPath === '/osa/recently-deleted'}>
+            <a href="/osa/recently-deleted" class="menu-item-btn" class:active={activePath === '/osa/recently-deleted'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
@@ -563,7 +572,7 @@
             </a>
 
             <!-- Departments Link -->
-            <a href="/osa/departments" class="menu-item-btn" class:active={currentPath === '/osa/departments'}>
+            <a href="/osa/departments" class="menu-item-btn" class:active={activePath === '/osa/departments'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
@@ -573,7 +582,7 @@
             </a>
 
             <!-- Settings Link -->
-            <a href="/osa/settings" class="menu-item-btn" class:active={currentPath === '/osa/settings'}>
+            <a href="/osa/settings" class="menu-item-btn" class:active={activePath === '/osa/settings'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="3"/>
@@ -584,7 +593,7 @@
             </a>
           {:else if userRole === 'dean'}
             <!-- Academic Department Head -->
-            <a href="/dean" class="menu-item-btn" class:active={currentPath === '/dean'}>
+            <a href="/dean" class="menu-item-btn" class:active={activePath === '/dean'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
@@ -592,7 +601,7 @@
               </div>
               <span class="menu-item-label">Agreement Form to Park</span>
             </a>
-            <a href="/dean/settings" class="menu-item-btn" class:active={currentPath === '/dean/settings'}>
+            <a href="/dean/settings" class="menu-item-btn" class:active={activePath === '/dean/settings'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="3"/>
@@ -603,7 +612,7 @@
             </a>
           {:else if userRole === 'administrative'}
             <!-- Administrative Department Head -->
-            <a href="/administrative" class="menu-item-btn" class:active={currentPath === '/administrative'}>
+            <a href="/administrative" class="menu-item-btn" class:active={activePath === '/administrative'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
@@ -611,7 +620,7 @@
               </div>
               <span class="menu-item-label">Agreement Form to Park</span>
             </a>
-            <a href="/administrative/settings" class="menu-item-btn" class:active={currentPath === '/administrative/settings'}>
+            <a href="/administrative/settings" class="menu-item-btn" class:active={activePath === '/administrative/settings'}>
               <div class="menu-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="3"/>
@@ -622,7 +631,7 @@
             </a>
           {:else}
             {#each securityActions as action}
-              <a href={action.href} class="menu-item-btn" class:active={currentPath === action.href}>
+              <a href={action.href} class="menu-item-btn" class:active={activePath === action.href}>
                 <div class="menu-item-icon">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     {@html action.icon}
@@ -804,6 +813,29 @@
 </main>
 
 <style>
+  /* Thin bar at the top while the next page is loading */
+  .nav-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    width: 100%;
+    z-index: 10000;
+    pointer-events: none;
+    background: linear-gradient(90deg, #D4A62A, #E9C25E);
+    transform-origin: left;
+    animation: nav-progress-grow 8s cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+  }
+
+  @keyframes nav-progress-grow {
+    from { transform: scaleX(0.05); }
+    to { transform: scaleX(0.95); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-progress { animation: none; transform: scaleX(1); opacity: 0.8; }
+  }
+
   .app-shell {
     min-height: 100vh;
     padding: 0;
