@@ -52,7 +52,9 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                 created_at
             `)
             .gte('entered_at', dateFilter)
-            .lt('entered_at', tomorrow);
+            .lt('entered_at', tomorrow)
+            // Refused gate attempts (blocked, revoked, double access...) show only in Flagged Alerts
+            .neq('presence_status', 'denied');
 
         let { data, error } = await query;
         if ((!data || data.length === 0) && !error) {
@@ -75,7 +77,8 @@ export const GET: RequestHandler = async ({ request, url, locals }) => {
                     created_at
                 `)
                 .gte('created_at', dateFilter)
-                .lt('created_at', tomorrow);
+                .lt('created_at', tomorrow)
+                .neq('presence_status', 'denied');
             if (createdData) data = createdData;
         }
 

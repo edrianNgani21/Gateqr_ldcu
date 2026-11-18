@@ -181,7 +181,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
             });
 
             stats.currentlyIn = stats.registeredIn;
-            stats.visitsToday = statsRows.length;
+            // Refused gate attempts are alerts, not visits
+            stats.visitsToday = statsRows.filter((log: any) => log.presence_status !== 'denied').length;
         }
 
         // Use max_capacity from parkingData already fetched above
